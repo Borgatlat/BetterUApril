@@ -1,0 +1,262 @@
+================================================================================
+PROGRESSIVE OVERLOAD MESSAGE FEATURE - CODE FOR CO-PROGRAMMER
+================================================================================
+File location: app/(tabs)/active-workout.js (integrated into the active workout screen)
+Dependencies: supabase (user_workout_logs), useUser (optional for personal records)
+
+--------------------------------------------------------------------------------
+OVERVIEW
+--------------------------------------------------------------------------------
+Shows users their previous performance ("Last time: 135 lbs × 10 reps") and
+suggests progressive overload (e.g. "Try 140 lbs or 11 reps!"). When user
+enters weight/reps that exceed last time, shows success messages like
+"New weight PR! (+5 lbs)" or "More reps! (+2 reps)".
+
+--------------------------------------------------------------------------------
+HOW IT WORKS
+--------------------------------------------------------------------------------
+1. fetchPreviousWorkoutData(workoutName) - Queries user_workout_logs for the
+   last 3 completions of this workout name, uses most recent.
+2. Builds progressiveOverloadSuggestions map: exerciseIndex -> { lastWeight,
+   lastReps, suggestedWeight, suggestedReps, daysAgo }.
+3. getProgressiveOverloadMessage(exerciseIndex, setIndex, currentWeight, currentReps)
+   - Returns { type: 'success', message } or { type: 'suggestion', message } or null.
+4. UI: "Last time" card above first set; placeholder hints in weight/reps inputs;
+   feedback message below each set when user enters data.
+
+--------------------------------------------------------------------------------
+1. STATE (add near other useState declarations)
+--------------------------------------------------------------------------------
+
+  // Progressive overload tracking - shows previous workout data to encourage progression
+  const [previousWorkoutData, setPreviousWorkoutData] = useState(null);
+  const [progressiveOverloadSuggestions, setProgressiveOverloadSuggestions] = useState({});
+
+
+--------------------------------------------------------------------------------
+2. fetchPreviousWorkoutData FUNCTION
+--------------------------------------------------------------------------------
+
+  /**
+   * Fetches previous workout data to provide progressive overload suggestions
+   * Compares current workout with previous workouts to encourage progression (weight/reps/volume)
+   * This helps users know what they did last time and suggests increases
+   */
+  const fetchPreviousWorkoutData = async (workoutName) => {
+    try {
+      if (!user?.id || !workoutName) {
+        return;
+      }
+
+      // Fetch the last 3 times this workout was completed
+      const { data, error } = await supabase
+        .from('user_workout_logs')
+        .select('exercises, completed_at, workout_name')
+        .eq('user_id', user.id)
+        .eq('workout_name', workoutName)
+        .order('completed_at', { ascending: false })
+        .limit(3);
+
+      if (error) {
+        console.error('Error fetching previous workout:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const lastWorkout = data[0];
+        setPreviousWorkoutData(lastWorkout);
+
+        const suggestions = {};
+        workout?.exercises.forEach((currentExercise, exIndex) => {
+          const previousExercise = lastWorkout.exercises.find(
+            ex => ex.name?.toLowerCase() === currentExercise.name?.toLowerCase()
+          );
+          
+          if (previousExercise && previousExercise.sets && previousExercise.sets.length > 0) {
+            const completedSets = previousExercise.sets.filter(s => s.completed);
+            if (completedSets.length > 0) {
+              const lastSet = completedSets[completedSets.length - 1];
+              const lastSetWeight = parseFloat(lastSet.weight) || 0;
+              const lastSetReps = parseInt(lastSet.reps) || 0;
+              const totalWeight = completedSets.reduce((sum, s) => sum + (parseFloat(s.weight) || 0), 0);
+              const totalReps = completedSets.reduce((sum, s) => sum + (parseInt(s.reps) || 0), 0);
+              const avgWeight = totalWeight / completedSets.length;
+              const avgReps = totalReps / completedSets.length;
+
+              suggestions[exIndex] = {
+                lastWeight: lastSetWeight,
+                lastReps: lastSetReps,
+                avgWeight: avgWeight,
+                avgReps: avgReps,
+                suggestedWeight: lastSetWeight > 0 ? Math.max(lastSetWeight + 5, avgWeight + 5) : 0,
+                suggestedReps: lastSetReps > 0 ? lastSetReps + 1 : 0,
+                lastVolume: completedSets.length,
+                daysAgo: Math.floor((new Date() - new Date(lastWorkout.completed_at)) / (1000 * 60 * 60 * 24))
+              };
+            }
+          }
+        });
+        
+        setProgressiveOverloadSuggestions(suggestions);
+      }
+    } catch (error) {
+      console.error('Error in fetchPreviousWorkoutData:', error);
+    }
+  };
+
+
+--------------------------------------------------------------------------------
+3. useEffect TO FETCH ON WORKOUT LOAD
+--------------------------------------------------------------------------------
+
+  // Fetch previous workout data whenever workout loads
+  useEffect(() => {
+    if (workout?.workout_name || workout?.name) {
+      fetchPreviousWorkoutData(workout.workout_name || workout.name);
+    }
+  }, [workout?.workout_name, workout?.name, user?.id]);
+
+
+--------------------------------------------------------------------------------
+4. getProgressiveOverloadMessage FUNCTION
+--------------------------------------------------------------------------------
+
+  /**
+   * Gets progressive overload message based on current vs previous performance
+   * @param {number} exerciseIndex - Index of the exercise in the workout
+   * @param {number} setIndex - Index of the set within the exercise
+   * @param {string} currentWeight - Current weight being used
+   * @param {string} currentReps - Current reps being performed
+   * @returns {Object|null} - { type: 'success'|'suggestion', message } or null
+   */
+  const getProgressiveOverloadMessage = (exerciseIndex, setIndex, currentWeight, currentReps) => {
+    const suggestion = progressiveOverloadSuggestions[exerciseIndex];
+    if (!suggestion || !currentWeight || !currentReps) return null;
+
+    const weight = parseFloat(currentWeight) || 0;
+    const reps = parseInt(currentReps) || 0;
+
+    if (weight > suggestion.lastWeight) {
+      return {
+        type: 'success',
+        message: `🔥 New weight PR! (+${(weight - suggestion.lastWeight).toFixed(1)} lbs)`
+      };
+    } else if (weight === suggestion.lastWeight && reps > suggestion.lastReps) {
+      return {
+        type: 'success',
+        message: `💪 More reps! (+${reps - suggestion.lastReps} reps)`
+      };
+    } else if (weight === suggestion.lastWeight && reps === suggestion.lastReps) {
+      return {
+        type: 'suggestion',
+        message: `💡 Same as last time. Try ${suggestion.suggestedWeight} lbs or ${suggestion.suggestedReps} reps!`
+      };
+    }
+    
+    return null;
+  };
+
+
+--------------------------------------------------------------------------------
+5. UI - "LAST TIME" CARD (above first set of each exercise)
+--------------------------------------------------------------------------------
+Place inside the exercise map loop, above exercise.sets.map(...):
+
+              {/* Show last time data above first set if we have suggestions */}
+              {progressiveOverloadSuggestions[exerciseIndex] && exercise.sets.length > 0 && (
+                <View style={styles.lastTimeCard}>
+                  <Ionicons name="time-outline" size={16} color="#00ffff" />
+                  <Text style={styles.lastTimeText}>
+                    Last time: {progressiveOverloadSuggestions[exerciseIndex].lastWeight} lbs × {progressiveOverloadSuggestions[exerciseIndex].lastReps} reps
+                    {progressiveOverloadSuggestions[exerciseIndex].daysAgo > 0 && ` (${progressiveOverloadSuggestions[exerciseIndex].daysAgo}d ago)`}
+                  </Text>
+                </View>
+              )}
+
+
+--------------------------------------------------------------------------------
+6. UI - PLACEHOLDER HINTS (for weight and reps TextInput, first set only)
+--------------------------------------------------------------------------------
+
+  placeholder={suggestion && setIndex === 0 ? `${suggestion.suggestedWeight}` : "0"}
+  placeholderTextColor={suggestion && setIndex === 0 ? "#00ffff" : "#666"}
+
+  placeholder={suggestion && setIndex === 0 ? `${suggestion.suggestedReps}` : "0"}
+  placeholderTextColor={suggestion && setIndex === 0 ? "#00ffff" : "#666"}
+
+
+--------------------------------------------------------------------------------
+7. UI - PROGRESSIVE OVERLOAD FEEDBACK (below each set row)
+--------------------------------------------------------------------------------
+Inside the set map, after the set row View, before the closing </View> of the set:
+
+                    {/* Show progressive overload feedback */}
+                    {overloadMessage && (
+                      <View style={[
+                        styles.progressFeedback,
+                        overloadMessage.type === 'success' ? styles.progressSuccess : styles.progressSuggestion
+                      ]}>
+                        <Text style={styles.progressFeedbackText}>
+                          {overloadMessage.message}
+                        </Text>
+                      </View>
+                    )}
+
+Where overloadMessage is computed as:
+  const suggestion = progressiveOverloadSuggestions[exerciseIndex];
+  const overloadMessage = set.weight && set.reps ? 
+    getProgressiveOverloadMessage(exerciseIndex, setIndex, set.weight, set.reps) : null;
+
+
+--------------------------------------------------------------------------------
+8. STYLES (add to StyleSheet)
+--------------------------------------------------------------------------------
+
+  // Progressive Overload Styles
+  lastTimeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 8,
+    marginTop: 4,
+    gap: 8,
+  },
+  lastTimeText: {
+    color: '#00ffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  progressFeedback: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginTop: 4,
+    marginBottom: 8,
+    marginLeft: 0,
+  },
+  progressSuccess: {
+    backgroundColor: 'rgba(0, 255, 0, 0.15)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#00ff00',
+  },
+  progressSuggestion: {
+    backgroundColor: 'rgba(255, 165, 0, 0.15)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#ffa500',
+  },
+  progressFeedbackText: {
+    color: '#fff',
+    fontSize: 13,
+  },
+
+
+--------------------------------------------------------------------------------
+NOTES
+--------------------------------------------------------------------------------
+- Progressive overload uses completed sets from last workout. Ensure workout logs
+  save sets with weight+reps (and completed: true) for this to work.
+- Exercise matching is case-insensitive by name.
+- suggestWeightForExercise (from aiUtils) can augment this with PR data if available.

@@ -1,0 +1,8 @@
+-- Future U daily limits use feature_type = 'future_u' in get_ai_generation_usage / increment_ai_generation_usage.
+-- If your RPCs validate allowed feature types, add 'future_u' to that allowlist (or drop validation).
+-- Example pattern (adjust to match your schema):
+--
+-- INSERT INTO ai_feature_types (code, label) VALUES ('future_u', 'Future U')
+--   ON CONFLICT (code) DO NOTHING;
+--
+-- Limits are enforced in the app via utils/aiGenerationLimits.js (FREE: 2/day, PREMIUM: 15/day by default).

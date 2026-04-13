@@ -1,0 +1,12 @@
+.env
+.expo/
+dist/
+node_modules/
+node_modules
+*.log
+.DS_Store
+
+# Xcode user-specific files (cause "Filename too long" on Windows with EAS)
+**/xcuserdata/
+**/*.xcuserstate
+*.xcuserstate

@@ -1,0 +1,56 @@
+{
+  "tabs": {
+    "home": "Inicio",
+    "workout": "Entrenamiento",
+    "nutrition": "Nutrición",
+    "mental": "Mental",
+    "community": "Comunidad",
+    "league": "Liga",
+    "therapist": "Terapeuta",
+    "analytics": "Análisis"
+  },
+  "settings": {
+    "title": "Ajustes",
+    "backToProfile": "Volver al perfil",
+    "language": "Idioma",
+    "languageValue": "Español",
+    "preferences": "Preferencias",
+    "useImperialUnits": "Usar unidades imperiales",
+    "calorieGoal": "Meta de calorías",
+    "waterGoal": "Meta de agua",
+    "proteinGoal": "Meta de proteína",
+    "reminders": "Recordatorios",
+    "dailyReminder": "Recordatorio diario de entrenamiento y mental",
+    "reminderTime": "Hora del recordatorio",
+    "testSendNotification": "Enviar notificación de prueba",
+    "workoutPreferences": "Preferencias de entrenamiento",
+    "restTimeBetweenSets": "Tiempo de descanso entre series",
+    "indoorStrideLength": "Longitud de zancada (interior)",
+    "musicIntegration": "Música",
+    "privacyBlocking": "Privacidad y bloqueos",
+    "account": "Cuenta",
+    "legal": "Legal",
+    "subscription": "Suscripción",
+    "premiumMember": "Miembro Premium",
+    "activeUntilLabel": "Activo hasta",
+    "subscriptionActiveGeneric": "Tu suscripción está activa",
+    "manageSubscription": "Gestionar",
+    "upgradeToPremium": "Pásate a Premium",
+    "upgradeSubtitle": "Desbloquea mensajes de IA, metas personalizadas, entrenamientos premium y más.",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "deleteAccount": "Eliminar cuenta",
+    "signOut": "Cerrar sesión"
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "error": "Error",
+    "success": "Éxito"
+  },
+  "languages": {
+    "en": "English",
+    "es": "Español"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "tabs": {
+    "home": "Home",
+    "workout": "Workout",
+    "nutrition": "Nutrition",
+    "mental": "Mental",
+    "community": "Community",
+    "league": "League",
+    "therapist": "Therapist",
+    "analytics": "Analytics"
+  },
+  "settings": {
+    "title": "Settings",
+    "backToProfile": "Back to Profile",
+    "language": "Language",
+    "languageValue": "English",
+    "preferences": "Preferences",
+    "useImperialUnits": "Use Imperial Units",
+    "calorieGoal": "Calorie Goal",
+    "waterGoal": "Water Goal",
+    "proteinGoal": "Protein Goal",
+    "reminders": "Reminders",
+    "dailyReminder": "Daily Workout & Mental Reminder",
+    "reminderTime": "Reminder Time",
+    "testSendNotification": "Test Send Notification",
+    "workoutPreferences": "Workout Preferences",
+    "restTimeBetweenSets": "Rest Time Between Sets",
+    "indoorStrideLength": "Indoor stride length",
+    "musicIntegration": "Music Integration",
+    "privacyBlocking": "Privacy & Blocking",
+    "account": "Account",
+    "legal": "Legal",
+    "subscription": "Subscription",
+    "premiumMember": "Premium Member",
+    "activeUntilLabel": "Active until",
+    "subscriptionActiveGeneric": "Your subscription is active",
+    "manageSubscription": "Manage",
+    "upgradeToPremium": "Upgrade to Premium",
+    "upgradeSubtitle": "Unlock AI messages, custom goals, premium workouts, and more.",
+    "cancel": "Cancel",
+    "save": "Save",
+    "deleteAccount": "Delete Account",
+    "signOut": "Sign Out"
+  },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "save": "Save",
+    "error": "Error",
+    "success": "Success"
+  },
+  "languages": {
+    "en": "English",
+    "es": "Español"
+  }
+}

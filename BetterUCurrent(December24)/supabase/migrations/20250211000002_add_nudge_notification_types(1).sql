@@ -1,0 +1,43 @@
+-- Allow new nudge notifications alongside existing types
+ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
+
+ALTER TABLE notifications ADD CONSTRAINT notifications_type_check CHECK (type IN (
+    'friend_request',
+    'friend_request_accepted',
+    'comment',
+    'like',
+    'mention',
+    'group_invitation',
+    'group_join_request',
+    'group_activity',
+    'goal_completion',
+    'streak_milestone',
+    'achievement',
+    'personal_record',
+    'workout_reminder',
+    'mental_reminder',
+    'hydration_reminder',
+    'weekly_progress',
+    'monthly_stats',
+    'ai_recommendation',
+    'motivational_quote',
+    'community_highlight',
+    'challenge_invitation',
+    'leaderboard_update',
+    'points_earned',
+    'level_up',
+    'reward_unlocked',
+    'sync_status',
+    'app_update',
+    'premium_feature',
+    'local_event',
+    'virtual_meetup',
+    'community_challenge',
+    'workout_share',
+    'mental_session_share',
+    'nudge_workout',
+    'nudge_run',
+    'nudge_mental',
+    'daily_reminder'
+));
+

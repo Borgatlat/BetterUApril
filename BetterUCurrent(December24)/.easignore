@@ -1,0 +1,10 @@
+# EAS Build - exclude from upload (avoids "filename too long" on Windows)
+# When present, .easignore overrides .gitignore for EAS uploads
+.env
+.expo/
+node_modules/
+*.log
+.DS_Store
+**/xcuserdata/
+**/*.xcuserstate
+.git/

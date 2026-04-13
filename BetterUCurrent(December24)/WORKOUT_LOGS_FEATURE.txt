@@ -1,0 +1,1214 @@
+================================================================================
+WORKOUT LOGS FEATURE - CODE FOR CO-PROGRAMMER
+================================================================================
+File location: app/(tabs)/workout-logs.js
+Dependencies: supabase (lib/supabase), React Native components, Ionicons
+
+--------------------------------------------------------------------------------
+OVERVIEW
+--------------------------------------------------------------------------------
+- Modal component that displays workout history from Supabase (user_workout_logs)
+- Fetches logs from last 3 months (configurable)
+- Shows: workout name, date, duration, exercise count, sets, total weight
+- Per-exercise breakdown: name, sets with weight × reps, per-set volume
+- Manual log: add workouts by hand (name, exercises, sets with weight/reps)
+- Delete all logs with confirmation
+- "Workouts this month" count in header
+
+--------------------------------------------------------------------------------
+SUPABASE TABLE: user_workout_logs
+--------------------------------------------------------------------------------
+Columns: id, user_id, workout_name, exercises (JSONB), completed_sets, 
+         exercise_count, exercise_names (TEXT[]), total_weight, duration, 
+         completed_at, created_at, updated_at, calories_burned (optional)
+
+exercises JSONB structure:
+[
+  { name: "Bench Press", targetMuscles: [], sets: [
+    { weight: 135, reps: 10, completed: true }
+  ]}
+]
+
+--------------------------------------------------------------------------------
+KEY FUNCTIONS
+--------------------------------------------------------------------------------
+- fetchWorkoutLogs() - Queries Supabase for logs (last 3 months)
+- deleteAllWorkoutLogs() - Deletes all logs for current user
+- saveManualWorkout() - Inserts manually entered workout
+- formatDate(), formatTime() - Helpers for display
+- renderWorkoutLog() - FlatList item renderer for each log card
+
+--------------------------------------------------------------------------------
+KNOWN BUGS TO FIX (Manual Log Modal):
+- updateSet has typos: excercises -> exercises, excerciseIndex -> exerciseIndex, 
+  set -> sets, setExcersises -> setExercises. Also updateSet should be a const
+  inside the component (it uses exercises state).
+- removeSet is called but not defined - add: 
+  const removeSet = (exerciseIndex, setIndex) => {
+    const newExercises = [...exercises];
+    newExercises[exerciseIndex].sets = newExercises[exerciseIndex].sets.filter(
+      (_, i) => i !== setIndex
+    );
+    if (newExercises[exerciseIndex].sets.length === 0) {
+      newExercises[exerciseIndex].sets = [{ weight: '', reps: '', completed: true }];
+    }
+    setExercises(newExercises);
+  };
+
+--------------------------------------------------------------------------------
+FULL SOURCE CODE (workout-logs.js)
+--------------------------------------------------------------------------------
+"use client";
+
+import { View, Text, StyleSheet, Modal, FlatList, TouchableOpacity, Alert, TextInput, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useState, useEffect } from 'react';
+import { supabase } from '../../lib/supabase';
+
+/**
+ * WorkoutLogs Component
+ * 
+ * This is a reusable component that displays a modal with workout history/logs.
+ * It's extracted from workout.js to make it easier to modify and maintain.
+ * 
+ * Props:
+ * - visible: Boolean that controls whether the modal is shown or hidden
+ * - onClose: Callback function called when user wants to close the modal
+ * 
+ * The component manages its own state for:
+ * - workoutLogs: Array of workout log entries from the database
+ * - monthlyWorkouts: Count of workouts completed this month
+ * - showDeleteConfirmation: Boolean to control the delete confirmation modal
+ * 
+ * Key Features:
+ * - Fetches workout logs from Supabase when modal becomes visible
+ * - Displays detailed workout information (exercises, sets, weight, reps)
+ * - Allows users to delete all workout logs with confirmation
+ * - Shows monthly workout count
+ * - Handles empty state when no logs exist
+ */
+const WorkoutLogs = ({ visible, onClose }) => {
+  // State for storing workout logs from the database
+  const [workoutLogs, setWorkoutLogs] = useState([]);
+  
+  // Count of workouts completed in the current month
+  const [monthlyWorkouts, setMonthlyWorkouts] = useState(0);
+  
+  // Controls whether the delete confirmation modal is shown
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  
+  // Manual log modal state
+  const [showManualLogModal, setShowManualLogModal] = useState(false);
+  const [workoutName, setWorkoutName] = useState('');
+  const [exercises, setExercises] = useState([
+    { name: '', sets: [{ weight: '', reps: '', completed: true }] }
+  ]);
+
+  /**
+   * useEffect Hook - Fetches workout logs when modal becomes visible
+   * 
+   * This hook runs whenever the 'visible' prop changes. When visible becomes true,
+   * it automatically fetches the workout logs from the database.
+   * 
+   * Dependencies: [visible] - Only runs when visible prop changes
+   * 
+   * If you remove 'visible' from dependencies, logs would only fetch once on component mount,
+   * and wouldn't refresh when you reopen the modal.
+   */
+  useEffect(() => {
+    if (visible) {
+      fetchWorkoutLogs();
+    }
+  }, [visible]);
+
+  /**
+   * fetchWorkoutLogs - Fetches workout logs from Supabase database
+   * 
+   * This async function:
+   * 1. Gets the current authenticated user
+   * 2. Calculates the start and end of the current month
+   * 3. Queries the user_workout_logs table for logs in this month
+   * 4. Updates the state with the fetched data
+   * 
+   * Error Handling: Uses try/catch to handle any database errors gracefully
+   * 
+   * If you change the date filtering, you could show logs from different time periods
+   * (e.g., all time, last week, last year) by modifying the date calculations.
+   */
+  const fetchWorkoutLogs = async () => {
+    try {
+      // Get the currently authenticated user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log('No user found');
+        return;
+      }
+
+      // Show logs from last 3 months (was: only current month)
+      // This ensures workouts from previous months are visible
+      const now = new Date();
+      const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+      const startDate = threeMonthsAgo.toISOString();
+      const endDate = new Date().toISOString();
+
+      // Also compute current month for the "workouts this month" count
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+
+      // Query Supabase for workout logs (last 3 months)
+      const { data, error } = await supabase
+        .from('user_workout_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .gte('completed_at', startDate)
+        .lte('completed_at', endDate)
+        .order('completed_at', { ascending: false });
+
+      if (error) throw error;
+
+      const logs = data || [];
+      setWorkoutLogs(logs);
+
+      // Count only this month's workouts for the subtitle
+      const thisMonthCount = logs.filter(
+        log => log.completed_at >= startOfMonth && log.completed_at <= endOfMonth
+      ).length;
+      setMonthlyWorkouts(thisMonthCount);
+    } catch (error) {
+      console.error('Error fetching workout logs:', error);
+    }
+  };
+
+  /**
+   * deleteAllWorkoutLogs - Deletes all workout logs for the current user
+   * 
+   * This function:
+   * 1. Gets the authenticated user
+   * 2. Deletes all records from user_workout_logs table for this user
+   * 3. Clears the local state
+   * 4. Closes the confirmation modal
+   * 5. Shows a success alert
+   * 
+   * Security: Uses .eq('user_id', user.id) to ensure users can only delete their own logs
+   * (Row Level Security in Supabase also enforces this server-side)
+   * 
+   * If you want to delete individual logs instead, you'd pass a log ID and use .eq('id', logId)
+   */
+  const deleteAllWorkoutLogs = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.log('No user found');
+        return;
+      }
+
+      // Delete all workout logs for this user
+      const { error } = await supabase
+        .from('user_workout_logs')
+        .delete()
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+      
+      // Clear local state
+      setWorkoutLogs([]);
+      setShowDeleteConfirmation(false);
+      Alert.alert('Success', 'All workout logs have been deleted');
+    } catch (error) {
+      console.error('Error deleting workout logs:', error);
+      Alert.alert('Error', 'Failed to delete workout logs. Please try again.');
+    }
+  };
+
+  /**
+   * formatDate - Formats a date string into a readable format
+   * 
+   * @param {string} dateString - ISO date string from database
+   * @returns {string} Formatted date like "Jan 15, 2024"
+   * 
+   * toLocaleDateString converts the Date object to a localized string
+   * The options object specifies the format: month as short name, day as number, year as 4 digits
+   * 
+   * If you change 'en-US', it will format dates according to different locale rules
+   * If you change the options, you get different date formats (e.g., full dates, different separators)
+   */
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',    // "Jan", "Feb", etc.
+      day: 'numeric',    // 1, 2, 3, etc.
+      year: 'numeric'    // 2024, 2025, etc.
+    });
+  };
+
+  /**
+   * formatTime - Converts seconds into MM:SS format
+   * 
+   * @param {number} seconds - Total seconds (e.g., 3665 for 1 hour 1 minute 5 seconds)
+   * @returns {string} Formatted time like "61:05"
+   * 
+   * Math.floor(seconds / 60) gives total minutes (drops decimal)
+   * seconds % 60 gives remaining seconds after removing full minutes
+   * padStart(2, '0') ensures seconds are always 2 digits (e.g., "05" not "5")
+   * 
+   * If you want hours:minutes:seconds format, you'd calculate hours similarly
+   */
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  /**
+   * saveManualWorkout - Saves a manually entered workout to Supabase
+   * 
+   * This function:
+   * 1. Validates that workout name and exercises are filled
+   * 2. Calculates statistics (total sets, total weight, exercise count)
+   * 3. Formats the data in the same structure as active workouts
+   * 4. Inserts the workout log into Supabase
+   * 5. Refreshes the workout logs list
+   * 
+   * @returns {Promise<void>}
+   */
+  const saveManualWorkout = async () => {
+    try {
+      // Validate workout name
+      if (!workoutName.trim()) {
+        Alert.alert('Error', 'Please enter a workout name');
+        return;
+      }
+
+      // Validate exercises - must have at least one exercise with sets
+      const validExercises = exercises.filter(ex => 
+        ex.name.trim() && 
+        ex.sets.length > 0 && 
+        ex.sets.some(set => set.completed && set.weight && set.reps)
+      );
+
+      if (validExercises.length === 0) {
+        Alert.alert('Error', 'Please add at least one exercise with completed sets');
+        return;
+      }
+
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        Alert.alert('Error', 'Please log in to save workouts');
+        return;
+      }
+
+      // Calculate statistics
+      let completedSets = 0;
+      let totalWeight = 0;
+
+      // Format exercises and calculate stats
+      const formattedExercises = validExercises.map(exercise => {
+        // Filter to only completed sets with weight and reps
+        const completedSetsData = exercise.sets.filter(set => 
+          set.completed && set.weight && set.reps
+        );
+
+        completedSets += completedSetsData.length;
+
+        // Calculate total weight for this exercise
+        completedSetsData.forEach(set => {
+          const weight = parseFloat(set.weight) || 0;
+          const reps = parseInt(set.reps) || 0;
+          totalWeight += weight * reps;
+        });
+
+        // Return formatted exercise data
+        return {
+          name: exercise.name.trim(),
+          sets: completedSetsData.map(set => ({
+            weight: parseFloat(set.weight) || 0,
+            reps: parseInt(set.reps) || 0,
+            completed: true
+          }))
+        };
+      });
+
+      // Save to Supabase
+      const { error } = await supabase
+        .from('user_workout_logs')
+        .insert({
+          user_id: user.id,
+          workout_name: workoutName.trim(),
+          exercises: formattedExercises,
+          completed_sets: completedSets,
+          exercise_count: formattedExercises.length,
+          exercise_names: formattedExercises.map(ex => ex.name),
+          total_weight: Math.round(totalWeight),
+          duration: 0, // Manual logs don't have duration
+          completed_at: new Date().toISOString()
+        });
+
+      if (error) {
+        console.error('Error saving manual workout:', error);
+        Alert.alert('Error', 'Failed to save workout. Please try again.');
+        return;
+      }
+
+      // Success - reset form and refresh logs
+      Alert.alert('Success', 'Workout saved successfully!');
+      setWorkoutName('');
+      setExercises([{ name: '', sets: [{ weight: '', reps: '', completed: true }] }]);
+      setShowManualLogModal(false);
+      
+      // Refresh the workout logs list
+      fetchWorkoutLogs();
+      
+    } catch (error) {
+      console.error('Error in saveManualWorkout:', error);
+      Alert.alert('Error', 'An unexpected error occurred');
+    }
+  };
+ 
+  /**
+   * addExercise - Adds a new exercise to the list
+   */
+  const addExercise = () => {
+    setExercises([...exercises, { 
+      name: '', 
+      sets: [{ weight: '', reps: '', completed: true }] 
+    }]);
+  };
+  /**
+   * removeExercise - Removes an exercise from the list
+   * @param {number} index - Index of exercise to remove
+   */
+  const removeExercise = (index) => {
+    const newExercises = exercises.filter((_, i) => i !== index);
+    setExercises(newExercises.length > 0 ? newExercises : [
+      { name: '', sets: [{ weight: '', reps: '', completed: true }] }
+    ]);
+  };
+
+  /**
+   * updateExerciseName - Updates the name of an exercise
+   * @param {number} index - Index of exercise
+   * @param {string} name - New exercise name
+   */
+  const updateExerciseName = (index, name) => {
+    const newExercises = [...exercises];
+    newExercises[index].name = name;
+    setExercises(newExercises);
+  };
+
+  /**
+   * addSet - Adds a new set to an exercise
+   * @param {number} exerciseIndex - Index of the exercise
+   */
+  const addSet = (exerciseIndex) => {
+    const newExercises = [...exercises];
+    newExercises[exerciseIndex].sets.push({ 
+      weight: '', 
+      reps: '', 
+      completed: true 
+    });
+    setExercises(newExercises);
+  };
+/**
+ * updateSet - Updates weight or reps for a specific set
+ * @param {number} exerciseIndex - Index of the exercise
+ * @param {number} setIndex - Index of the set
+ * @param {string} field - 'weight' or 'reps'
+ * @param {string} value - New value
+ */
+const updateSet = (exerciseIndex, setIndex, field, value) => {
+    const newExcercises = [...excercises]// ... is the spread operator to create a new array 
+    newExcercises[excerciseIndex].set[setIndex][field]= value;
+    setExcersises(newExcercises);
+
+};
+
+  /**
+   * renderWorkoutLog - Renders a single workout log entry
+   * 
+   * This function is used by FlatList to render each workout log item.
+   * It displays:
+   * - Workout name and date
+   * - Statistics (duration, exercise count, sets completed)
+   * - Detailed exercise breakdown (name, sets with weight/reps)
+   * - Total weight for each exercise
+   * 
+   * @param {Object} item - Workout log object from database
+   * @param {string} item.workout_name - Name of the workout
+   * @param {string} item.completed_at - When workout was completed
+   * @param {number} item.duration - Duration in seconds
+   * @param {number} item.exercise_count - Number of exercises
+   * @param {number} item.completed_sets - Total sets completed
+   * @param {Array} item.exercises - Array of exercise objects with sets
+   * @param {number} item.weight - Total weight lifted
+   * The exercises field is JSONB (JSON Binary) - a flexible format that stores
+   * structured data like: [{ name: "Bench Press", sets: [{ weight: 135, reps: 10, completed: true }] }]
+   * 
+   * If exercises is empty or in old format, it falls back to showing just exercise names
+   */
+    
+
+
+
+
+  
+
+  const renderWorkoutLog = ({ item }) => {
+    // Parse exercises JSONB field - handle cases where it might be null/undefined
+    const exercises = item.exercises || [];
+    
+    // Check if we have detailed data (exercises with sets array)
+    const hasDetailedData = exercises.length > 0 && exercises[0]?.sets;
+
+    return (
+      <View style={styles.logCard}>
+        {/* Header: Workout name and date */}
+        <View style={styles.logHeader}>
+          <Text style={styles.logTitle}>{item.workout_name}</Text>
+          <Text style={styles.logDate}>{formatDate(item.completed_at)}</Text>
+        </View>
+        
+        {/* Statistics: Duration, exercise count, sets */}
+        <View style={styles.logStats}>
+          <View style={styles.logStat}>
+            <Ionicons name="time-outline" size={20} color="#00ffff" />
+            <Text style={styles.logStatValue}>{formatTime(parseInt(item.duration))}</Text>
+          </View>
+          <View style={styles.logStat}>
+            <Ionicons name="barbell-outline" size={20} color="#00ffff" />
+            <Text style={styles.logStatValue}>{item.exercise_count} exercises</Text>
+          </View>
+          <View style={styles.logStat}>
+            <Ionicons name="checkmark-circle-outline" size={20} color="#00ffff" />
+            <Text style={styles.logStatValue}>{item.completed_sets} sets</Text>
+          </View>
+        </View>
+
+        {/* Detailed exercises section */}
+        <View style={styles.logDetails}>
+          <Text style={styles.logDetailTitle}>Exercises:</Text>
+          
+          {/* If we have detailed exercise data (with sets), show full breakdown */}
+          {hasDetailedData ? (
+            exercises.map((exercise, exerciseIndex) => {
+              // Filter to completed sets with data (weight or reps)
+              // Includes sets marked completed OR sets with weight+reps (from our save fix)
+              const completedSets = (exercise.sets || []).filter(set => {
+                const w = parseFloat(set.weight) || 0;
+                const r = parseInt(set.reps) || 0;
+                return (set.completed || (w > 0 && r > 0)) && (w > 0 || r > 0);
+              });
+
+              // Skip exercises with no completed sets (return null means don't render)
+              if (completedSets.length === 0) return null;
+
+              // Calculate total weight for this exercise
+              // .reduce() accumulates a value by processing each item in array
+              // Starts at 0, adds (weight × reps) for each set
+              const exerciseTotalWeight = completedSets.reduce((sum, set) => {
+                const weight = parseFloat(set.weight) || 0;  // Convert to number, default to 0
+                const reps = parseInt(set.reps) || 0;        // Convert to integer, default to 0
+                return sum + (weight * reps);                // Add to accumulator
+              }, 0);
+
+              return (
+                <View key={exerciseIndex} style={styles.exerciseDetail}>
+                  {/* Exercise name and total weight */}
+                  <View style={styles.exerciseHeader}>
+                    <Text style={styles.exerciseName}>{exercise.name}</Text>
+                    {exerciseTotalWeight > 0 && (
+                      <Text style={styles.exerciseTotalWeight}>
+                        {exerciseTotalWeight.toFixed(0)} lbs total
+                      </Text>
+                    )}
+                  </View>
+                  
+                  {/* Sets breakdown - shows weight x reps for each set */}
+                  <View style={styles.setsContainer}>
+                    {completedSets.map((set, setIndex) => {
+                      const weight = parseFloat(set.weight) || 0;
+                      const reps = parseInt(set.reps) || 0;
+                      
+                      return (
+                        <View key={setIndex} style={styles.setRow}>
+                          <Text style={styles.setNumber}>Set {setIndex + 1}:</Text>
+                          <Text style={styles.setDetails}>
+                            {weight.toFixed(0)} lbs × {reps} reps
+                          </Text>
+                          {/* Show volume (weight × reps) for this set */}
+                          <Text style={styles.setVolume}>
+                            ({weight * reps} lbs)
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            })
+          ) : (
+            // Fallback: If no detailed data, show just exercise names (old format)
+            item.exercise_names && item.exercise_names.map((exercise, index) => (
+              <Text key={index} style={styles.logDetailText}>• {exercise}</Text>
+            ))
+          )}
+          
+          {/* Show total weight for entire workout if available */}
+          {item.total_weight > 0 && (
+            <View style={styles.totalWeightContainer}>
+              <Ionicons name="barbell" size={16} color="#00ffff" />
+              <Text style={styles.totalWeightText}>
+                Total Weight: {item.total_weight} lbs
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  return (
+    <>
+      {/* Main Workout Logs Modal */}
+      <Modal
+        visible={visible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={onClose}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            {/* Header with title, subtitle, and action buttons */}
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Workout History</Text>
+                <Text style={styles.modalSubtitle}>{monthlyWorkouts} workouts this month</Text>
+              </View>
+              <View style={styles.modalHeaderButtons}>
+                {/* Manual Log button */}
+                <TouchableOpacity 
+                  style={styles.manualLogButton}
+                  onPress={() => setShowManualLogModal(true)}
+                >
+                  <Ionicons name="add-outline" size={24} color="#00ffff" />
+                </TouchableOpacity>
+                {/* Delete button - opens confirmation modal */}
+                <TouchableOpacity 
+                  style={styles.headerDeleteButton}
+                  onPress={() => setShowDeleteConfirmation(true)}
+                >
+                  <Ionicons name="trash-outline" size={24} color="#ff4444" />
+                </TouchableOpacity>
+                {/* Close button - calls onClose callback */}
+                <TouchableOpacity 
+                  style={styles.closeButton}
+                  onPress={onClose}
+                >
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+            
+            {/* FlatList displays all workout logs */}
+            {/* FlatList is efficient for long lists - only renders visible items */}
+            <FlatList
+              data={workoutLogs}
+              renderItem={renderWorkoutLog}
+              keyExtractor={(item) => item.id.toString()}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.logsList}
+              ListEmptyComponent={() => (
+                <Text style={styles.emptyText}>No workout history yet</Text>
+              )}
+              onRefresh={fetchWorkoutLogs}
+              refreshing={false}
+            />
+          </View>
+        </View>
+
+        {/* Delete Confirmation Modal - nested inside main modal */}
+        <Modal
+          visible={showDeleteConfirmation}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setShowDeleteConfirmation(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.confirmationModal}>
+              <Text style={styles.confirmationTitle}>Delete All Workout Logs?</Text>
+              <Text style={styles.confirmationText}>
+                This action cannot be undone. All your workout history will be permanently deleted.
+              </Text>
+              <View style={styles.confirmationButtons}>
+                <TouchableOpacity 
+                  style={[styles.confirmationButton, styles.cancelButton]}
+                  onPress={() => setShowDeleteConfirmation(false)}
+                >
+                  <Text style={styles.buttonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.confirmationButton, styles.deleteButton]}
+                  onPress={deleteAllWorkoutLogs}
+                >
+                  <Text style={styles.buttonText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </Modal>
+
+      {/* Manual Log Modal */}
+      <Modal
+        visible={showManualLogModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowManualLogModal(false)}
+      >
+        <View style={styles.manualLogModalOverlay}>
+          <View style={styles.manualLogModalContent}>
+            {/* Header */}
+            <View style={styles.manualLogHeader}>
+              <Text style={styles.manualLogTitle}>Manual Workout Log</Text>
+              <TouchableOpacity 
+                onPress={() => setShowManualLogModal(false)}
+                style={styles.closeButton}
+              >
+                <Ionicons name="close" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Scrollable content */}
+            <ScrollView style={styles.manualLogScrollView}>
+              {/* Workout Name Input */}
+              <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>Workout Name</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="e.g., Push Day, Leg Day"
+                  placeholderTextColor="#666"
+                  value={workoutName}
+                  onChangeText={setWorkoutName}
+                />
+              </View>
+
+              {/* Exercises List */}
+              {exercises.map((exercise, exerciseIndex) => (
+                <View key={exerciseIndex} style={styles.exerciseInputContainer}>
+                  {/* Exercise Header */}
+                  <View style={styles.exerciseInputHeader}>
+                    <TextInput
+                      style={[styles.textInput, styles.exerciseNameInput]}
+                      placeholder="Exercise name"
+                      placeholderTextColor="#666"
+                      value={exercise.name}
+                      onChangeText={(text) => updateExerciseName(exerciseIndex, text)}
+                    />
+                    {exercises.length > 1 && (
+                      <TouchableOpacity
+                        onPress={() => removeExercise(exerciseIndex)}
+                        style={styles.removeExerciseButton}
+                      >
+                        <Ionicons name="trash-outline" size={20} color="#ff4444" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Sets for this exercise */}
+                  {exercise.sets.map((set, setIndex) => (
+                    <View key={setIndex} style={styles.setInputRow}>
+                      <Text style={styles.setNumberText}>Set {setIndex + 1}</Text>
+                      <TextInput
+                        style={[styles.numberInput, styles.weightInput]}
+                        placeholder="Weight"
+                        placeholderTextColor="#666"
+                        keyboardType="numeric"
+                        value={set.weight.toString()}
+                        onChangeText={(text) => updateSet(exerciseIndex, setIndex, 'weight', text)}
+                      />
+                      <Text style={styles.unitText}>lbs</Text>
+                      <TextInput
+                        style={[styles.numberInput, styles.repsInput]}
+                        placeholder="Reps"
+                        placeholderTextColor="#666"
+                        keyboardType="numeric"
+                        value={set.reps.toString()}
+                        onChangeText={(text) => updateSet(exerciseIndex, setIndex, 'reps', text)}
+                      />
+                      <Text style={styles.unitText}>reps</Text>
+                      {exercise.sets.length > 1 && (
+                        <TouchableOpacity
+                          onPress={() => removeSet(exerciseIndex, setIndex)}
+                          style={styles.removeSetButton}
+                        >
+                          <Ionicons name="close-circle" size={20} color="#666" />
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ))}
+
+                  {/* Add Set Button */}
+                  <TouchableOpacity
+                    onPress={() => addSet(exerciseIndex)}
+                    style={styles.addSetButton}
+                  >
+                    <Ionicons name="add-circle-outline" size={20} color="#00ffff" />
+                    <Text style={styles.addSetText}>Add Set</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+
+              {/* Add Exercise Button */}
+              <TouchableOpacity
+                onPress={addExercise}
+                style={styles.addExerciseButton}
+              >
+                <Ionicons name="add-circle-outline" size={24} color="#00ffff" />
+                <Text style={styles.addExerciseText}>Add Exercise</Text>
+              </TouchableOpacity>
+
+              {/* Save Button */}
+              <TouchableOpacity
+                onPress={saveManualWorkout}
+                style={styles.saveManualWorkoutButton}
+              >
+                <Text style={styles.saveManualWorkoutButtonText}>Save Workout</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
+};
+
+/**
+ * Stylesheet for WorkoutLogs component
+ * 
+ * Uses dark theme with cyan accent colors (#00ffff)
+ * Styles are organized by component section:
+ * - Modal container and content
+ * - Header and buttons
+ * - Log list and cards
+ * - Exercise details
+ * - Confirmation modal
+ * 
+ * If you change colors, the component will update everywhere it's used
+ * If you change layout (flexDirection, padding, etc.), the visual structure changes
+ */
+const styles = StyleSheet.create({
+  // Main modal container - full screen with dark background
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+  },
+  // Modal content area
+  modalContent: {
+    flex: 1,
+    marginTop: 50,
+  },
+  // Header row with title and buttons
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  // Main title text
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  // Subtitle showing workout count
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#666',
+  },
+  // Container for header buttons (delete, close)
+  modalHeaderButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  // Delete button style (in header - icon button)
+  headerDeleteButton: {
+    padding: 8,
+    backgroundColor: 'transparent',
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20
+  },
+  // Close button style (in header)
+  closeButton: {
+    padding: 8,
+    backgroundColor: 'transparent',
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Container for the list of logs
+  logsList: {
+    padding: 20,
+  },
+  // Individual log card
+  logCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  // Log card header (name and date)
+  logHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  // Workout name text
+  logTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  // Date text
+  logDate: {
+    fontSize: 14,
+    color: '#666',
+  },
+  // Statistics row (duration, exercises, sets)
+  logStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  // Individual stat item
+  logStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  // Stat value text
+  logStatValue: {
+    color: '#00ffff',
+    fontSize: 14,
+  },
+  // Details section container
+  logDetails: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  // "Exercises:" title
+  logDetailTitle: {
+    fontSize: 14,
+    color: '#fff',
+    marginBottom: 5,
+  },
+  // Exercise name text (fallback format)
+  logDetailText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 5,
+    marginBottom: 2,
+  },
+  // Individual exercise detail container
+  exerciseDetail: {
+    marginBottom: 15,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  // Exercise header (name and total weight)
+  exerciseHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  // Exercise name
+  exerciseName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    flex: 1,
+  },
+  // Exercise total weight badge
+  exerciseTotalWeight: {
+    fontSize: 12,
+    color: '#00ffff',
+    fontWeight: '500',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  // Container for sets list
+  setsContainer: {
+    marginLeft: 5,
+  },
+  // Individual set row
+  setRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+  },
+  // Set number label
+  setNumber: {
+    fontSize: 13,
+    color: '#888',
+    fontWeight: '500',
+    minWidth: 50,
+  },
+  // Set details (weight × reps)
+  setDetails: {
+    fontSize: 14,
+    color: '#aaa',
+    flex: 1,
+  },
+  // Set volume (total weight for set)
+  setVolume: {
+    fontSize: 12,
+    color: '#666',
+    fontStyle: 'italic',
+  },
+  // Total weight container for entire workout
+  totalWeightContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  // Total weight text
+  totalWeightText: {
+    fontSize: 15,
+    color: '#00ffff',
+    fontWeight: '600',
+  },
+  // Empty state text
+  emptyText: {
+    color: '#666',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 30,
+  },
+  // Overlay for confirmation modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // Confirmation modal container
+  confirmationModal: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    padding: 20,
+    width: '80%',
+    alignItems: 'center',
+  },
+  // Confirmation title
+  confirmationTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 10,
+  },
+  // Confirmation message text
+  confirmationText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  // Container for confirmation buttons
+  confirmationButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+  },
+  // Base button style for confirmation
+  confirmationButton: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 10,
+    marginHorizontal: 5,
+  },
+  // Cancel button style
+  cancelButton: {
+    backgroundColor: '#333',
+  },
+  // Delete button style (in confirmation - different from header delete button)
+  deleteButton: {
+    backgroundColor: '#ff4444',
+  },
+  // Button text style
+  buttonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontWeight: 'bold',
+  },
+  // Manual Log Modal Styles
+  manualLogModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+  },
+  manualLogModalContent: {
+    flex: 1,
+    marginTop: 50,
+    backgroundColor: '#000',
+  },
+  manualLogHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  manualLogTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  manualLogScrollView: {
+    flex: 1,
+    padding: 20,
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  textInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 10,
+    padding: 15,
+    color: '#fff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  exerciseInputContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  exerciseInputHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 15,
+    gap: 10,
+  },
+  exerciseNameInput: {
+    flex: 1,
+  },
+  removeExerciseButton: {
+    padding: 8,
+  },
+  setInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 8,
+  },
+  setNumberText: {
+    fontSize: 14,
+    color: '#888',
+    fontWeight: '500',
+    minWidth: 50,
+  },
+  numberInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: 10,
+    color: '#fff',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  weightInput: {
+    width: 70,
+  },
+  repsInput: {
+    width: 60,
+  },
+  unitText: {
+    fontSize: 14,
+    color: '#666',
+  },
+  removeSetButton: {
+    padding: 4,
+  },
+  addSetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    marginTop: 5,
+    gap: 5,
+  },
+  addSetText: {
+    color: '#00ffff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  addExerciseButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#00ffff',
+    gap: 8,
+  },
+  addExerciseText: {
+    color: '#00ffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  saveManualWorkoutButton: {
+    backgroundColor: '#00ffff',
+    borderRadius: 12,
+    padding: 18,
+    alignItems: 'center',
+    marginBottom: 30,
+  },
+  saveManualWorkoutButtonText: {
+    color: '#000',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  manualLogButton: {
+    padding: 8,
+    backgroundColor: 'transparent',
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
+
+export default WorkoutLogs; 

@@ -1,0 +1,178 @@
+================================================================================
+TALK IT OUT / VOICE THERAPY — REMOVED FROM app/(tabs)/mental.js
+Saved on request so you can paste pieces back later.
+================================================================================
+
+--- A) handleCategoryPress — replace the simplified version with this if you add
+     a category that has isVoiceTherapy: true again ---
+
+  const handleCategoryPress = (category) => {
+    if (category.isVoiceTherapy) {
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'mental.js:423',message:'Voice therapy navigation triggered',data:{categoryId:category.id,hasRoute:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      router.push('/voice-therapy-session');
+    } else {
+      router.push({
+        pathname: '/category-exercises',
+        params: {
+          title: category.title,
+          exercises: JSON.stringify(category.exercises),
+          color: category.color
+        }
+      });
+    }
+  };
+
+--- B) Horizontal category list — use .filter if a voice category exists again ---
+
+  {categories
+    .filter(category => !category.isVoiceTherapy)
+    .map((category, index, arr) => (
+
+--- C) JSX: Talk It Out card section (place after the "Choose Your Practice"
+     ScrollView closes, before the Volunteer section) ---
+
+          {/* Voice Therapy Card Section */}
+          <View style={styles.section}>
+            <TouchableOpacity 
+              style={styles.voiceTherapyCard} 
+              onPress={() => router.push('/voice-therapy-session')} 
+              activeOpacity={0.7}
+            >
+              <LinearGradient
+                colors={['rgba(139, 92, 246, 0.15)', 'rgba(139, 92, 246, 0.08)']}
+                style={styles.voiceTherapyCardGradient}
+              >
+                <View style={styles.voiceTherapyIconContainer}>
+                  <Ionicons name="mic" size={24} color="#8b5cf6" />
+                </View>
+                <View style={styles.voiceTherapyContent}>
+                  <Text style={styles.voiceTherapyTitle}>Talk It Out</Text>
+                  <Text style={styles.voiceTherapyDescription} numberOfLines={1}>
+                    Talk with Eleos
+                  </Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.voiceTherapyButton}
+                  activeOpacity={0.7}
+                  onPress={() => router.push('/voice-therapy-session')}
+                >
+                  <LinearGradient
+                    colors={['#8b5cf6', '#a855f7']}
+                    style={styles.voiceTherapyButtonGradient}
+                  >
+                    <Ionicons name="mic-circle" size={20} color="#fff" />
+                    <Text style={styles.voiceTherapyButtonText}>Start Session</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+
+--- D) StyleSheet entries (merge inside StyleSheet.create({ ... })) ---
+
+  // Voice Therapy Row Card Styling
+  voiceTherapyRowCard: {
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    borderWidth: 2,
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  voiceTherapyRowIcon: {
+    backgroundColor: 'rgba(139, 92, 246, 0.3)',
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  voiceTherapyRowTitle: {
+    color: '#8b5cf6',
+    fontWeight: 'bold',
+  },
+  voiceTherapyRowDescription: {
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+
+  voiceTherapyCard: {
+    borderRadius: 15,
+  marginBottom: 20,
+  overflow: 'hidden',
+  borderWidth: 1.5,
+  borderColor: 'rgba(139, 92, 246, 0.3)',
+  shadowColor: '#8b5cf6',
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.25,
+  shadowRadius: 12,
+  elevation: 5,
+  },
+  voiceTherapyTitle: {
+    color: '#fff', // White text
+    fontWeight: 'bold',
+    fontSize: 18,
+  },
+  voiceTherapyCardGradient: {
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 100,
+  },
+  voiceTherapyIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+    borderWidth: 2,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  voiceTherapyContent: {
+    flex: 1,
+    justifyContent: 'center',
+    marginRight: 15,
+  },
+  voiceTherapyTitle: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  voiceTherapyDescription: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    lineHeight: 18,
+  },
+  voiceTherapyButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  voiceTherapyButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  voiceTherapyButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    letterSpacing: 0.3,
+  },
+
+================================================================================
+NOTE: Route /voice-therapy-session is unchanged; only the Mental tab entry UI
+was removed. FloatingAITherapist and other features are untouched.
+================================================================================

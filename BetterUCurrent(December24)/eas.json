@@ -1,0 +1,55 @@
+{
+  "cli": {
+    "version": ">= 5.9.1",
+    "appVersionSource": "local"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium",
+        "simulator": true
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "resourceClass": "m-medium"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "ios": {
+        "resourceClass": "m-medium",
+        "image": "macos-sonoma-14.6-xcode-16.1",
+        "node": "20.18.0",
+        "buildConfiguration": "Release",
+        "cocoapods": "1.15.2",
+        "env": {
+          "EXPO_NEW_ARCH_ENABLED": "false",
+          "NODE_VERSION": "20.18.0",
+          "NODE_OPTIONS": "--max-old-space-size=4096",
+          "NPM_CONFIG_ENGINE_STRICT": "false",
+          "POD_INSTALL_USE_FRAMEWORKS": "static",
+          "USE_FRAMEWORKS": "static",
+          "COCOAPODS_DISABLE_STATS": "true",
+          "FASTLANE_SKIP_UPDATE_CHECK": "true",
+          "FASTLANE_HIDE_TIMESTAMP": "true",
+          "FASTLANE_SKIP_ACTION_SUMMARY": "true"
+        },
+        "credentialsSource": "remote"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "andyjulijohn@yahoo.com",
+        "ascAppId": "6688642020",
+        "appleTeamId": "3DT3JG9S95",
+        "sku": "betterU_TestFlight_v7"
+      }
+    }
+  }
+}
