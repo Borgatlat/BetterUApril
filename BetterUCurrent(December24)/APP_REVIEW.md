@@ -325,7 +325,7 @@ export const validatePassword = (password) => {
 **Current** (Insecure):
 ```javascript
 // app.config.js
-googleMapsApiKey: "AIzaSyCqGOh4wjmj3CHim04fZbxAqM_Przqy024"
+googleMapsApiKey: "YOUR_GOOGLE_MAPS_API_KEY"
 ```
 
 **Better**:

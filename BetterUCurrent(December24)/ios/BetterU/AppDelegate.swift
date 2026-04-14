@@ -34,9 +34,19 @@ public class AppDelegate: ExpoAppDelegate {
       launchOptions: launchOptions)
 #endif
 
+// Google Maps: do not commit real keys. For local iOS runs, set GOOGLE_MAPS_API_KEY (or EXPO_PUBLIC_GOOGLE_MAPS_API_KEY)
+// in Xcode → Scheme → Run → Environment, or put a non-empty value in GMSApiKey in a local-only plist change you do not commit.
 // @generated begin react-native-maps-init - expo prebuild (DO NOT MODIFY) sync-a469bae146250fe98743034d52737f18e3795fa0
 #if canImport(GoogleMaps)
-GMSServices.provideAPIKey("AIzaSyCqGOh4wjmj3CHim04fZbxAqM_Przqy024")
+    let envKey = (ProcessInfo.processInfo.environment["GOOGLE_MAPS_API_KEY"]
+      ?? ProcessInfo.processInfo.environment["EXPO_PUBLIC_GOOGLE_MAPS_API_KEY"]
+      ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let plistKey = (Bundle.main.object(forInfoDictionaryKey: "GMSApiKey") as? String ?? "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    let mapsApiKey = envKey.isEmpty ? plistKey : envKey
+    if !mapsApiKey.isEmpty {
+      GMSServices.provideAPIKey(mapsApiKey)
+    }
 #endif
 // @generated end react-native-maps-init
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
