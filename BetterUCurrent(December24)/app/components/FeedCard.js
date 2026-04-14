@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Vibration, Dimensions, Alert, Linking, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from '../../lib/MapView';
@@ -12,6 +12,69 @@ import ReportModal from '../../components/ReportModal';
 import { PremiumAvatar } from './PremiumAvatar';
 
 const { width } = Dimensions.get('window');
+
+/** Add https:// for bare www. links so Linking can open them. */
+function hrefForOpen(raw) {
+  const t = String(raw || '').trim();
+  if (!t) return null;
+  if (/^https?:\/\//i.test(t)) return t;
+  if (/^www\./i.test(t)) return `https://${t}`;
+  return t;
+}
+
+/** Split copy into plain segments + URL segments (http(s)://… or www.…). */
+function splitTextWithUrls(text) {
+  const s = String(text ?? '');
+  if (!s) return [{ type: 'text', value: '' }];
+  const re = /(https?:\/\/[^\s<>"']+)|(www\.[^\s<>"']+)/gi;
+  const parts = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) parts.push({ type: 'text', value: s.slice(last, m.index) });
+    parts.push({ type: 'link', value: m[0], href: hrefForOpen(m[0]) });
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) parts.push({ type: 'text', value: s.slice(last) });
+  return parts.length ? parts : [{ type: 'text', value: s }];
+}
+
+function openUrlFromFeed(url) {
+  const u = hrefForOpen(url);
+  if (!u) return;
+  Linking.canOpenURL(u)
+    .then((ok) => {
+      if (ok) return Linking.openURL(u);
+      Alert.alert('Cannot open link', 'This address could not be opened from the app.');
+    })
+    .catch(() => Alert.alert('Cannot open link', 'Please try again in a moment.'));
+}
+
+/**
+ * Renders description with tappable URLs (volunteer “Sign up / details: …”, pasted links, etc.).
+ * Nested `Text` + `onPress` is the standard React Native pattern for inline links.
+ */
+function LinkableDescription({ text, baseStyle, linkStyle, numberOfLines }) {
+  const parts = useMemo(() => splitTextWithUrls(text), [text]);
+  return (
+    <Text style={baseStyle} numberOfLines={numberOfLines}>
+      {parts.map((p, i) =>
+        p.type === 'link' && p.href ? (
+          <Text
+            key={`l-${i}`}
+            style={linkStyle}
+            onPress={() => openUrlFromFeed(p.href)}
+            accessibilityRole="link"
+          >
+            {p.value}
+          </Text>
+        ) : (
+          <Text key={`t-${i}`}>{p.value}</Text>
+        )
+      )}
+    </Text>
+  );
+}
 
 const FeedCard = ({
   avatarUrl,
@@ -433,7 +496,11 @@ const FeedCard = ({
         <Text style={styles.title}>{title}</Text>
       </View>
       {description ? (
-        <Text style={styles.description}>{description}</Text>
+        <LinkableDescription
+          text={String(description)}
+          baseStyle={styles.description}
+          linkStyle={styles.descriptionLink}
+        />
       ) : null}
 
       {/* TEMPORARILY DISABLED: Music visibility on feed cards
@@ -550,7 +617,12 @@ const FeedCard = ({
             {(eventData.location && eventData.location.trim()) ? (
               <View style={styles.eventDateTimeRow}>
                 <Ionicons name="location-outline" size={16} color="#00ffff" style={{ marginRight: 6 }} />
-                <Text style={styles.eventLocationText} numberOfLines={1}>{eventData.location}</Text>
+                <LinkableDescription
+                  text={String(eventData.location).trim()}
+                  baseStyle={styles.eventLocationText}
+                  linkStyle={styles.descriptionLink}
+                  numberOfLines={2}
+                />
               </View>
             ) : null}
           </View>
@@ -844,6 +916,12 @@ justifyContent: 'center',
     color: '#888',
     fontSize: 14,
     marginBottom: 12,
+    lineHeight: 20,
+  },
+  descriptionLink: {
+    color: '#00ffff',
+    textDecorationLine: 'underline',
+    fontSize: 14,
     lineHeight: 20,
   },
   statsContainer: {
