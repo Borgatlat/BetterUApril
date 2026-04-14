@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { supabase } from '../../lib/supabase';
+import { notifyCommunityFeedUpdated } from '../../utils/feedPreloader';
 
 /** Format a Date for the date field (MM/DD/YYYY) */
 function formatDateForForm(d) {
@@ -197,7 +198,6 @@ export default function AddEventModal({ visible, onClose, onSuccess, initialValu
           user_id: user.id,
         });
       }
-      Alert.alert('Success', `Event shared to ${selectedGroupIds.length} group(s).`);
     } catch (err) {
       console.error('Error sharing to groups:', err);
       Alert.alert('Error', err.message || 'Failed to share to some groups.');
@@ -207,6 +207,7 @@ export default function AddEventModal({ visible, onClose, onSuccess, initialValu
     }
   };
 
+  /** After `events` insert succeeded: closes share sheet + main modal and runs `onSuccess`. */
   const finishShareFlow = () => {
     setShowShareModal(false);
     const data = createdEventData;
@@ -246,7 +247,8 @@ export default function AddEventModal({ visible, onClose, onSuccess, initialValu
       const insertPayload = {
         title: eventForm.title.trim(),
         description: (eventForm.description || '').trim() || null,
-        date: eventForm.date.trim(),
+        // Store ISO YYYY-MM-DD so Community feed sort (new Date(item.date)) is reliable vs MM/DD/YYYY strings.
+        date: formDateToIsoDate(eventForm.date),
         time: eventForm.time.trim(),
         location: (eventForm.location || '').trim() || null,
         creator_id: user.id,
@@ -267,7 +269,22 @@ export default function AddEventModal({ visible, onClose, onSuccess, initialValu
 
       if (error) throw error;
       setCreatedEventData(data);
-      setShowShareModal(true);
+      // Community tab caches the feed; invalidate so the new `events` row appears without a manual pull-to-refresh.
+      notifyCommunityFeedUpdated();
+      // Show success as soon as the row is saved (user expectation: right after "Create Event").
+      // `buttons[0].onPress` opens the optional group-share step so the first modal can dismiss cleanly first.
+      Alert.alert(
+        'Posted to Community',
+        'Your event was added to the Community feed. Open Community → Feed to see it. Next, you can share it to your groups—or skip.',
+        [
+          {
+            text: 'OK',
+            onPress: () => setShowShareModal(true),
+          },
+        ],
+        // If cancelable is true on Android, tapping outside can dismiss without `onPress` and skip the share step.
+        { cancelable: false }
+      );
     } catch (err) {
       console.error('Error creating event:', err);
       const msg = err?.message || 'Failed to create event. Please try again.';
@@ -479,14 +496,14 @@ export default function AddEventModal({ visible, onClose, onSuccess, initialValu
         visible={showShareModal}
         animationType="slide"
         transparent
-        onRequestClose={finishShareFlow}
+        onRequestClose={() => finishShareFlow()}
       >
         <View style={styles.overlay}>
           <View style={styles.content}>
             <View style={styles.header}>
               <Text style={styles.title}>Share event to groups</Text>
               <TouchableOpacity
-                onPress={finishShareFlow}
+                onPress={() => finishShareFlow()}
                 style={styles.closeBtn}
                 disabled={sharingToGroups}
               >
@@ -545,7 +562,7 @@ export default function AddEventModal({ visible, onClose, onSuccess, initialValu
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.skipButton}
-                onPress={finishShareFlow}
+                onPress={() => finishShareFlow()}
                 disabled={sharingToGroups}
               >
                 <Text style={styles.skipButtonText}>Skip</Text>

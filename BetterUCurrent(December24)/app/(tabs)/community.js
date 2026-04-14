@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, FlatList, Image, ActivityIndicator, TouchableOpacity, RefreshControl, Modal, Alert, ScrollView, Share, Platform } from 'react-native';
+import { View, Text, StyleSheet, TextInput, FlatList, Image, ActivityIndicator, TouchableOpacity, RefreshControl, Modal, Alert, ScrollView, Share, Platform, DeviceEventEmitter } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useUser } from '../../context/UserContext';
 import { createFriendRequestAcceptedNotification, createLikeNotification } from '../../utils/notificationHelpers';
@@ -12,7 +12,14 @@ import FeedCard from '../components/FeedCard';
 import * as ImagePicker from 'expo-image-picker';
 import { PremiumAvatar } from '../components/PremiumAvatar';
 import { GroupAvatar } from '../components/GroupAvatar';
-import { getFeedCache, setFeedLoaded, setCachedFeedData, clearFeedCache } from '../../utils/feedPreloader';
+import {
+  getFeedCache,
+  setFeedLoaded,
+  setCachedFeedData,
+  clearFeedCache,
+  COMMUNITY_FEED_INVALIDATE_EVENT,
+  consumeCommunityFeedNeedsRefresh,
+} from '../../utils/feedPreloader';
 import GroupList from '../../components/GroupList';
 import AddEventModal from '../(modals)/AddEventModal';
 import { COMMUNITY_THEME } from '../../config/communityTheme';
@@ -151,18 +158,6 @@ const CommunityScreen = () => {
   }, [params.refresh]);
 
 
-
-  // Preload friends data when the tab is focused
-  // Note: Feed cache restoration is handled in the main useEffect to avoid duplicate work
-  useFocusEffect(
-    React.useCallback(() => {
-      if (userProfile?.id) {
-        // Load friends data regardless of active tab
-        fetchFriendsAndRequests();
-        fetchAllFriendships();
-      }
-    }, [userProfile?.id])
-  );
 
   // Cache feed data whenever it changes (for persistence across unmounts)
   useEffect(() => {
@@ -1450,6 +1445,36 @@ const CommunityScreen = () => {
       setLoadingMore(false);
     }
   };
+
+  // Always points at latest fetchFeed (used by invalidation listeners below).
+  const fetchFeedRef = useRef(fetchFeed);
+  fetchFeedRef.current = fetchFeed;
+
+  // Preload friends when Community is focused; refetch feed after volunteer / Add Event creates a row.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (userProfile?.id) {
+        fetchFriendsAndRequests();
+        fetchAllFriendships();
+        if (consumeCommunityFeedNeedsRefresh()) {
+          feedLoadedRef.current = false;
+          setFeedLoaded(false);
+          clearFeedCache();
+          fetchFeedRef.current(false, true);
+        }
+      }
+    }, [userProfile?.id])
+  );
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(COMMUNITY_FEED_INVALIDATE_EVENT, () => {
+      if (!userProfile?.id) return;
+      setFeedLoaded(false);
+      feedLoadedRef.current = false;
+      fetchFeedRef.current(false, true);
+    });
+    return () => sub.remove();
+  }, [userProfile?.id]);
 
   // Add function to load more items
   const loadMoreFeed = async () => {
@@ -3325,7 +3350,8 @@ const CommunityScreen = () => {
         onClose={() => setShowCreateEventModal(false)}
         onSuccess={() => {
           setShowCreateEventModal(false);
-          onRefresh();
+          // Always reload feed data (onRefresh only runs fetch when the Feed sub-tab is active).
+          fetchFeedRef.current(false, true);
         }}
       />
     </View>

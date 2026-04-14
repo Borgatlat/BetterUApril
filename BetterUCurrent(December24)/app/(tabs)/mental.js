@@ -807,7 +807,7 @@ const MentalScreen = () => {
           <View style={styles.section}>
             <TouchableOpacity
               style={styles.volunteerCard}
-              onPress={() => router.push('../../(modals)/volunteer-oppurtunities')}
+              onPress={() => router.push('/volunteer-oppurtunities')}
               activeOpacity={0.85}
             >
               <View style={styles.volunteerHeader}>

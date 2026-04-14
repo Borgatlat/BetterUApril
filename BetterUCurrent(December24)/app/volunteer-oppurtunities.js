@@ -403,9 +403,62 @@ const INTEREST_OPTIONS = [
 ];
 
 /**
- * Curated opportunities with real signup links. Replace with API / Supabase when ready.
- * latitude/longitude are approximate city centers for distance ranking.
+ * Curated fallback rows (merged with Google Places). Same shape as `googlePlaceToOpportunity`.
+ * Replace with API / Supabase when ready. `latitude`/`longitude` are rough city centers for distance.
  */
+const VOLUNTEER_OPPORTUNITIES = [
+  {
+    id: 'curated-volunteermatch',
+    title: 'Find a role on VolunteerMatch',
+    organization: 'VolunteerMatch',
+    description:
+      'Search virtual and in-person volunteer openings across the U.S. Filter by cause, skills, and time commitment.',
+    locationLabel: 'Remote / nationwide',
+    isRemote: true,
+    applyUrl: 'https://www.volunteermatch.org/',
+    tags: ['community', 'education', 'health', 'youth'],
+    logoDomain: 'volunteermatch.org',
+    source: 'curated',
+  },
+  {
+    id: 'curated-redcross',
+    title: 'American Red Cross volunteering',
+    organization: 'American Red Cross',
+    description: 'Blood drives, disaster response, and community support — local and remote options.',
+    locationLabel: 'Nationwide chapters',
+    isRemote: true,
+    applyUrl: 'https://www.redcross.org/volunteer',
+    tags: ['health', 'community', 'seniors'],
+    logoDomain: 'redcross.org',
+    source: 'curated',
+  },
+  {
+    id: 'curated-feeding-america',
+    title: 'Food bank & pantry volunteering',
+    organization: 'Feeding America',
+    description: 'Locate a member food bank for sorting, packing, and distribution shifts near you.',
+    locationLabel: 'United States',
+    latitude: 41.8781,
+    longitude: -87.6298,
+    isRemote: false,
+    applyUrl: 'https://www.feedingamerica.org/find-your-local-foodbank',
+    tags: ['food', 'community'],
+    logoDomain: 'feedingamerica.org',
+    source: 'curated',
+  },
+  {
+    id: 'curated-idealist',
+    title: 'Idealist — nonprofit jobs & volunteer',
+    organization: 'Idealist',
+    description: 'Browse volunteer listings from nonprofits worldwide, including many remote roles.',
+    locationLabel: 'Remote / global',
+    isRemote: true,
+    applyUrl: 'https://www.idealist.org/en/?type=VOLUNTEER',
+    tags: ['community', 'education', 'environment'],
+    logoDomain: 'idealist.org',
+    source: 'curated',
+  },
+];
 
 export default function VolunteerOpportunitiesScreen() {
   const router = useRouter();
@@ -832,6 +885,8 @@ export default function VolunteerOpportunitiesScreen() {
         onSuccess={() => {
           setEventModalVisible(false);
           setEventDraft(null);
+          // Land on Community → Feed so the new event is visible after the success alert.
+          router.push('/(tabs)/community?tab=feed');
         }}
       />
     </View>

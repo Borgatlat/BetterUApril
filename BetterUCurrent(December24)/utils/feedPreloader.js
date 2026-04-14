@@ -5,7 +5,25 @@
  * when they navigate to the feed for the first time.
  */
 
+import { DeviceEventEmitter } from 'react-native';
 import { supabase } from '../lib/supabase';
+
+/** Emitted when a new row is inserted into `events` so Community can refetch (AddEventModal, etc.). */
+export const COMMUNITY_FEED_INVALIDATE_EVENT = 'betteru:communityFeedInvalidate';
+
+let communityFeedNeedsRefresh = false;
+
+/** Call when the `events` table changes so the next Community tab focus refetches the feed. */
+export const markCommunityFeedNeedsRefresh = () => {
+  communityFeedNeedsRefresh = true;
+};
+
+/** Returns true once per mark; used by Community useFocusEffect. */
+export const consumeCommunityFeedNeedsRefresh = () => {
+  const v = communityFeedNeedsRefresh;
+  communityFeedNeedsRefresh = false;
+  return v;
+};
 
 // Module-level cache for feed data (shared with Community component)
 let feedLoadedInSession = false;
@@ -42,6 +60,13 @@ export const clearFeedCache = () => {
     hasMoreFeed: true
   };
   console.log('🗑️ Feed cache cleared');
+};
+
+/** Clears cached feed, marks refresh, and notifies listeners (Community tab may be mounted). */
+export const notifyCommunityFeedUpdated = () => {
+  markCommunityFeedNeedsRefresh();
+  clearFeedCache();
+  DeviceEventEmitter.emit(COMMUNITY_FEED_INVALIDATE_EVENT);
 };
 
 /**
