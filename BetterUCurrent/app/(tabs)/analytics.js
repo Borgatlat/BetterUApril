@@ -23,7 +23,7 @@ import ProgressRings from '../../components/ProgressRings';
 import AnalyticsAdvice from '../../components/AnalyticsAdvice';
 import { getLocalDateString } from '../../utils/scheduledWorkoutHelpers';
 import { useFocusEffect } from 'expo-router';
-import { useHomePageCustomization } from '../hooks/useHomePageCustomization';
+import { useHomePageCustomization } from '../../hooks/useHomePageCustomization';
 import { hexToRgba } from '../../utils/homePageCustomization';
 
 const { width: screenWidth } = Dimensions.get('window');

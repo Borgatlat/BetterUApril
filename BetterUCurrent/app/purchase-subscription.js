@@ -3,22 +3,18 @@ import { View, Text, TouchableOpacity, Alert, Linking, StyleSheet, ScrollView, A
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import Constants from 'expo-constants';
 import { LogoImage } from '../utils/imageUtils';
 import { useAuth } from '../context/AuthContext';
-import { getOfferings, purchasePackage, restorePurchases, initializePurchases } from '../lib/purchases';
-import { Purchases } from 'react-native-purchases';
+import {
+  getOfferings,
+  purchasePackage,
+  restorePurchases,
+  initializePurchases,
+  customerInfoHasActiveSubscription,
+  resolveCustomerInfoAfterPurchase,
+} from '../lib/purchases';
 import { supabase } from '../lib/supabase';
-
-/** True when RevenueCat reports an active entitlement or subscription (post-purchase). */
-function customerInfoHasActiveSubscription(customerInfo) {
-  if (!customerInfo) return false;
-  const ent = customerInfo.entitlements?.active || {};
-  const subs = customerInfo.activeSubscriptions || [];
-  const byProd = customerInfo.subscriptionsByProductIdentifier || {};
-  const anyActiveProduct = Object.values(byProd).some((s) => s && s.isActive);
-  return Object.keys(ent).length > 0 || subs.length > 0 || anyActiveProduct;
-}
+import { isExpoGo, nativeFeatureUnavailableMessage } from '../lib/runtimeEnvironment';
 
 /**
  * Format a single offer (intro or discount) for display.
@@ -200,12 +196,8 @@ function PurchaseSubscriptionScreen() {
       return;
     }
 
-    // Apple’s payment sheet + RevenueCat native code are not available inside the Expo Go client.
-    if (Platform.OS === 'ios' && Constants.appOwnership === 'expo') {
-      Alert.alert(
-        'Use a development build',
-        'The App Store subscription sheet does not run in Expo Go. Build and install the app with:\n\nnpx expo run:ios\n\nor an EAS development build, then subscribe there.'
-      );
+    if (Platform.OS === 'ios' && isExpoGo()) {
+      Alert.alert('Subscriptions', nativeFeatureUnavailableMessage('In-app subscriptions'));
       return;
     }
 
@@ -223,13 +215,17 @@ function PurchaseSubscriptionScreen() {
         throw new Error(result.error || 'Failed to complete purchase');
       }
 
-      if (!customerInfoHasActiveSubscription(result.customerInfo)) {
+      const customerInfo = await resolveCustomerInfoAfterPurchase(result.customerInfo);
+      if (!customerInfoHasActiveSubscription(customerInfo)) {
         Alert.alert(
           'Subscription not confirmed',
-          'We could not detect an active subscription after checkout. If no Apple payment sheet appeared, use a development build (not Expo Go). You can also try Restore Purchases from this screen.'
+          isExpoGo()
+            ? nativeFeatureUnavailableMessage('In-app subscriptions')
+            : 'Apple may still be processing your purchase. Wait a moment, then tap Restore Purchases. If you were not charged, try subscribing again.'
         );
         return;
       }
+      result.customerInfo = customerInfo;
 
       console.log('Purchase successful! Creating subscription record...');
       
@@ -398,6 +394,31 @@ function PurchaseSubscriptionScreen() {
     } catch (error) {
       console.error('Purchase error:', error);
       Alert.alert('Error', error.message || 'Failed to complete purchase. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Onboarding path: skip premium and finish setup (TestFlight users must not be trapped on paywall). */
+  const handleContinueFree = async () => {
+    try {
+      setLoading(true);
+      if (user?.id) {
+        await supabase
+          .from('profiles')
+          .update({ onboarding_completed: true })
+          .eq('id', user.id);
+        await supabase.from('onboarding_data').delete().eq('id', user.id);
+        await refetchProfile();
+      }
+      router.replace('/(tabs)/home');
+    } catch (e) {
+      console.error('handleContinueFree:', e);
+      Alert.alert(
+        'Could not save progress',
+        'We will still open the app. You can finish setup from Settings if needed.',
+        [{ text: 'Continue', onPress: () => router.replace('/(tabs)/home') }]
+      );
     } finally {
       setLoading(false);
     }
@@ -822,6 +843,16 @@ function PurchaseSubscriptionScreen() {
             );
           })()}
 
+          {hasExistingSubscription !== true && (
+            <TouchableOpacity
+              style={styles.freeButton}
+              onPress={handleContinueFree}
+              disabled={loading}
+            >
+              <Text style={styles.freeButtonText}>Continue with free version</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity 
             style={styles.restoreButton} 
             onPress={handleRestorePurchases}
@@ -1056,6 +1087,21 @@ const styles = StyleSheet.create({
   },
   subscribeButtonDisabled: {
     opacity: 0.6,
+  },
+  freeButton: {
+    marginTop: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+  },
+  freeButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   restoreButton: {
     marginTop: 18,

@@ -1,6 +1,7 @@
 "use client";
 
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Alert, Linking } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useState, useEffect } from 'react';
@@ -13,6 +14,9 @@ import MentalSessionSummary from '../components/MentalSessionSummary';
 import { FloatingAITherapist } from '../../components/FloatingAITherapist';
 import { MentalSessionShareModal } from '../../components/MentalSessionShareModal';
 import { SharedMentalSessionsList } from '../../components/SharedMentalSessionsList';
+import { StudentDailyPulseCard } from '../../components/school/StudentDailyPulseCard';
+import { VolunteerPromoCard } from '../../components/school/VolunteerPromoCard';
+import { DAILY_EXAMEN_CATEGORY } from '../../lib/dailyExamNavigation';
 
 const mentalSessions = {
   meditation: [
@@ -123,6 +127,7 @@ const moodOptions = [
 
 const MentalScreen = () => {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { updateMood, incrementStat, mood } = useTracking();
   const [showMoodModal, setShowMoodModal] = useState(false);
@@ -415,30 +420,7 @@ const MentalScreen = () => {
         }
       ]
     },
-    {
-      id: 'examen',
-      title: 'Daily Examen',
-      icon: 'search',
-      color: '#FFB74D',
-      description: 'A 3-minute reflection on your day',
-      exercises: [
-        {
-          id: 'daily-examen',
-          title: 'Daily Examen',
-          duration: 3,
-          session_type: 'examen',
-          type: 'examen',
-          description: 'Examination of conscience: find what went wrong, what went right, and how to improve—in 3 minutes.',
-          steps: JSON.stringify([
-            'Gratitude — What are you grateful for today? Recall one or two moments or people.',
-            'Light — Pause and invite clarity. Ask to see your day honestly and without harsh judgment.',
-            'Review — Look back at your day. What drew you toward your best self? What pulled you away?',
-            'Sorrow — Where did you fall short? Acknowledge it with kindness, not self-criticism.',
-            'Hope — What one thing will you do differently tomorrow? Set a gentle intention.',
-          ])
-        }
-      ]
-    },
+    DAILY_EXAMEN_CATEGORY,
   ]
 
 
@@ -613,9 +595,12 @@ const MentalScreen = () => {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={{ paddingHorizontal: 20, paddingBottom: 20 }} contentContainerStyle={{ paddingBottom: 100 }}>
-        {/* Header + two quick-action "tabs": Track Mood opens modal; History goes to session log */}
-        <View style={styles.headerSection}>
+      <ScrollView
+        style={{ paddingHorizontal: 20, paddingBottom: 20 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
+      >
+        {/* Title first (safe area) so school pulse card below is fully visible */}
+        <View style={[styles.headerSection, { paddingTop: Math.max(insets.top, 12) + 4 }]}>
           <Text style={styles.title}>Mental Wellness</Text>
           <View style={styles.quickActionsRow}>
             <TouchableOpacity
@@ -640,6 +625,8 @@ const MentalScreen = () => {
             </TouchableOpacity>
           </View>
         </View>
+
+        <StudentDailyPulseCard />
 
         {/* AI Wellness Recommendation Banner */}
         <View style={styles.aiRecommendationBanner}>
@@ -805,35 +792,7 @@ const MentalScreen = () => {
           )}
 
           <View style={styles.section}>
-            <TouchableOpacity
-              style={styles.volunteerCard}
-              onPress={() => router.push('/volunteer-oppurtunities')}
-              activeOpacity={0.85}
-            >
-              <View style={styles.volunteerHeader}>
-                <View style={styles.volunteerIconContainer}>
-                  <Ionicons name="heart-circle" size={28} color="#00ffff" />
-                </View>
-                <View style={styles.volunteerTextContainer}>
-                  <Text style={styles.volunteerTitle}>Volunteer Opportunities</Text>
-                  <Text style={styles.volunteerSubtitle}>Give back and build social fitness</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={22} color="#00ffff" />
-              </View>
-
-              <Text style={styles.volunteerDescription}>
-                Find opportunities that match your skills and interests, and make a
-                meaningful impact in your community.
-              </Text>
-
-              <View style={styles.volunteerStatBox}>
-                <Ionicons name="analytics-outline" size={16} color="#00ffff" />
-                <Text style={styles.volunteerStat}>
-                  The Harvard Study of Adult Development found social connection and
-                  contribution are strong predictors of long-term wellbeing.
-                </Text>
-              </View>
-            </TouchableOpacity>
+            <VolunteerPromoCard />
           </View>
 
           {/* Mood Tracking */}
@@ -961,14 +920,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
   },
   headerSection: {
-    paddingTop: 60,
-    marginBottom: 24,
+    marginBottom: 10,
   },
   title: {
     fontSize: 36,
     fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 20,
+    marginBottom: 8,
     textShadowColor: 'rgba(0, 255, 255, 0.3)',
     textShadowOffset: { width: 0, height: 0 },
     textShadowRadius: 10,
@@ -976,7 +934,7 @@ const styles = StyleSheet.create({
   quickActionsRow: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 8,
+    marginTop: 4,
   },
   /* flex: 1 lets both buttons share the row width evenly (like two tabs). */
   quickActionButton: {
@@ -1350,67 +1308,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: 'bold',
     marginRight: 5,
-  },
-  volunteerCard: {
-    backgroundColor: 'rgba(0, 255, 255, 0.05)',
-    borderRadius: 15,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 255, 255, 0.15)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  volunteerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  volunteerIconContainer: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 255, 255, 0.1)',
-    marginRight: 12,
-  },
-  volunteerTextContainer: {
-    flex: 1,
-  },
-  volunteerTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  volunteerSubtitle: {
-    color: '#8ddddd',
-    fontSize: 13,
-  },
-  volunteerDescription: {
-    color: '#d7fefe',
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 12,
-  },
-  volunteerStatBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.08)',
-    padding: 10,
-    gap: 8,
-  },
-  volunteerStat: {
-    flex: 1,
-    color: '#9ea9b1',
-    fontSize: 12,
-    lineHeight: 18,
   },
   enhancedSectionHeader: {
     backgroundColor: 'rgba(0, 255, 255, 0.05)',

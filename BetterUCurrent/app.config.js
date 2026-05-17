@@ -59,14 +59,12 @@ export default {
     slug: "betterutestflightv8",
     version: "1.1.6",
     orientation: "portrait",
-    // iOS app icons must be fully opaque (no transparency). If the source image has alpha,
-    // iOS will flatten it (often against white), which creates the "white space/halo" issue
-    // you saw in TestFlight. This file is the same artwork, but flattened onto black.
-    icon: "./assets/images/Icon-iOS18-Gradient-1024-OPAQUE.png",
+    // iOS app icons must be fully opaque (no transparency). Repo includes this 1024 source;
+    // (If you regenerate a flattened PNG, replace this path.)
+    icon: "./assets/images/Icon-iOS-Dark-1024x1024@1x.png",
     userInterfaceStyle: "light",
     scheme: "betteru",
     jsEngine: "hermes",
-    newArchEnabled: false,
     splash: {
       image: "./assets/images/splash-icon.png",
       resizeMode: "contain",
@@ -84,7 +82,7 @@ export default {
       // `CURRENT_PROJECT_VERSION` in `ios/BetterU.xcodeproj/project.pbxproj`,
       // so that file MUST be kept in sync with this number, or Apple rejects
       // the upload with `ITMS-90478` (extension/parent CFBundleVersion mismatch).
-      buildNumber: "9",
+      buildNumber: "12",
       infoPlist: {
         NSCameraUsageDescription: "This app uses the camera to let you take profile pictures.",
         NSPhotoLibraryUsageDescription: "This app uses the photo library to let you select profile pictures.",
@@ -110,6 +108,8 @@ export default {
       },
       entitlements: {
         // "com.apple.developer.healthkit": true,  // Temporarily disabled for TestFlight
+        "aps-environment": "production",
+        "com.apple.developer.applesignin": ["Default"],
         "com.apple.developer.usernotifications.time-sensitive": true
         // "com.apple.developer.activity-kit": true  // Temporarily disabled for TestFlight
       }
@@ -117,13 +117,13 @@ export default {
     android: {
       package: "com.enriqueortiz.betteru",
       // Same idea as iOS buildNumber: incrementing versionCode forces Android to accept the update.
-      versionCode: 4,
+      versionCode: 5,
       adaptiveIcon: {
         // Android adaptive icons are split into:
         // - foreground: the logo (should have transparency)
         // - background: a solid color/image behind it
         // We generate this foreground from the same iOS icon by making near-black pixels transparent.
-        foregroundImage: "./assets/images/adaptive-icon-foreground.png",
+        foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#000000"
       }
     },
@@ -150,6 +150,7 @@ export default {
           "defaultChannel": "default"
         }
       ],
+      "expo-apple-authentication",
       [
         "expo-splash-screen",
         {
@@ -202,6 +203,7 @@ export default {
         projectId: "57d27416-420d-4d92-8d6d-d1365c22f311"
       },
       openaiApiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY,
+      livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL,
       admob: {
         // Banner *ad unit* IDs (with /) — created in AdMob console; Android still uses Google's sample test unit until that platform's ad unit is live.
         iosBannerAdUnitId: process.env.EXPO_PUBLIC_ADMOB_IOS_BANNER_AD_UNIT_ID || "ca-app-pub-9221552597487164/1003410305",
@@ -213,11 +215,12 @@ export default {
       EXPO_PUBLIC_ADMOB_IOS_APP_ID: process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID,
       EXPO_PUBLIC_ADMOB_ANDROID_APP_ID: process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID,
       EXPO_PUBLIC_ADMOB_IOS_BANNER_AD_UNIT_ID: process.env.EXPO_PUBLIC_ADMOB_IOS_BANNER_AD_UNIT_ID,
-      EXPO_PUBLIC_ADMOB_ANDROID_BANNER_AD_UNIT_ID: process.env.EXPO_PUBLIC_ADMOB_ANDROID_BANNER_AD_UNIT_ID
+      EXPO_PUBLIC_ADMOB_ANDROID_BANNER_AD_UNIT_ID: process.env.EXPO_PUBLIC_ADMOB_ANDROID_BANNER_AD_UNIT_ID,
+      EXPO_PUBLIC_LIVEKIT_URL: process.env.EXPO_PUBLIC_LIVEKIT_URL
     },
     owner: "easbetteru",
     // Bare workflow requires a fixed runtime version string (policy-based runtimeVersion is unsupported).
-    runtimeVersion: "1.1.5",
+    runtimeVersion: "1.1.6",
     updates: {
       url: "https://u.expo.dev/57d27416-420d-4d92-8d6d-d1365c22f311"
     }

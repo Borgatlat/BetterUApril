@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, FlatList, Image, ActivityIndicator, TouchableOpacity, RefreshControl, Modal, Alert, ScrollView, Share, Platform, DeviceEventEmitter } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useUser } from '../../context/UserContext';
-import { createFriendRequestAcceptedNotification, createLikeNotification } from '../../utils/notificationHelpers';
+import { createFriendRequestAcceptedNotification } from '../../utils/notificationHelpers';
 import { useUnits } from '../../context/UnitsContext';
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import LeagueContent from '../../components/LeagueContent';
@@ -23,6 +23,7 @@ import {
 import GroupList from '../../components/GroupList';
 import AddEventModal from '../(modals)/AddEventModal';
 import { COMMUNITY_THEME } from '../../config/communityTheme';
+import { useAuthSession } from '../../hooks/useAuthSession';
 
 /** Design tokens for Community styles — same object everywhere so the screen matches Feed/League. */
 const T = COMMUNITY_THEME;
@@ -73,6 +74,9 @@ const PostType = {
 
 const CommunityScreen = () => {
   const { userProfile, isPremium } = useUser();
+  const { workspace, orgId } = useAuthSession();
+  /** School students keep global league discovery out of unified search — friend lookups stay same-org below. */
+  const schoolClassmatesOnly = workspace === 'student' && !!orgId;
   const { useImperial } = useUnits();
   // Inner views: feed | friends (header) | groups | league (League pill — embeds LeagueContent)
   const [activeTab, setActiveTab] = useState('feed');
@@ -113,7 +117,6 @@ const CommunityScreen = () => {
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showCreateEventModal, setShowCreateEventModal] = useState(false);
   const [activeFeedFilter, setActiveFeedFilter] = useState(PostType.ALL);
-  const [kudosGivenThisWeek, setKudosGivenThisWeek] = useState(0);
   // One-time dismissible nudge at top of feed: "Your friends are active — share a workout or run?"
   const [showParticipationNudge, setShowParticipationNudge] = useState(true);
   const [newGroup, setNewGroup] = useState({
@@ -243,24 +246,6 @@ const CommunityScreen = () => {
       feedLoadedRef.current = false;
     }
   }, [userProfile?.id]); // Only depend on userProfile, shared cache persists across unmounts
-
-  // Support summary: count kudos given by current user in the last 7 days (for "You've given kudos to X posts this week.")
-  useEffect(() => {
-    if (!userProfile?.id) return;
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const since = sevenDaysAgo.toISOString();
-    const fetchKudosGiven = async () => {
-      const [wRes, mRes, rRes] = await Promise.all([
-        supabase.from('workout_kudos').select('id').eq('user_id', userProfile.id).gte('created_at', since),
-        supabase.from('mental_session_kudos').select('id').eq('user_id', userProfile.id).gte('created_at', since),
-        supabase.from('run_kudos').select('id').eq('user_id', userProfile.id).gte('created_at', since),
-      ]);
-      const total = (wRes.data?.length ?? 0) + (mRes.data?.length ?? 0) + (rRes.data?.length ?? 0);
-      setKudosGivenThisWeek(total);
-    };
-    fetchKudosGiven();
-  }, [userProfile?.id]);
 
   // Fetch all friendships for current user (for Find Friends logic)
   const fetchAllFriendships = async () => {
@@ -464,6 +449,27 @@ const CommunityScreen = () => {
           console.error('Error fetching friendship:', fetchError);
         }
 
+        /** Block accepting outsiders when school roster uses org-scoped social graph. */
+        if (schoolClassmatesOnly && orgId && friendship) {
+          const otherUserId =
+            friendship.user_id === userProfile.id ? friendship.friend_id : friendship.user_id;
+          const { data: peer } = await supabase
+            .from('profiles')
+            .select('org_id')
+            .eq('id', otherUserId)
+            .maybeSingle();
+          if (peer?.org_id !== orgId) {
+            Alert.alert(
+              'Classmates only',
+              'Only friend invites from classmates at your school can be accepted here.'
+            );
+            await supabase.from('friends').delete().eq('id', friendshipId);
+            fetchFriendsAndRequests();
+            fetchAllFriendships();
+            return;
+          }
+        }
+
         await supabase.from('friends').update({ status: 'accepted' }).eq('id', friendshipId);
 
         // Create notification for the person who sent the request
@@ -526,6 +532,23 @@ const CommunityScreen = () => {
         );
         setRequesting(r => ({ ...r, [targetId]: false }));
         return;
+      }
+
+      /** Defense in depth — search is already scoped, but stale UI could still invoke this. */
+      if (schoolClassmatesOnly && orgId) {
+        const { data: peerProfile } = await supabase
+          .from('profiles')
+          .select('org_id')
+          .eq('id', targetId)
+          .maybeSingle();
+        if (peerProfile?.org_id !== orgId) {
+          Alert.alert(
+            'Classmates only',
+            'Friend requests can only go to classmates at your school.'
+          );
+          setRequesting((r) => ({ ...r, [targetId]: false }));
+          return;
+        }
       }
 
       // Create new friend request
@@ -641,6 +664,10 @@ const CommunityScreen = () => {
         .ilike('username', `%${text}%`)
         .neq('id', userProfile.id);
 
+      if (schoolClassmatesOnly) {
+        query = query.eq('org_id', orgId);
+      }
+
       // Exclude blocked users from search results
       if (blockedIds.size > 0) {
         const blockedArray = Array.from(blockedIds);
@@ -692,6 +719,9 @@ const CommunityScreen = () => {
         .ilike('username', `%${q}%`)
         .neq('id', userProfile.id)
         .limit(8);
+      if (schoolClassmatesOnly) {
+        profileQuery = profileQuery.eq('org_id', orgId);
+      }
       if (blockedIds.size > 0) {
         const blockedArray = Array.from(blockedIds);
         profileQuery = profileQuery.not(
@@ -700,14 +730,19 @@ const CommunityScreen = () => {
           `(${blockedArray.map((id) => `"${id}"`).join(',')})`
         );
       }
+      const emptyList = Promise.resolve({ data: [], error: null });
       const [profilesRes, groupsRes, teamsRes] = await Promise.all([
         profileQuery,
-        supabase
+        schoolClassmatesOnly
+          ? emptyList
+          : supabase
           .from('groups')
           .select('id, name, avatar_url, description, is_public')
           .ilike('name', `%${q}%`)
           .limit(8),
-        supabase
+        schoolClassmatesOnly
+          ? emptyList
+          : supabase
           .from('teams')
           .select('id, name, avatar_url, current_league, total_trophies')
           .ilike('name', `%${q}%`)
@@ -1068,7 +1103,7 @@ const CommunityScreen = () => {
       const filteredEvents = (events || []).filter(e => !blockedIds.has(e.creator_id));
       
       // OPTIMIZATION: First, combine and sort all activities to find the top 10
-      // Then fetch kudos/comments ONLY for those 10 (much faster!)
+      // Then fetch comments/Spotify ONLY for those 10 (much faster!)
       let allActivities = [];
       
       filteredWorkouts.forEach(item => {
@@ -1120,7 +1155,7 @@ const CommunityScreen = () => {
       allActivities.sort((a, b) => new Date(b.date) - new Date(a.date));
       const topActivities = allActivities.slice(0, ITEMS_PER_PAGE);
       
-      // Now fetch kudos/comments/Spotify ONLY for the top 10 activities
+      // Now fetch comments/Spotify ONLY for the top 10 activities
       const topWorkoutIds = topActivities.filter(a => a.type === 'workout').map(a => a.id);
       const topMentalIds = topActivities.filter(a => a.type === 'mental').map(a => a.id);
       const topRunIds = topActivities.filter(a => a.type === 'run').map(a => a.id);
@@ -1129,9 +1164,9 @@ const CommunityScreen = () => {
         .filter(a => a.type === 'workout' && a.workout_session_id)
         .map(a => a.workout_session_id);
 
-      const kudosAndCommentsPromises = [];
-      
-      // Event attendees: (1) which events the current user joined (Join/Leave button), (2) which attendees are friends (show their avatars on the card).
+      const extraDataPromises = [];
+
+      // Event attendees... (1) which events the current user joined (Join/Leave button), (2) which attendees are friends (show their avatars on the card).
       // We run two queries: first for current user's events, then for ALL attendees of those events; we filter attendees to nonBlockedFriendIds and fetch profiles to get avatar_url.
       let eventIdsUserJoined = new Set();
       const eventAttendeesByEvent = {}; // eventId -> [{ user_id, avatar_url }, ...], only friends
@@ -1178,7 +1213,7 @@ const CommunityScreen = () => {
       
       // Spotify tracks (only for top 10 workouts)
       if (topWorkoutSessionIds.length > 0) {
-        kudosAndCommentsPromises.push(
+        extraDataPromises.push(
           supabase
             .from('workout_spotify_tracks')
             .select('workout_session_id, track_name, artist_name, album_name, album_image_url, played_at, track_id')
@@ -1187,49 +1222,12 @@ const CommunityScreen = () => {
             .then(result => ({ type: 'spotify', data: result.data || [], error: result.error }))
         );
       } else {
-        kudosAndCommentsPromises.push(Promise.resolve({ type: 'spotify', data: [] }));
-      }
-
-      // Fetch kudos ONLY for top 10
-      if (topWorkoutIds.length > 0) {
-        kudosAndCommentsPromises.push(
-          supabase
-            .from('workout_kudos')
-            .select('*')
-            .in('workout_id', topWorkoutIds)
-            .then(result => ({ type: 'workout_kudos', data: result.data || [], error: result.error }))
-        );
-      } else {
-        kudosAndCommentsPromises.push(Promise.resolve({ type: 'workout_kudos', data: [] }));
-      }
-
-      if (topMentalIds.length > 0) {
-        kudosAndCommentsPromises.push(
-          supabase
-            .from('mental_session_kudos')
-            .select('*')
-            .in('session_id', topMentalIds)
-            .then(result => ({ type: 'mental_kudos', data: result.data || [], error: result.error }))
-        );
-      } else {
-        kudosAndCommentsPromises.push(Promise.resolve({ type: 'mental_kudos', data: [] }));
-      }
-
-      if (topRunIds.length > 0) {
-        kudosAndCommentsPromises.push(
-          supabase
-            .from('run_kudos')
-            .select('*')
-            .in('run_id', topRunIds)
-            .then(result => ({ type: 'run_kudos', data: result.data || [], error: result.error }))
-        );
-      } else {
-        kudosAndCommentsPromises.push(Promise.resolve({ type: 'run_kudos', data: [] }));
+        extraDataPromises.push(Promise.resolve({ type: 'spotify', data: [] }));
       }
 
       // Fetch comments ONLY for top 10
       if (topWorkoutIds.length > 0) {
-        kudosAndCommentsPromises.push(
+        extraDataPromises.push(
           supabase
             .from('workout_comments')
             .select('*')
@@ -1237,11 +1235,11 @@ const CommunityScreen = () => {
             .then(result => ({ type: 'workout_comments', data: result.data || [], error: result.error }))
         );
       } else {
-        kudosAndCommentsPromises.push(Promise.resolve({ type: 'workout_comments', data: [] }));
+        extraDataPromises.push(Promise.resolve({ type: 'workout_comments', data: [] }));
       }
 
       if (topMentalIds.length > 0) {
-        kudosAndCommentsPromises.push(
+        extraDataPromises.push(
           supabase
             .from('mental_session_comments')
             .select('*')
@@ -1249,11 +1247,11 @@ const CommunityScreen = () => {
             .then(result => ({ type: 'mental_comments', data: result.data || [], error: result.error }))
         );
       } else {
-        kudosAndCommentsPromises.push(Promise.resolve({ type: 'mental_comments', data: [] }));
+        extraDataPromises.push(Promise.resolve({ type: 'mental_comments', data: [] }));
       }
 
       if (topRunIds.length > 0) {
-        kudosAndCommentsPromises.push(
+        extraDataPromises.push(
           supabase
             .from('run_comments')
             .select('*')
@@ -1261,18 +1259,17 @@ const CommunityScreen = () => {
             .then(result => ({ type: 'run_comments', data: result.data || [], error: result.error }))
         );
       } else {
-        kudosAndCommentsPromises.push(Promise.resolve({ type: 'run_comments', data: [] }));
+        extraDataPromises.push(Promise.resolve({ type: 'run_comments', data: [] }));
       }
 
-      // Wait for all kudos, comments, and Spotify tracks to load in parallel
-      const kudosCommentsResults = await Promise.all(kudosAndCommentsPromises);
-      
-      // Process results
+      // Spotify + comments load in parallel
+      const extraDataResults = await Promise.all(extraDataPromises);
+
+      // Process results (no likes/kudos payloads)
       let spotifyTrackMap = {};
-      const kudosMap = {};
       const commentsMap = {};
 
-      kudosCommentsResults.forEach(result => {
+      extraDataResults.forEach(result => {
         if (result.type === 'spotify' && result.data) {
           result.data.forEach(row => {
             if (!spotifyTrackMap[row.workout_session_id]) {
@@ -1285,21 +1282,6 @@ const CommunityScreen = () => {
               album_image_url: row.album_image_url,
               played_at: row.played_at
             });
-          });
-        } else if (result.type === 'workout_kudos' && result.data) {
-          result.data.forEach(k => {
-            if (!kudosMap[k.workout_id]) kudosMap[k.workout_id] = [];
-            kudosMap[k.workout_id].push(k);
-          });
-        } else if (result.type === 'mental_kudos' && result.data) {
-          result.data.forEach(k => {
-            if (!kudosMap[k.session_id]) kudosMap[k.session_id] = [];
-            kudosMap[k.session_id].push(k);
-          });
-        } else if (result.type === 'run_kudos' && result.data) {
-          result.data.forEach(k => {
-            if (!kudosMap[k.run_id]) kudosMap[k.run_id] = [];
-            kudosMap[k.run_id].push(k);
           });
         } else if (result.type === 'workout_comments' && result.data) {
           result.data.forEach(c => {
@@ -1318,13 +1300,11 @@ const CommunityScreen = () => {
           });
         }
       });
-      
-      // Now attach kudos/comments/Spotify to the top 10 activities
+
       const feedItems = topActivities.map(activity => {
         if (activity.type === 'workout') {
           return {
             ...activity,
-            kudos: kudosMap[activity.id] || [],
             comments: commentsMap[activity.id] || [],
             workout_session_id: activity.workout_session_id,
             spotify_tracks_preview: (activity.workout_session_id && spotifyTrackMap[activity.workout_session_id])
@@ -1337,27 +1317,23 @@ const CommunityScreen = () => {
         } else if (activity.type === 'mental') {
           return {
             ...activity,
-            kudos: kudosMap[activity.id] || [],
             comments: commentsMap[activity.id] || [],
           };
         } else if (activity.type === 'run') {
           return {
             ...activity,
-            kudos: kudosMap[activity.id] || [],
             comments: commentsMap[activity.id] || [],
           };
         } else if (activity.type === 'event') {
           return {
             ...activity,
-            kudos: [],
             comments: [],
             isEventJoined: eventIdsUserJoined.has(activity.id),
             attendeesWhoAreFriends: eventAttendeesByEvent[activity.id] || [],
           };
-        } else { // PR
+        } else {
           return {
             ...activity,
-            kudos: [],
             comments: [],
           };
         }
@@ -2043,151 +2019,6 @@ const CommunityScreen = () => {
     setFeed(filtered);
   };
 
-  // Helper function to create kudos notifications
-  const createKudosNotification = async (type, targetId) => {
-    try {
-      // Get the post owner's info
-      let postOwnerId = null;
-      
-      if (type === 'run') {
-        const { data: run, error: runError } = await supabase
-          .from('runs')
-          .select('user_id')
-          .eq('id', targetId)
-          .single();
-        
-        if (!runError && run) {
-          postOwnerId = run.user_id;
-        }
-      } else {
-        const { data: post, error: postError } = await supabase
-          .from(`${type === 'workout' ? 'user_workout_logs' : 'mental_session_logs'}`)
-          .select('user_id')
-          .eq('id', targetId)
-          .single();
-        
-        if (!postError && post) {
-          postOwnerId = post.user_id;
-        }
-      }
-
-      // Send notification to the post owner
-      if (postOwnerId && postOwnerId !== userProfile.id) {
-        await createLikeNotification(
-          userProfile.id,
-          postOwnerId,
-          userProfile.full_name || userProfile.username,
-          type,
-          targetId
-        );
-      }
-    } catch (error) {
-      console.error('Error creating kudos notification:', error);
-    }
-  };
-
-  const handleToggleKudos = async (type, targetId) => {
-    try {
-      // Special handling for runs
-      if (type === 'run') {
-        const { data: existingKudos, error: fetchError } = await supabase
-          .from('run_kudos')
-          .select('*')
-          .eq('run_id', targetId)
-          .eq('user_id', userProfile.id);
-
-        if (fetchError) {
-          console.error('Error checking run kudos:', fetchError);
-          return;
-        }
-
-        if (existingKudos && existingKudos.length > 0) {
-          // If kudos exists, remove it
-          const { error: deleteError } = await supabase
-            .from('run_kudos')
-            .delete()
-            .eq('run_id', targetId)
-            .eq('user_id', userProfile.id);
-
-          if (deleteError) {
-            console.error('Error removing run kudos:', deleteError);
-            return;
-          }
-        } else {
-          // If no kudos exists, add it
-          const { error: insertError } = await supabase
-            .from('run_kudos')
-            .insert([
-              {
-                run_id: targetId,
-                user_id: userProfile.id,
-              },
-            ]);
-
-          if (insertError) {
-            console.error('Error adding run kudos:', insertError);
-            return;
-          }
-
-          // Create notification for run kudos
-          await createKudosNotification('run', targetId);
-        }
-      } else {
-        // Handle other types (workout, mental) as before
-        const { data: existingKudos, error: fetchError } = await supabase
-          .from(`${type}_kudos`)
-          .select('*')
-          .eq(`${type}_id`, targetId)
-          .eq('user_id', userProfile.id)
-          .single();
-
-        if (fetchError && fetchError.code !== 'PGRST116') {
-          console.error('Error checking existing kudos:', fetchError);
-          return;
-        }
-
-        if (existingKudos) {
-          // If kudos exists, remove it
-          const { error: deleteError } = await supabase
-            .from(`${type}_kudos`)
-            .delete()
-            .eq(`${type}_id`, targetId)
-            .eq('user_id', userProfile.id);
-
-          if (deleteError) {
-            console.error('Error removing kudos:', deleteError);
-            return;
-          }
-        } else {
-          // If no kudos exists, add it
-          const { error: insertError } = await supabase
-            .from(`${type}_kudos`)
-            .insert([
-              {
-                [`${type}_id`]: targetId,
-                user_id: userProfile.id,
-              },
-            ]);
-
-          if (insertError) {
-            console.error('Error adding kudos:', insertError);
-            return;
-          }
-
-          // Create notification for kudos
-          await createKudosNotification(type, targetId);
-        }
-      }
-
-      // Refresh the feed to update kudos count
-      fetchFeed();
-    } catch (error) {
-      console.error('Error toggling kudos:', error);
-    }
-  };
-
-
-
   // Clean up duplicate activities (call this occasionally to prevent duplicates)
   const cleanupDuplicates = async () => {
     try {
@@ -2485,20 +2316,15 @@ const CommunityScreen = () => {
                   </TouchableOpacity>
                 </View>
               )}
-             
-              {kudosGivenThisWeek > 0 && (
-                <Text style={styles.feedSupportSummary}>You have given kudos to {kudosGivenThisWeek} post{kudosGivenThisWeek === 1 ? '' : 's'} this week.</Text>
-              )}
+            
                 <FlatList
                 data={feed}
                 keyExtractor={item => `${item.type}_${item.id}`}
                 renderItem={({ item }) => {
                   const profile = profileMap[item.user_id] || {};
                   const isOwnActivity = item.user_id === userProfile.id;
-                  const kudosCount = item.kudos.length;
-                  const hasKudoed = item.kudos.some(k => k.user_id === userProfile.id);
-                  const commentCount = item.comments.length;
-                
+                  const commentCount = Array.isArray(item.comments) ? item.comments.length : 0;
+
                   if (item.type === 'workout') {
                     const durationSeconds = resolveDurationSeconds(item.duration_seconds, item.duration, 'seconds');
                     const description = [item.description, item.workout_focus, item.notes]
@@ -2522,12 +2348,8 @@ const CommunityScreen = () => {
                         onEdit={isOwnActivity ? () => handleEditWorkout(item.id) : undefined}
                         userId={item.user_id}
                         photoUrl={item.photo_url}
-                        initialKudosCount={kudosCount}
-                        initialHasKudoed={hasKudoed}
                         initialCommentCount={commentCount}
                         borderColor={item.border_color || undefined}
-                        kudosUsers={item.kudos || []}
-                        profileMap={profileMap}
                         // TEMPORARILY DISABLED: Music visibility on feed cards
                         // spotifyTracksPreview={item.spotify_tracks_preview || []}
                         // spotifyTrackCount={item.spotify_track_count || 0}
@@ -2558,12 +2380,8 @@ const CommunityScreen = () => {
                         onEdit={isOwnActivity ? () => handleEditMental(item.id) : undefined}
                         userId={item.user_id}
                         photoUrl={item.photo_url}
-                        initialKudosCount={kudosCount}
-                        initialHasKudoed={hasKudoed}
                         initialCommentCount={commentCount}
                         borderColor={item.border_color || undefined}
-                        kudosUsers={item.kudos || []}
-                        profileMap={profileMap}
                       />
                     );
                   } else if (item.type === 'pr') {
@@ -2633,8 +2451,6 @@ const CommunityScreen = () => {
                         targetId={item.id}
                         isOwner={isOwnActivity}
                         userId={item.user_id}
-                        kudosUsers={item.kudos || []}
-                        profileMap={profileMap}
                       />
                     );
                   } else if (item.type === 'run') {
@@ -2712,9 +2528,7 @@ const CommunityScreen = () => {
                          onEdit={isOwnActivity ? () => handleEditRun(item.id) : undefined}
                          userId={item.user_id}
                          photoUrl={item.photo_url}
-                         initialKudosCount={item.kudos.length}
-                         initialHasKudoed={item.kudos.some(k => k.user_id === userProfile.id)}
-                         initialCommentCount={item.comments.length}
+                         initialCommentCount={commentCount}
                          runData={{
                            path: item.path,
                            distance_meters: item.distance_meters,
@@ -2724,8 +2538,6 @@ const CommunityScreen = () => {
                          }}
                          showMapToOthers={item.show_map_to_others !== false}
                          borderColor={item.border_color || undefined}
-                         kudosUsers={item.kudos || []}
-                         profileMap={profileMap}
                        />
                      );
                   } else if (item.type === 'event') {
@@ -2918,6 +2730,11 @@ const CommunityScreen = () => {
           <>
             <View style={styles.searchSection}>
               <Text style={styles.searchHeader}>Add Friends</Text>
+              {schoolClassmatesOnly ? (
+                <Text style={{ color: T.communityTextMuted, fontSize: 12, marginBottom: 8 }}>
+                  Search classmates by BetterU username — same school only.
+                </Text>
+              ) : null}
               <TextInput
                 style={styles.searchInput}
                 placeholder="Search users..."
@@ -2943,18 +2760,6 @@ const CommunityScreen = () => {
               </>
             ) : (
               <>
-                <TouchableOpacity
-                  style={[styles.sectionCard, { marginBottom: 16, flexDirection: 'row', alignItems: 'center', padding: 14 }]}
-                  onPress={() => router.push('/accountability')}
-                  activeOpacity={0.8}
-                >
-                  <Ionicons name="hand-left-outline" size={24} color="#00ffff" />
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.sectionTitleText}>Accountability partners</Text>
-                    <Text style={{ color: '#888', fontSize: 12, marginTop: 2 }}>Weekly check-ins with friends</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#666" />
-                </TouchableOpacity>
                 {friendRequests.length > 0 && (
                   <View style={styles.sectionCard}>
                     <View style={styles.sectionHeaderRow}>
@@ -3868,12 +3673,6 @@ const styles = StyleSheet.create({
     color: 'rgba(0, 255, 255, 0.9)',
     fontSize: 14,
     marginTop: 12,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  feedSupportSummary: {
-    color: '#94a3b8',
-    fontSize: 13,
     marginBottom: 8,
     textAlign: 'center',
   },

@@ -15,20 +15,11 @@ import getEnvVars from './config';
  * Security: API key never leaves the server
  */
 export const analyzeFoodPhoto = async (imageUri) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:17',message:'analyzeFoodPhoto entry',data:{imageUri:imageUri?.substring(0,100),imageUriType:typeof imageUri,imageUriExists:!!imageUri},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   try {
     console.log('📸 Starting food photo analysis...');
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:22',message:'Before convertImageToBase64',data:{imageUri:imageUri?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     // Step 1: Convert image to base64
     const base64Image = await convertImageToBase64(imageUri);
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:24',message:'After convertImageToBase64',data:{base64Length:base64Image?.length,base64Exists:!!base64Image},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     
     // Step 2: Get current user ID (optional, for tracking)
     let userId = null;
@@ -78,9 +69,6 @@ export const analyzeFoodPhoto = async (imageUri) => {
     };
 
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:71',message:'analyzeFoodPhoto error caught',data:{errorMessage:error?.message,errorCode:error?.code,errorName:error?.name,errorStack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-    // #endregion
     console.error('❌ Error analyzing food photo:', error);
     return {
       success: false,
@@ -107,9 +95,6 @@ export const analyzeFoodPhoto = async (imageUri) => {
  * - The SERVER (Supabase Edge Function) converts it to a Data URL for OpenAI.
  */
 const convertImageToBase64 = async (imageUri) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:121',message:'convertImageToBase64 entry',data:{imageUri:imageUri?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-  // #endregion
   try {
     console.log('🔄 Converting image URI to base64:', imageUri?.substring(0, 50) + '...');
     
@@ -120,22 +105,13 @@ const convertImageToBase64 = async (imageUri) => {
     
     try {
       // Attempt 1: Try reading directly (works for file:// URIs)
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:135',message:'Attempting direct read',data:{imageUri:imageUri?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
       base64 = await FileSystem.readAsStringAsync(imageUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:139',message:'Direct read succeeded',data:{base64Length:base64?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
       console.log('✅ Direct read succeeded');
     } catch (directReadError) {
       // Attempt 2: Direct read failed, copy to temp file first
       // This handles ph:// (iOS) and content:// (Android) URIs
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:143',message:'Direct read failed, trying copy',data:{errorMessage:directReadError?.message,imageUri:imageUri?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
       console.log('📋 Direct read failed, copying to temporary file...');
       
       // Create a temporary file path in the app's cache directory
@@ -146,28 +122,16 @@ const convertImageToBase64 = async (imageUri) => {
       
       // Copy the image from the original location to our temp file
       // FileSystem.copyAsync supports ph:// and content:// URIs as sources
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:153',message:'Before copyAsync',data:{from:imageUri?.substring(0,100),to:tempFileUri?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
       await FileSystem.copyAsync({
         from: imageUri,        // Source: can be ph://, content://, or file://
         to: tempFileUri,       // Destination: always file:// URI
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:159',message:'After copyAsync success',data:{tempFileUri:tempFileUri?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
       console.log('✅ Image copied to temporary file');
       
       // Now read the temp file (guaranteed to be file:// URI)
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:164',message:'Reading temp file',data:{tempFileUri:tempFileUri?.substring(0,100)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
       base64 = await FileSystem.readAsStringAsync(tempFileUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:168',message:'Temp file read succeeded',data:{base64Length:base64?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
     }
     
     // Clean up temporary file if we created one
@@ -185,9 +149,6 @@ const convertImageToBase64 = async (imageUri) => {
     return base64;
     
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'foodPhotoAnalyzer.js:183',message:'convertImageToBase64 error caught',data:{errorMessage:error?.message,errorCode:error?.code,errorName:error?.name,errorStack:error?.stack?.substring(0,300)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'H'})}).catch(()=>{});
-    // #endregion
     console.error('❌ Error converting image to base64:', error);
     console.error('Error details:', {
       message: error.message,

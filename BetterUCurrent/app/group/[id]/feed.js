@@ -111,42 +111,7 @@ export default function GroupFeedScreen() {
       if (runs.error) throw runs.error;
       if (prs.error) throw prs.error;
 
-      // Fetch all kudos in bulk
-      const [workoutKudos, mentalKudos, runKudos] = await Promise.all([
-        supabase
-          .from('workout_kudos')
-          .select('*')
-          .in('workout_id', (workouts.data || []).map(w => w.id)),
-        supabase
-          .from('mental_session_kudos')
-          .select('*')
-          .in('session_id', (mentalSessions.data || []).map(m => m.id)),
-        supabase
-          .from('run_kudos')
-          .select('*')
-          .in('run_id', (runs.data || []).map(r => r.id))
-      ]);
-
-      if (workoutKudos.error) throw workoutKudos.error;
-      if (mentalKudos.error) throw mentalKudos.error;
-      if (runKudos.error) throw runKudos.error;
-
-      // Create kudos maps for quick lookup
-      const kudosMap = {};
-      (workoutKudos.data || []).forEach(k => {
-        if (!kudosMap[k.workout_id]) kudosMap[k.workout_id] = [];
-        kudosMap[k.workout_id].push(k);
-      });
-      (mentalKudos.data || []).forEach(k => {
-        if (!kudosMap[k.session_id]) kudosMap[k.session_id] = [];
-        kudosMap[k.session_id].push(k);
-      });
-      (runKudos.data || []).forEach(k => {
-        if (!kudosMap[k.run_id]) kudosMap[k.run_id] = [];
-        kudosMap[k.run_id].push(k);
-      });
-
-      // Get current user for kudos check and blocking filter
+      // Get current user for blocking filter
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       const currentUserIdForFilter = currentUser?.id || currentUserId;
 
@@ -212,8 +177,7 @@ export default function GroupFeedScreen() {
             { label: 'Duration', value: `${Math.floor(w.duration / 60)} min` },
             { label: 'Exercises', value: w.exercise_count }
           ],
-          kudos: kudosMap[w.id] || [],
-          hasKudoed: (kudosMap[w.id] || []).some(k => k.user_id === currentUser?.id)
+          comments: []
         })),
         ...filteredMentalSessions.map(m => ({
           ...m,
@@ -224,8 +188,7 @@ export default function GroupFeedScreen() {
             { label: 'Duration', value: `${m.duration} min` },
             { label: 'Calmness', value: `${m.calmness_level}/10` }
           ],
-          kudos: kudosMap[m.id] || [],
-          hasKudoed: (kudosMap[m.id] || []).some(k => k.user_id === currentUser?.id)
+          comments: []
         })),
         ...filteredRuns.map(r => ({
           ...r,
@@ -236,8 +199,7 @@ export default function GroupFeedScreen() {
             { label: 'Distance', value: `${r.distance_meters / 1000} km` },
             { label: r.activity_type === 'bike' ? 'Avg Speed' : 'Pace', value: `${r.average_pace_minutes_per_km} min/km` }
           ],
-          kudos: kudosMap[r.id] || [],
-          hasKudoed: (kudosMap[r.id] || []).some(k => k.user_id === currentUser?.id),
+          comments: [],
           runData: {
             path: r.path,
             distance_meters: r.distance_meters,
@@ -256,8 +218,7 @@ export default function GroupFeedScreen() {
             { label: 'Weight', value: `${p.weight_current} kg` },
             { label: 'Target', value: `${p.weight_target} kg` }
           ],
-          kudos: [],
-          hasKudoed: false
+          comments: []
         }))
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -287,9 +248,7 @@ export default function GroupFeedScreen() {
 
   const renderFeedItem = ({ item }) => {
     const profile = item.profiles || {};
-    const kudosCount = item.kudos?.length || 0;
-    const hasKudoed = item.hasKudoed || false;
-    const commentCount = item.comments?.length || 0;
+    const commentCount = Array.isArray(item.comments) ? item.comments.length : 0;
 
     const isOwnActivity = item.user_id === currentUserId || item.profile_id === currentUserId;
     
@@ -324,8 +283,6 @@ export default function GroupFeedScreen() {
         onEdit={getEditHandler()}
         userId={item.user_id || item.profile_id}
         photoUrl={item.photo_url}
-        initialKudosCount={kudosCount}
-        initialHasKudoed={hasKudoed}
         initialCommentCount={commentCount}
         username={profile.username}
         runData={item.runData}

@@ -19,22 +19,20 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { LogoImage } from "../../utils/imageUtils";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import * as WebBrowser from 'expo-web-browser';
 import { makeRedirectUri, useAuthRequest, ResponseType } from 'expo-auth-session';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import Constants from 'expo-constants';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import TurnstileCaptcha from "../../components/TurnstileCaptcha";
+import { consumerDomainFromEmail, isPersonalConsumerEmail } from "../../lib/schoolEmailDomains";
 import { TURNSTILE_CONFIG } from "../../config/turnstile";
-
 // Initialize WebBrowser for auth
 WebBrowser.maybeCompleteAuthSession();
 
 // Get screen dimensions for responsive design
 const { width, height } = Dimensions.get("window");
 const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812);
-const isExpoGo = Constants.appOwnership === 'expo';
 
 const LoginScreen = () => {
   const [email, setEmail] = useState("");
@@ -53,6 +51,17 @@ const LoginScreen = () => {
   const [cooldownTimeLeft, setCooldownTimeLeft] = useState(0);
   
   const router = useRouter();
+  const params = useLocalSearchParams();
+  /** Email/password path: "public" vs partner "school" (same semantics as signup). */
+  const [loginMode, setLoginMode] = useState("public");
+
+  useEffect(() => {
+    const raw = params?.mode;
+    const mode = Array.isArray(raw) ? raw[0] : raw;
+    if (mode === "school" || mode === "partner") {
+      setLoginMode("school");
+    }
+  }, [params?.mode]);
 
   // Set up the auth request
   const [request, response, promptAsync] = useAuthRequest(
@@ -96,6 +105,8 @@ const LoginScreen = () => {
 
       console.log('Supabase sign in successful:', data);
 
+      await syncSchoolDomainOnLogin(data.user.id, data.user.email);
+
       // Check onboarding status - handle case where profile doesn't exist
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -121,7 +132,7 @@ const LoginScreen = () => {
       if (!profile?.onboarding_completed) {
         router.replace('/(auth)/onboarding/welcome');
       } else {
-        router.replace('/(tabs)/home');
+        router.replace('/');
       }
     } catch (error) {
       console.error('Apple Sign In error:', error);
@@ -181,6 +192,11 @@ const LoginScreen = () => {
       // App Store requirement: use name/email from Apple; never ask again.
       await persistAppleNameEmailIfProvided(data.user.id, credential);
 
+      await syncSchoolDomainOnLogin(
+        data.user.id,
+        credential.email || data.user.email
+      );
+
       // Check onboarding status - handle case where profile doesn't exist
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -206,7 +222,7 @@ const LoginScreen = () => {
       if (!profile?.onboarding_completed) {
         router.replace('/(auth)/onboarding/welcome');
       } else {
-        router.replace('/(tabs)/home');
+        router.replace('/');
       }
     } catch (error) {
       if (error.code !== 'ERR_CANCELED') {
@@ -315,6 +331,25 @@ const LoginScreen = () => {
     }
   };
 
+  /**
+   * Keeps profiles.account_type / org_id aligned with partner org domain_lock (matches AuthContext signIn).
+   */
+  const syncSchoolDomainOnLogin = async (userId, emailForDomain) => {
+    const em = (emailForDomain || "").trim();
+    if (!userId || !em) return;
+    try {
+      const { error: domainError } = await supabase.rpc("apply_school_domain_on_profile", {
+        p_user_id: userId,
+        p_email: em,
+      });
+      if (domainError) {
+        console.warn("apply_school_domain_on_profile (login):", domainError.message);
+      }
+    } catch (e) {
+      console.warn("apply_school_domain_on_profile (login):", e?.message ?? e);
+    }
+  };
+
   const checkConnection = async () => {
     try {
       // First check if the URL is reachable
@@ -369,6 +404,24 @@ const LoginScreen = () => {
       return;
     }
 
+    const trimmedEmail = email.trim();
+    if (loginMode === "school") {
+      const domain = consumerDomainFromEmail(trimmedEmail);
+      if (!domain) {
+        setError("Enter a valid school email address.");
+        Alert.alert("School email", "Please use your school-issued email (e.g. you@yourschool.edu).");
+        return;
+      }
+      if (isPersonalConsumerEmail(trimmedEmail)) {
+        setError("School login needs your school email, not a personal inbox.");
+        Alert.alert(
+          "Use your school email",
+          'Partner school sign-in works with your school-issued address. Switch to "Personal account" if you use Gmail or iCloud.'
+        );
+        return;
+      }
+    }
+
     // Check if captcha is required but not completed
     if (captchaRequired && !captchaToken) {
       setError("Please complete the security verification");
@@ -421,8 +474,8 @@ const LoginScreen = () => {
 
         const { data, error } = await Promise.race([
           supabase.auth.signInWithPassword({
-        email,
-        password,
+            email: trimmedEmail,
+            password,
           }),
           new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Login timeout')), 15000)
@@ -465,6 +518,9 @@ const LoginScreen = () => {
           break;
         }
 
+        const loginEmail = (data.user.email ?? trimmedEmail).trim();
+        await syncSchoolDomainOnLogin(data.user.id, loginEmail);
+
         // Check onboarding status - handle case where profile doesn't exist
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
@@ -491,7 +547,7 @@ const LoginScreen = () => {
         if (!profile?.onboarding_completed) {
           router.replace('/(auth)/onboarding/welcome');
         } else {
-        router.replace('/(tabs)/home');
+          router.replace('/');
         }
         return;
 
@@ -540,6 +596,8 @@ const LoginScreen = () => {
         token: credential.identityToken,
       });
       if (error) throw error;
+      await persistAppleNameEmailIfProvided(data.user.id, credential);
+      await syncSchoolDomainOnLogin(data.user.id, credential.email || data.user.email);
       // Check onboarding status - handle case where profile doesn't exist
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
@@ -563,7 +621,7 @@ const LoginScreen = () => {
       if (!profile?.onboarding_completed) {
         router.replace('/(auth)/onboarding/welcome');
       } else {
-        router.replace('/(tabs)/home');
+        router.replace('/');
       }
     } catch (error) {
       if (error.code !== 'ERR_CANCELED') {
@@ -589,7 +647,60 @@ const LoginScreen = () => {
 
           <View style={styles.formContainer}>
             <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>Sign in to continue</Text>
+            <Text style={styles.subtitle}>
+              {loginMode === "school"
+                ? "Partner school: sign in with your official school email."
+                : "Sign in to continue"}
+            </Text>
+
+            <View style={styles.modeRow}>
+              <TouchableOpacity
+                style={[styles.modeChip, loginMode === "public" && styles.modeChipActive]}
+                onPress={() => setLoginMode("public")}
+                activeOpacity={0.85}
+                disabled={isLoading}
+              >
+                <Ionicons
+                  name="person-outline"
+                  size={18}
+                  color={loginMode === "public" ? "#000" : "#ccc"}
+                  style={styles.modeChipIcon}
+                />
+                <Text
+                  style={[styles.modeChipText, loginMode === "public" && styles.modeChipTextActive]}
+                >
+                  Personal account
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modeChip, loginMode === "school" && styles.modeChipActive]}
+                onPress={() => setLoginMode("school")}
+                activeOpacity={0.85}
+                disabled={isLoading}
+              >
+                <Ionicons
+                  name="school-outline"
+                  size={18}
+                  color={loginMode === "school" ? "#000" : "#ccc"}
+                  style={styles.modeChipIcon}
+                />
+                <Text
+                  style={[styles.modeChipText, loginMode === "school" && styles.modeChipTextActive]}
+                >
+                  School sign in
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {loginMode === "school" ? (
+              <View style={styles.schoolHint}>
+                <Ionicons name="information-circle-outline" size={20} color="#00ffff" style={styles.schoolHintIcon} />
+                <Text style={styles.schoolHintText}>
+                  Use the same school-issued email your district uses with BetterU. Personal inboxes
+                  (Gmail, iCloud, etc.) are not accepted in this mode—switch to Personal account instead.
+                </Text>
+              </View>
+            ) : null}
 
             {connectionStatus && !connectionStatus.connected && (
               <View style={styles.connectionError}>
@@ -622,7 +733,7 @@ const LoginScreen = () => {
               <Ionicons name="mail-outline" size={22} color="#888" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Email"
+                placeholder={loginMode === "school" ? "School email (you@yourschool.edu)" : "Email"}
                 placeholderTextColor="#888"
                 value={email}
                 onChangeText={setEmail}
@@ -729,7 +840,9 @@ const LoginScreen = () => {
                   <Text style={styles.loadingText}>Signing in...</Text>
                 </View>
               ) : (
-                <Text style={styles.buttonText}>Sign In</Text>
+                <Text style={styles.buttonText}>
+                  {loginMode === "school" ? "Sign in with school email" : "Sign In"}
+                </Text>
               )}
             </TouchableOpacity>
 
@@ -788,8 +901,60 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: "#B3B3B3",
-    marginBottom: 30,
+    marginBottom: 16,
     textAlign: "center",
+  },
+  modeRow: {
+    flexDirection: "row",
+    marginBottom: 16,
+  },
+  modeChip: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    marginHorizontal: 5,
+  },
+  modeChipActive: {
+    backgroundColor: "#00ffff",
+    borderColor: "#00ffff",
+  },
+  modeChipIcon: {
+    marginRight: 6,
+  },
+  modeChipText: {
+    color: "#ccc",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  modeChipTextActive: {
+    color: "#000",
+  },
+  schoolHint: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "rgba(0,255,255,0.08)",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(0,255,255,0.2)",
+  },
+  schoolHintIcon: {
+    marginRight: 10,
+    marginTop: 2,
+  },
+  schoolHintText: {
+    flex: 1,
+    color: "#b8e8e8",
+    fontSize: 13,
+    lineHeight: 19,
   },
   inputContainer: {
     flexDirection: "row",

@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Vibration, Dimensions, Alert, Linking, Share } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Dimensions, Alert, Linking, Share } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from '../../lib/MapView';
 import { Video } from 'expo-av'; // Import Video component for video playback
 import { supabase } from '../../lib/supabase';
 import { useNotifications } from '../../context/NotificationContext';
-import { createLikeNotification } from '../../utils/notificationHelpers';
 import { useRouter } from 'expo-router';
 import CommentsModal from '../(modals)/CommentsModal';
 import ReportModal from '../../components/ReportModal';
@@ -90,8 +89,6 @@ const FeedCard = ({
   style,
   userId,
   photoUrl,
-  initialKudosCount = 0,
-  initialHasKudoed = false,
   initialCommentCount = 0,
   username,
   spotifyTracksPreview = [],
@@ -104,17 +101,12 @@ const FeedCard = ({
   runData, // { path, distance_meters, duration_seconds, start_time, end_time }
   showMapToOthers = true, // Whether to show the map to others
   borderColor, // Custom border color for workout posts (set with Sparks)
-  kudosUsers = [], // Optional: array of { user_id } to show who gave kudos
-  profileMap = {}, // Optional: map of user id to { avatar_url } for kudos avatars
 }) => {
-  const [kudosCount, setKudosCount] = useState(initialKudosCount);
-  const [hasKudoed, setHasKudoed] = useState(initialHasKudoed);
   const [commentCount, setCommentCount] = useState(initialCommentCount);
   const [loading, setLoading] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [showComments, setShowComments] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
-  const [showKudosFeedback, setShowKudosFeedback] = useState(false);
 
   // Map-related state
   const [mapRegion, setMapRegion] = useState(null);
@@ -221,32 +213,8 @@ const FeedCard = ({
 
   // Update state when props change
   useEffect(() => {
-    setKudosCount(initialKudosCount);
-    setHasKudoed(initialHasKudoed);
     setCommentCount(initialCommentCount);
-  }, [initialKudosCount, initialHasKudoed, initialCommentCount]);
-
-  // Determine table and target column based on type
-  let table = null;
-  let targetColumn = null;
-  let commentTable = null;
-  let commentColumn = null;
-  if (type === 'workout') {
-    table = 'workout_kudos';
-    targetColumn = 'workout_id';
-    commentTable = 'workout_comments';
-    commentColumn = 'workout_id';
-  } else if (type === 'mental') {
-    table = 'mental_session_kudos';
-    targetColumn = 'session_id';
-    commentTable = 'mental_session_comments';
-    commentColumn = 'session_id';
-  } else if (type === 'run') {
-    table = 'run_kudos';
-    targetColumn = 'run_id';
-    commentTable = 'run_comments';
-    commentColumn = 'run_id';
-  }
+  }, [initialCommentCount]);
 
   useEffect(() => {
     const getCurrentUser = async () => {
@@ -270,104 +238,7 @@ const FeedCard = ({
     }
   }, [targetId]);
 
-  const handleKudos = async () => {
-    if (!table || !targetColumn || !currentUserId || !targetId) return;
-    
-    // Optimistic update - update UI immediately
-    const newHasKudoed = !hasKudoed;
-    const newKudosCount = hasKudoed ? kudosCount - 1 : kudosCount + 1;
-    setHasKudoed(newHasKudoed);
-    setKudosCount(newKudosCount);
-    
-    // Very light tap feedback
-    Vibration.vibrate(5);
-
-    try {
-      // Check if kudos already exists
-      const { data: existingKudos, error: fetchError } = await supabase
-        .from(table)
-        .select('*')
-        .eq(targetColumn, targetId)
-        .eq('user_id', currentUserId);
-
-      if (fetchError) {
-        // Revert optimistic update if there's an error
-        setHasKudoed(!newHasKudoed);
-        setKudosCount(!newKudosCount);
-        throw fetchError;
-      }
-
-      if (existingKudos && existingKudos.length > 0) {
-        // If kudos exists, remove it
-        const { error: deleteError } = await supabase
-          .from(table)
-          .delete()
-          .eq(targetColumn, targetId)
-          .eq('user_id', currentUserId);
-
-        if (deleteError) {
-          // Revert optimistic update if there's an error
-          setHasKudoed(!newHasKudoed);
-          setKudosCount(!newKudosCount);
-          throw deleteError;
-        }
-      } else {
-        // If no kudos exists, add it
-        const { error: insertError } = await supabase
-          .from(table)
-          .insert([{
-            [targetColumn]: targetId,
-            user_id: currentUserId
-          }]);
-
-        if (insertError) {
-          // Revert optimistic update if there's an error
-          setHasKudoed(!newHasKudoed);
-          setKudosCount(!newKudosCount);
-          throw insertError;
-        }
-
-        // Create push notification for the post owner (only if not the same user)
-        if (currentUserId !== userId) {
-          try {
-            // Get the current user's name for the notification
-            const { data: currentUserProfile, error: profileError } = await supabase
-              .from('profiles')
-              .select('username, full_name')
-              .eq('id', currentUserId)
-              .single();
-
-            if (!profileError && currentUserProfile) {
-              const kudosGiverName = currentUserProfile.full_name || currentUserProfile.username;
-              
-              console.log('🎯 Sending like notification:', {
-                fromUserId: currentUserId,
-                toUserId: userId,
-                fromUserName: kudosGiverName,
-                itemType: type,
-                itemId: targetId
-              });
-
-              // Send push notification using our new system
-              await createLikeNotification(
-                currentUserId,    // Who liked it
-                userId,          // Who owns the post (receives notification)
-                kudosGiverName,  // Display name
-                type,            // Type of item (run, workout, mental, pr)
-                targetId         // ID of the item
-              );
-            }
-          } catch (notificationError) {
-            console.error('Error creating kudos push notification:', notificationError);
-          }
-        }
-        setShowKudosFeedback(true);
-        setTimeout(() => setShowKudosFeedback(false), 2500);
-      }
-    } catch (error) {
-      console.error('Error toggling kudos:', error);
-    }
-  };
+  const showInteractRow = type === 'workout' || type === 'mental' || type === 'run';
 
   const getIcon = () => {
     switch (type) {
@@ -748,26 +619,9 @@ const FeedCard = ({
         ))}
       </View>
       
-      {table && targetColumn && (
+      {showInteractRow && (
         <View style={styles.actionsContainer}>
-          {/* Top row: Kudos and Report buttons */}
           <View style={styles.topActionsRow}>
-            <TouchableOpacity 
-              style={[styles.kudosButton, hasKudoed && styles.kudosButtonActive]} 
-              onPress={handleKudos}
-              disabled={loading}
-              accessibilityLabel={`Give kudos, ${kudosCount} ${kudosCount === 1 ? 'kudo' : 'kudos'}`}
-              accessibilityRole="button"
-            >
-              <Ionicons 
-                name={hasKudoed ? "heart" : "heart-outline"} 
-                size={32}
-                color={hasKudoed ? "#ff0055" : "#00ffff"} 
-              />
-              <Text style={[styles.kudosCount, hasKudoed && styles.kudosCountActive]}>
-                {kudosCount}
-              </Text>
-            </TouchableOpacity>
             <TouchableOpacity
               onPress={sharePost}
               style={styles.shareButton}
@@ -788,7 +642,6 @@ const FeedCard = ({
               <Ionicons name="chatbubble-ellipses-outline" size={28} color="#00ffff" />
               <Text style={styles.commentsText}>{commentCount > 0 ? `(${commentCount})` : ''}</Text>
             </TouchableOpacity>
-            {/* Report Button */}
             {userId !== currentUserId && (
               <TouchableOpacity
                 style={styles.reportButton}
@@ -799,32 +652,7 @@ const FeedCard = ({
                 <Ionicons name="flag-outline" size={24} color="#dc3545" />
               </TouchableOpacity>
             )}
-
           </View>
-          {kudosCount > 0 && kudosUsers.length > 0 && Object.keys(profileMap).length > 0 && (
-            <View style={styles.kudosAvatarsRow}>
-              {[...new Set(kudosUsers.map((k) => k.user_id))].slice(0, 3).map((uid) => {
-                const profile = profileMap[uid];
-                const avatarUrl = profile?.avatar_url;
-                return (
-                  <View key={uid} style={styles.kudosAvatarWrap}>
-                    {avatarUrl ? (
-                      <Image source={{ uri: avatarUrl }} style={styles.kudosAvatar} />
-                    ) : (
-                      <View style={[styles.kudosAvatar, styles.kudosAvatarPlaceholder]}>
-                        <Text style={styles.kudosAvatarInitial}>
-                          {(profile?.full_name || profile?.username || '?').charAt(0).toUpperCase()}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-          {showKudosFeedback && (
-            <Text style={styles.kudosFeedbackText}>You supported {name}!</Text>
-          )}
         </View>
       )}
 
@@ -1047,62 +875,10 @@ justifyContent: 'center',
   },
   topActionsRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between', // Spread kudos and report across full width
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12, // Space between top and bottom rows
-    width: '100%', // Take up full width
-  },
-  kudosFeedbackText: {
-    color: 'rgba(0, 255, 255, 0.9)',
-    fontSize: 13,
-    marginTop: -4,
-    marginBottom: 4,
-  },
-  kudosAvatarsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 6,
-    marginBottom: 2,
-  },
-  kudosAvatarWrap: {
-    marginRight: -8,
-  },
-  kudosAvatar: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#333',
-  },
-  kudosAvatarPlaceholder: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  kudosAvatarInitial: {
-    color: '#00ffff',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  kudosButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 12, // Reduced from 14 to 12
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,255,255,0.04)',
-    minWidth: 60, // Add minimum width for consistency
-  },
-  kudosButtonActive: {
-    backgroundColor: 'rgba(255,0,85,0.04)',
-  },
-  kudosCount: {
-    color: '#00ffff',
-    fontWeight: 'bold',
-    fontSize: 16,
-    marginLeft: 6,
-  },
-  kudosCountActive: {
-    color: '#00ffff',
+    marginBottom: 12,
+    width: '100%',
   },
   highlightedStat: {
     color: '#00ffff',

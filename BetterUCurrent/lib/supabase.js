@@ -98,11 +98,16 @@ supabase.isUrlReachable = async () => {
       })
     ]);
 
+    // Any real HTTP status (2xx–5xx) means we reached Supabase; `ok` alone is misleading.
+    // Anon REST often returns **401 Unauthorized** — that still proves the gateway is reachable.
+    const authStatusVal = typeof authResponse?.status === 'number' ? authResponse.status : 0;
+    const mainStatusVal = typeof mainResponse?.status === 'number' ? mainResponse.status : 0;
+
     return {
-      mainEndpoint: mainResponse.ok,
-      authEndpoint: authResponse.ok,
-      mainStatus: mainResponse.status,
-      authStatus: authResponse.status,
+      mainEndpoint: mainStatusVal > 0 && mainStatusVal < 600,
+      authEndpoint: authStatusVal >= 200 && authStatusVal < 500,
+      mainStatus: mainStatusVal,
+      authStatus: authStatusVal,
       mainStatusText: mainResponse.statusText,
       authStatusText: authResponse.statusText
     };
@@ -116,79 +121,128 @@ supabase.isUrlReachable = async () => {
   }
 };
 
-// Enhance test connection function
+const DB_PING_TIMEOUT_MS = 20000;
+
+/** Races a promise against a timeout; does not cancel the underlying request. */
+function withTimeout(promise, ms, timeoutMessage = 'Query timeout') {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(timeoutMessage)), ms);
+    }),
+  ]);
+}
+
+/**
+ * Startup / status check: ping REST + auth, then optionally one row from profiles.
+ * Skips the table query when logged out (RLS often blocks anon reads and can look like a "timeout").
+ */
 const testConnection = async () => {
+  const startTime = Date.now();
   try {
-    console.log('Testing Supabase connection...');
-    const startTime = Date.now();
-    
-    // First check endpoint reachability
+    if (__DEV__) {
+      console.log('Testing Supabase connection...');
+    }
+
     const reachability = await supabase.isUrlReachable();
-    console.log('Endpoint reachability check result:', reachability);
-    
+    if (__DEV__) {
+      console.log('Endpoint reachability check result:', reachability);
+    }
+
     if (!reachability.mainEndpoint || !reachability.authEndpoint) {
-      console.error('Endpoint reachability check failed:', reachability);
+      const msg = !reachability.authEndpoint
+        ? `Authentication service check failed: ${reachability.authStatus} ${reachability.authStatusText}`
+        : `Main service check failed: ${reachability.mainStatus} ${reachability.mainStatusText}`;
+      console.warn('Supabase reachability check failed:', reachability);
+      return { error: msg, details: reachability };
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) {
+      const responseTime = Date.now() - startTime;
+      if (__DEV__) {
+        console.log(`Supabase reachable (${responseTime}ms); skipping profiles ping (not signed in).`);
+      }
       return {
-        error: !reachability.authEndpoint 
-          ? `Authentication service check failed: ${reachability.authStatus} ${reachability.authStatusText}`
-          : `Main service check failed: ${reachability.mainStatus} ${reachability.mainStatusText}`,
-        details: reachability
+        success: true,
+        responseTime,
+        reachabilityOnly: true,
+        endpoints: reachability,
       };
     }
-    
-    // If endpoints are reachable, try the actual query
-    const { data, error } = await Promise.race([
-      supabase.from('profiles').select('count').limit(1),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Query timeout')), 10000)
-      )
-    ]);
-    
+
+    // Light query: `count` is not a column — use `id` and only the signed-in user's row.
+    const queryPromise = supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', session.user.id)
+      .maybeSingle();
+
+    const { data, error } = await withTimeout(queryPromise, DB_PING_TIMEOUT_MS);
+
     const responseTime = Date.now() - startTime;
-    console.log(`Connection response time: ${responseTime}ms`);
-    
+
     if (error) {
-      if (error.message?.includes('network') || error.message?.includes('Failed to fetch')) {
-        console.error('Network error:', error);
-        return { 
+      const isNetwork =
+        error.message?.includes('network') || error.message?.includes('Failed to fetch');
+      if (isNetwork) {
+        console.warn('Supabase network error during profiles ping:', error.message);
+        return {
           error: 'Network connectivity issues detected. Please check your internet connection.',
-          details: error.message
+          details: error.message,
         };
       }
-      if (error.message?.includes('timeout')) {
-        console.error('Query timeout:', error);
-        return { 
-          error: 'Server response timeout. Please try again.',
-          details: error.message
-        };
-      }
-      console.error('Query error:', error);
-      return { 
-        error: error.message,
-        details: error
+      // API is up; row missing or RLS message is not a full outage.
+      console.warn('Supabase profiles ping:', error.message);
+      return {
+        success: true,
+        responseTime,
+        reachabilityOnly: true,
+        endpoints: reachability,
+        warning: error.message,
       };
     }
-    
-    console.log('Connection test successful');
-    return { 
-      success: true, 
+
+    if (__DEV__) {
+      console.log(`Supabase connection OK (${responseTime}ms)`, data?.id ? 'profile found' : 'no profile row yet');
+    }
+    return {
+      success: true,
       responseTime,
       data,
-      endpoints: reachability
+      endpoints: reachability,
     };
   } catch (error) {
-    console.error('Connection test error:', error);
-    return { 
-      error: error.message === 'Query timeout' 
-        ? 'Server response timeout. Please try again.'
-        : 'Unable to connect to Supabase',
-      details: error.message
+    const responseTime = Date.now() - startTime;
+    const isTimeout = error?.message === 'Query timeout';
+
+    // Reachability already passed — slow DB ping should not spam ERROR on every launch.
+    if (isTimeout) {
+      console.warn(
+        `Supabase profiles ping timed out after ${DB_PING_TIMEOUT_MS}ms (API was reachable). App can still work; check Supabase dashboard if data never loads.`
+      );
+      return {
+        success: true,
+        responseTime,
+        reachabilityOnly: true,
+        warning: 'Profiles query timed out',
+      };
+    }
+
+    console.warn('Supabase connection test:', error?.message || error);
+    return {
+      error: error?.message || 'Unable to connect to Supabase',
+      details: error?.message,
     };
   }
 };
 
-// Run initial test
-testConnection();
+// Startup smoke test — never throws; avoids red ERROR when only the optional ping is slow.
+testConnection().catch((e) => {
+  if (__DEV__) {
+    console.warn('Supabase startup check failed:', e?.message);
+  }
+});
 
 // Attach checkSupabaseStatus to the supabase client instance
 supabase.checkSupabaseStatus = async () => {

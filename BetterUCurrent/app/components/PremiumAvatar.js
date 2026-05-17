@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Image, StyleSheet, Animated, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { isUserPremium } from '../utils/premiumStatus';
+import { isUserPremium } from '../../utils/premiumStatus';
 
 export function PremiumAvatar({ userId, size = 40, style, isPremium: propIsPremium, username, fullName, ...props }) {
   const [isPremium, setIsPremium] = React.useState(propIsPremium || false);

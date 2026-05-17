@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -20,11 +20,13 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../../lib/supabase";
 import { LogoImage } from "../../utils/imageUtils";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useAuth } from "../../context/AuthContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import TurnstileCaptcha from "../../components/TurnstileCaptcha";
 import { TURNSTILE_CONFIG } from "../../config/turnstile";
 import * as AppleAuthentication from 'expo-apple-authentication';
+import { consumerDomainFromEmail, isPersonalConsumerEmail } from "../../lib/schoolEmailDomains";
 
 const { width, height } = Dimensions.get("window");
 const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812);
@@ -43,7 +45,20 @@ const SignupScreen = () => {
   const [captchaToken, setCaptchaToken] = useState("");
   const [captchaError, setCaptchaError] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  /** "public" = standard B2C; "school" = partner school (must use school email for domain match). */
+  const [signupMode, setSignupMode] = useState("public");
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const { signUp: authSignUp } = useAuth();
+
+  // Deep link / welcome CTA: /signup?mode=school
+  useEffect(() => {
+    const raw = params?.mode;
+    const mode = Array.isArray(raw) ? raw[0] : raw;
+    if (mode === "school" || mode === "partner") {
+      setSignupMode("school");
+    }
+  }, [params?.mode]);
 
   const handleSignup = async () => {
     if (fullName === "" || email === "" || password === "" || confirmPassword === "") {
@@ -72,43 +87,62 @@ const SignupScreen = () => {
       return;
     }
 
+    const domain = consumerDomainFromEmail(email);
+    if (signupMode === "school") {
+      if (!domain) {
+        setError("Enter a valid school email address.");
+        Alert.alert("School email", "Please use your school-issued email (e.g. you@yourschool.edu).");
+        return;
+      }
+      if (isPersonalConsumerEmail(email)) {
+        setError("School signup needs your school email, not a personal inbox.");
+        Alert.alert(
+          "Use your school email",
+          "Partner school sign-up only works with an email your school gave you (for example @yourschool.edu). Pick “Personal account” if you’re signing up with Gmail or iCloud."
+        );
+        return;
+      }
+    }
+
     setIsLoading(true);
     setError("");
 
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password
-      });
+      // useAuth.signUp creates onboarding_data + apply_school_domain_on_profile (student vs public).
+      const { error: signErr, user: createdUser } = await authSignUp(
+        email.trim(),
+        password,
+        fullName.trim()
+      );
 
-      if (error) {
-        console.error("Auth error:", error);
+      if (signErr) {
+        console.error("Auth error:", signErr);
+        const msg = signErr.message ?? String(signErr);
         const isEmailDeliveryError =
-          error.message?.toLowerCase().includes("confirmation email") ||
-          error.message?.toLowerCase().includes("sending confirmation");
+          msg.toLowerCase().includes("confirmation email") ||
+          msg.toLowerCase().includes("sending confirmation");
         const friendlyMessage = isEmailDeliveryError
           ? "We couldn't send the verification email right now. Please try again in a few minutes, or sign up with Apple above."
-          : error.message;
+          : msg;
         setError(friendlyMessage);
         Alert.alert(
           "Sign up issue",
           isEmailDeliveryError
             ? "We couldn't send the verification email right now. Please try again in a few minutes, or use \"Sign up with Apple\" at the top of this screen."
-            : error.message
+            : msg
         );
         setIsLoading(false);
         return;
       }
 
-      if (!data?.user) {
+      if (!createdUser) {
         setError("Failed to create user");
         Alert.alert("Error", "Failed to create user. Please try again.");
         setIsLoading(false);
         return;
       }
 
-      // Show success modal instead of alert
-      setUserEmail(email);
+      setUserEmail(email.trim());
       setShowSuccessModal(true);
     } catch (error) {
       console.error("Unexpected error:", error);
@@ -227,7 +261,61 @@ const SignupScreen = () => {
 
           <View style={styles.formContainer}>
             <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>Sign up to get started</Text>
+            <Text style={styles.subtitle}>
+              {signupMode === "school"
+                ? "Use your school email to sign up."
+                : "Sign up to get started with BetterU"}
+            </Text>
+
+            {/* Choose personal vs school-partner signup (two-door B2B2C). */}
+            <View style={styles.modeRow}>
+              <TouchableOpacity
+                style={[styles.modeChip, signupMode === "public" && styles.modeChipActive]}
+                onPress={() => setSignupMode("public")}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name="person-outline"
+                  size={18}
+                  color={signupMode === "public" ? "#000" : "#ccc"}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[styles.modeChipText, signupMode === "public" && styles.modeChipTextActive]}
+                >
+                  Personal account
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modeChip, signupMode === "school" && styles.modeChipActive]}
+                onPress={() => setSignupMode("school")}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name="school-outline"
+                  size={18}
+                  color={signupMode === "school" ? "#000" : "#ccc"}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[styles.modeChipText, signupMode === "school" && styles.modeChipTextActive]}
+                >
+                  School sign in
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {signupMode === "school" ? (
+              <View style={styles.schoolHint}>
+                <Ionicons name="information-circle-outline" size={20} color="#00ffff" style={styles.schoolHintIcon} />
+                <Text style={styles.schoolHintText}>
+                  If your school or district has partnered with BetterU, sign up with the email they
+                  gave you (same domain as your classmates). You’ll get the school wellness workspace
+                  after you verify email. If your domain isn’t set up yet, you’ll still have a normal
+                  account until your school joins.
+                </Text>
+              </View>
+            ) : null}
 
             {/* Sign up with Apple first (iOS) */}
             {Platform.OS === 'ios' && (
@@ -263,7 +351,7 @@ const SignupScreen = () => {
               <Ionicons name="mail-outline" size={22} color="#888" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Email"
+                placeholder={signupMode === "school" ? "School email (you@yourschool.edu)" : "Email"}
                 placeholderTextColor="#888"
                 value={email}
                 onChangeText={setEmail}
@@ -401,7 +489,11 @@ const SignupScreen = () => {
                   styles.buttonText,
                   !agreedToTerms && styles.buttonTextDisabled
                 ]}>
-                  {!agreedToTerms ? 'Agree to Terms to Sign Up' : 'Sign Up'}
+                  {!agreedToTerms
+                    ? "Agree to Terms to Sign Up"
+                    : signupMode === "school"
+                      ? "Sign up with school email"
+                      : "Sign Up"}
                 </Text>
               )}
             </TouchableOpacity>
@@ -558,8 +650,57 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 16,
     color: "#B3B3B3",
-    marginBottom: 30,
+    marginBottom: 16,
     textAlign: "center",
+  },
+  modeRow: {
+    flexDirection: "row",
+    marginBottom: 16,
+  },
+  modeChip: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    marginHorizontal: 5,
+  },
+  modeChipActive: {
+    backgroundColor: "#00ffff",
+    borderColor: "#00ffff",
+  },
+  modeChipText: {
+    color: "#ccc",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  modeChipTextActive: {
+    color: "#000",
+  },
+  schoolHint: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "rgba(0,255,255,0.08)",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "rgba(0,255,255,0.2)",
+  },
+  schoolHintIcon: {
+    marginRight: 10,
+    marginTop: 2,
+  },
+  schoolHintText: {
+    flex: 1,
+    color: "#b8e8e8",
+    fontSize: 13,
+    lineHeight: 19,
   },
   inputContainer: {
     flexDirection: "row",

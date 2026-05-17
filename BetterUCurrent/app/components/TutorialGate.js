@@ -20,22 +20,38 @@ export default function TutorialGate({ children }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       try {
         const [intro, tutorial] = await Promise.all([
           AsyncStorage.getItem(INTRO_SEEN_KEY),
           AsyncStorage.getItem(TUTORIAL_SEEN_KEY)
         ]);
-        setIntroSeen(intro === 'true');
-        setTutorialSeen(tutorial === 'true');
+        if (!cancelled) {
+          setIntroSeen(intro === 'true');
+          setTutorialSeen(tutorial === 'true');
+          setIsLoading(false);
+        }
       } catch (e) {
-        setIntroSeen(false);
-        setTutorialSeen(false);
-      } finally {
-        setIsLoading(false);
+        if (!cancelled) {
+          setIntroSeen(false);
+          setTutorialSeen(false);
+          setIsLoading(false);
+        }
       }
     }
+    const failsafe = setTimeout(() => {
+      if (!cancelled) {
+        setIntroSeen((v) => v ?? false);
+        setTutorialSeen((v) => v ?? false);
+        setIsLoading(false);
+      }
+    }, 2000);
     load();
+    return () => {
+      cancelled = true;
+      clearTimeout(failsafe);
+    };
   }, []);
 
   const handleIntroComplete = async () => {

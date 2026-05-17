@@ -926,8 +926,7 @@ const spotifyTopTracksHeading = useMemo(() => {
               isOwner={currentUserId === profile.id}
               onEdit={null}
               userId={profile.id}
-              initialKudosCount={0}
-              initialHasKudoed={false}
+
               initialCommentCount={0}
             />
           ))}
@@ -975,8 +974,7 @@ const spotifyTopTracksHeading = useMemo(() => {
                 onEdit={() => handleEditMental(item.id)}
                 userId={profile.id}
                 photoUrl={item.photo_url}
-                initialKudosCount={item.kudos?.length || 0}
-                initialHasKudoed={item.kudos?.some(k => k.user_id === currentUserId) || false}
+                
                 initialCommentCount={item.comments?.length || 0}
               />
             );
@@ -1019,8 +1017,7 @@ const spotifyTopTracksHeading = useMemo(() => {
                 onEdit={() => handleEditWorkout(item.id)}
                 userId={profile.id}
                 photoUrl={item.photo_url}
-                initialKudosCount={item.kudos?.length || 0}
-                initialHasKudoed={item.kudos?.some(k => k.user_id === currentUserId) || false}
+                
                 initialCommentCount={item.comments?.length || 0}
               />
             );
@@ -1073,8 +1070,7 @@ const spotifyTopTracksHeading = useMemo(() => {
                 onEdit={() => handleEditRun(item.id)}
                 userId={profile.id}
                 photoUrl={item.photo_url}
-                initialKudosCount={item.kudos?.length || 0}
-                initialHasKudoed={item.kudos?.some(k => k.user_id === currentUserId) || false}
+                
                 initialCommentCount={item.comments?.length || 0}
                 runData={{
                   path: item.path,
@@ -1449,8 +1445,7 @@ const spotifyTopTracksHeading = useMemo(() => {
                   isOwner={currentUserId === profile.id}
                   onEdit={null}
                   userId={profile.id}
-                  initialKudosCount={0}
-                  initialHasKudoed={false}
+
                   initialCommentCount={0}
                 />
               ))}
@@ -1499,8 +1494,7 @@ const spotifyTopTracksHeading = useMemo(() => {
                     onEdit={() => handleEditWorkout(item.id)}
                     userId={profile.id}
                     photoUrl={item.photo_url}
-                    initialKudosCount={item.kudos?.length || 0}
-                    initialHasKudoed={item.kudos?.some(k => k.user_id === currentUserId) || false}
+
                     initialCommentCount={item.comments?.length || 0}
                   />
                 );
@@ -1554,8 +1548,7 @@ const spotifyTopTracksHeading = useMemo(() => {
                     onEdit={() => handleEditMental(item.id)}
                     userId={profile.id}
                     photoUrl={item.photo_url}
-                    initialKudosCount={item.kudos?.length || 0}
-                    initialHasKudoed={item.kudos?.some(k => k.user_id === currentUserId) || false}
+
                     initialCommentCount={item.comments?.length || 0}
                   />
                 );
@@ -1614,8 +1607,7 @@ const spotifyTopTracksHeading = useMemo(() => {
                     onEdit={() => handleEditRun(item.id)}
                     userId={profile.id}
                     photoUrl={item.photo_url}
-                    initialKudosCount={item.kudos?.length || 0}
-                    initialHasKudoed={item.kudos?.some(k => k.user_id === currentUserId) || false}
+
                     initialCommentCount={item.comments?.length || 0}
                     runData={{
                       path: item.path,

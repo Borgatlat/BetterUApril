@@ -1,7 +1,7 @@
 {
   "name": "betteru_testflight_v7",
   "main": "index.js",
-  "version": "1.1.0",
+  "version": "1.1.6",
   "scripts": {
     "start": "expo start --offline",
     "start:online": "expo start",
@@ -12,6 +12,10 @@
     "lint": "expo lint",
     "eas-build-on-success": "echo 'Build succeeded!'",
     "eas-build-on-error": "echo 'Build failed!'",
+    "verify:eas-production": "node scripts/verify-eas-production.cjs",
+    "eas:version:set": "npx eas-cli@latest build:version:set",
+    "eas:version:sync": "npx eas-cli@latest build:version:sync",
+    "build:ios:production": "node scripts/verify-eas-production.cjs && npx eas-cli@latest build --platform ios --profile production",
     "submit:ios": "npx eas-cli@latest submit --platform ios --profile production --latest --verbose --verbose-fastlane --non-interactive",
     "submit:ios:schedule": "npx eas-cli@latest submit --platform ios --profile production --latest --non-interactive --no-wait",
     "prebuild": "npx expo prebuild",

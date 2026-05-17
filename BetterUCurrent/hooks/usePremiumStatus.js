@@ -1,4 +1,4 @@
-import { useUser } from '../../context/UserContext';
+import { useUser } from '../context/UserContext';
 
 /**
  * Single source of truth for premium: reads from UserContext (same as useUser().isPremium).

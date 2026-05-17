@@ -875,19 +875,10 @@ export const TrackingProvider = ({ children }) => {
   // This function allows both positive (add) and negative (remove) amounts
   // Negative amounts are used to subtract calories when user removes food entries
   const addCalories = async (amount) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TrackingContext.js:842',message:'addCalories called',data:{amount,type:typeof amount,currentConsumed:calories.consumed},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A,B'})}).catch(()=>{});
-    // #endregion
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TrackingContext.js:847',message:'Validation check before',data:{amount,isZero:amount===0,isNegative:amount<0,isNull:amount==null,willFail:amount==null||amount===0},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       // Allow negative amounts (for removal), but reject null/undefined/0
       // amount === 0 is not meaningful - you can't add or remove zero calories
       if (amount == null || amount === 0) {
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TrackingContext.js:850',message:'Validation failed - invalid amount',data:{amount,reason:amount==null?'null/undefined':'zero'},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'A'})}).catch(()=>{});
-        // #endregion
         console.error('[addCalories] Invalid amount:', amount);
         return false;
       }
@@ -895,9 +886,6 @@ export const TrackingProvider = ({ children }) => {
       // Calculate new consumed value, ensuring it doesn't go below 0
       // Math.max ensures consumed never becomes negative (e.g., if removing more than exists)
       const newConsumed = Math.max(0, calories.consumed + amount);
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'TrackingContext.js:853',message:'Calculated new consumed',data:{previousConsumed:calories.consumed,amount,newConsumed,wasClamped:newConsumed!==calories.consumed+amount},timestamp:Date.now(),sessionId:'debug-session',runId:'post-fix',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       const newCalories = { ...calories, consumed: newConsumed };
       
       // Update local state

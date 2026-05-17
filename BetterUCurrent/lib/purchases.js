@@ -30,6 +30,44 @@ let initPromise = null;
 
 export const isRevenueCatReady = () => isInitialized;
 
+/** True when RevenueCat reports an active entitlement or subscription. */
+export function customerInfoHasActiveSubscription(customerInfo) {
+  if (!customerInfo) return false;
+  const ent = customerInfo.entitlements?.active || {};
+  const subs = customerInfo.activeSubscriptions || [];
+  const byProd = customerInfo.subscriptionsByProductIdentifier || {};
+  const anyActiveProduct = Object.values(byProd).some((s) => s && s.isActive);
+  return Object.keys(ent).length > 0 || subs.length > 0 || anyActiveProduct;
+}
+
+/**
+ * After StoreKit checkout, RevenueCat can lag a moment before entitlements appear.
+ * Polls getCustomerInfo so TestFlight users are not told to use a "development build".
+ */
+export async function resolveCustomerInfoAfterPurchase(initialCustomerInfo, {
+  maxAttempts = 5,
+  delayMs = 800,
+} = {}) {
+  if (customerInfoHasActiveSubscription(initialCustomerInfo)) {
+    return initialCustomerInfo;
+  }
+  if (Platform.OS !== 'ios' || !isInitialized) {
+    return initialCustomerInfo;
+  }
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await new Promise((r) => setTimeout(r, delayMs));
+    try {
+      const info = await Purchases.getCustomerInfo();
+      if (customerInfoHasActiveSubscription(info)) {
+        return info;
+      }
+    } catch (e) {
+      console.warn('resolveCustomerInfoAfterPurchase poll failed:', e?.message);
+    }
+  }
+  return initialCustomerInfo;
+}
+
 export const initializePurchases = async (userId) => {
   if (isInitialized) {
     console.log('RevenueCat already initialized, skipping...');

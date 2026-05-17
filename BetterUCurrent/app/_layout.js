@@ -7,7 +7,7 @@ import { UnitsProvider } from '../context/UnitsContext';
 import { TrackingProvider } from '../context/TrackingContext';
 import { NotificationProvider } from '../context/NotificationContext';
 import { LanguageProvider } from '../context/LanguageContext';
-import { View, ActivityIndicator, StyleSheet, Text, Alert } from 'react-native';
+import { StyleSheet, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { preloadImages } from '../utils/imageUtils';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -15,10 +15,8 @@ import { SettingsProvider } from '../context/SettingsContext';
 import { SharedMessageLimitProvider } from '../context/SharedMessageLimitContext';
 import { AIConsentProvider } from '../context/AIConsentContext';
 import LoadingScreen from '../screens/loadingScreen';
-import WelcomeScreen from './components/WelcomeScreen';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { initializePurchases } from '../lib/purchases';
 import { initializeAdMob } from '../lib/adMob';
+import { runStartupStep } from '../lib/startupUtils';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -37,10 +35,8 @@ const MainContent = () => {
 
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
-  const [loadingStep, setLoadingStep] = useState('Initializing...');
+  const [loadingStep, setLoadingStep] = useState('Starting...');
   const [loadingProgress, setLoadingProgress] = useState(0);
-  const [error, setError] = useState(null);
-  const [contextsReady, setContextsReady] = useState(false);
   const router = useRouter();
 
   // Handle deep links for OAuth callbacks
@@ -158,101 +154,64 @@ export default function RootLayout() {
 
   useEffect(() => {
     let isMounted = true;
-    let timeoutId;
 
     const initializeApp = async () => {
-      try {
-        if (!isMounted) return;
-        setLoadingStep('Starting up...');
-        setLoadingProgress(0.2);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        if (!isMounted) return;
-        setLoadingStep('Loading assets...');
-        setLoadingProgress(0.4);
-        await Promise.race([
-          preloadImages(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Image loading timeout')), 10000))
-        ]);
-        
-        if (!isMounted) return;
-        setLoadingStep('Preparing data...');
-        setLoadingProgress(0.7);
-        // Initialize ad SDK once at startup; non-premium banner components use it later.
-        await initializeAdMob();
-        
-        const maxWaitTime = 5000;
-        const startTime = Date.now();
-        
-        await new Promise((resolve) => {
-          const checkContexts = () => {
-            if (contextsReady || Date.now() - startTime > maxWaitTime) {
-              resolve();
-            } else {
-              timeoutId = setTimeout(checkContexts, 500);
-            }
-          };
-          checkContexts();
-        });
-        
-        if (isMounted) {
-          setLoadingStep('Ready!');
-          setLoadingProgress(1);
-          setIsReady(true);
-          setError(null);
-        }
-      } catch (error) {
-        console.error('Error initializing app:', error);
-        if (isMounted) {
-          setError(error.message);
-          setIsReady(true);
-        }
-      }
+      setLoadingStep('Loading...');
+      setLoadingProgress(0.35);
+
+      await Promise.all([
+        runStartupStep(() => preloadImages(), 4000, 'preloadImages'),
+        runStartupStep(() => initializeAdMob(), 3500, 'initializeAdMob'),
+      ]);
+
+      if (!isMounted) return;
+      setLoadingStep('Ready');
+      setLoadingProgress(1);
+      setIsReady(true);
     };
 
-    initializeApp();
+    const maxBoot = setTimeout(() => {
+      if (isMounted) setIsReady(true);
+    }, 4500);
+
+    initializeApp().catch(() => {
+      if (isMounted) setIsReady(true);
+    });
 
     return () => {
       isMounted = false;
-      if (timeoutId) clearTimeout(timeoutId);
+      clearTimeout(maxBoot);
     };
-  }, [contextsReady]);
+  }, []);
 
-  if (!isReady) {
-    return (
-      <SafeAreaProvider>
-        <LoadingScreen 
-          progress={loadingProgress}
-          loadingStep={loadingStep}
-        />
-      </SafeAreaProvider>
-    );
-  }
-
+  // AuthProvider must wrap EVERY branch. Expo Router can still evaluate `app/index.js` during
+  // the loading phase; routes that call useAuth/useAuthSession must see a provider here.
   return (
     <SafeAreaProvider>
       <LanguageProvider>
         <AuthProvider>
-          <UserProvider onReady={async (user) => {
-            if (user?.id) {
-              await initializePurchases(user.id);
-            }
-            setContextsReady(true);
-          }}>
-            <SettingsProvider>
-              <UnitsProvider>
-                <NotificationProvider>
-                  <SharedMessageLimitProvider>
-                    <TrackingProvider>
-                      <AIConsentProvider>
-                        <MainContent />
-                      </AIConsentProvider>
-                    </TrackingProvider>
-                  </SharedMessageLimitProvider>
-                </NotificationProvider>
-              </UnitsProvider>
-            </SettingsProvider>
-          </UserProvider>
+          {!isReady ? (
+            <LoadingScreen
+              progress={loadingProgress}
+              loadingStep={loadingStep}
+            />
+          ) : (
+            <UserProvider>
+              <SettingsProvider>
+                <UnitsProvider>
+                  <NotificationProvider>
+                    <SharedMessageLimitProvider>
+                      <TrackingProvider>
+                        <AIConsentProvider>
+                          <MainContent />
+                        </AIConsentProvider>
+                      </TrackingProvider>
+                    </SharedMessageLimitProvider>
+                  </NotificationProvider>
+                </UnitsProvider>
+              </SettingsProvider>
+            </UserProvider>
+          )}
         </AuthProvider>
       </LanguageProvider>
     </SafeAreaProvider>

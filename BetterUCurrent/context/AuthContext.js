@@ -2,14 +2,38 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react"
 import { supabase } from "../lib/supabase"
+import { normalizeSchoolProfile } from "../lib/schoolProfileNormalize"
 import {
   SIGNUP_EMAIL_IN_USE_MESSAGE,
   isDuplicateSignupAuthError,
   isDuplicateSignupUserObfuscated,
 } from "../utils/signupEmailConflict"
 import AsyncStorage from "@react-native-async-storage/async-storage"
+import { runStartupStep } from "../lib/startupUtils"
 
 const AuthContext = createContext()
+
+/** True when AsyncStorage holds a stale refresh token (Supabase cannot renew the session). */
+function isInvalidRefreshTokenError(err) {
+  const m = String(err?.message ?? "").toLowerCase()
+  return (
+    m.includes("refresh token") ||
+    m.includes("invalid refresh") ||
+    m.includes("refresh_token")
+  )
+}
+
+/**
+ * signOut({ scope: "local" }) removes tokens from device storage only — no network call.
+ * That avoids repeated AuthApiError when the stored refresh token was revoked or wiped server-side.
+ */
+async function clearLocalSupabaseSession() {
+  try {
+    await supabase.auth.signOut({ scope: "local" })
+  } catch (e) {
+    console.warn("[AuthContext] clearLocalSupabaseSession:", e?.message)
+  }
+}
 
 // Helper function to save user's timezone to their profile
 // This is important for streak calculations to use the correct local day
@@ -102,7 +126,7 @@ export const AuthProvider = ({ children }) => {
         throw error;
       }
 
-      return profile;
+      return normalizeSchoolProfile(profile);
     } catch (error) {
       console.error('[AuthContext] Error fetching profile:', error);
       return null;
@@ -145,37 +169,60 @@ export const AuthProvider = ({ children }) => {
     let mounted = true;
     let subscription = null;
 
+    /** Ban + profile run after UI is unblocked so TestFlight never spins on slow Supabase. */
+    const loadUserMetaInBackground = async (userId) => {
+      const banStatus = await runStartupStep(
+        () => checkBanStatus(userId),
+        5000,
+        "banStatus",
+        { isBanned: false }
+      );
+      if (!mounted) return;
+      setBanStatus(banStatus);
+      if (banStatus?.isBanned) {
+        setProfile(null);
+        return;
+      }
+      const profile = await runStartupStep(
+        () => fetchProfile(userId),
+        6000,
+        "profile",
+        null
+      );
+      if (!mounted) return;
+      setProfile(normalizeSchoolProfile(profile));
+      saveUserTimezone(userId);
+    };
+
     const initializeAuth = async () => {
       try {
-        // Get initial session
-            const { data: { session } } = await supabase.auth.getSession();
-            if (mounted) {
-              setSession(session);
-              setUser(session?.user ?? null);
-              if (session?.user?.id) {
-                // Check ban status first
-                const banStatus = await checkBanStatus(session.user.id);
-                if (mounted) {
-                  setBanStatus(banStatus);
-                  console.log('Ban status checked:', banStatus);
-                  // Only fetch profile if not banned
-                  if (!banStatus.isBanned) {
-                    const profile = await fetchProfile(session.user.id);
-                    if (mounted) {
-                      setProfile(profile);
-                      // Save user's timezone for streak calculations
-                      // This ensures triggers use the correct local day
-                      saveUserTimezone(session.user.id);
-                    }
-                  } else {
-                    console.log('User is banned, not fetching profile');
-                  }
-                }
-              }
-              setIsLoading(false);
-            }
+        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession()
+
+        let session = initialSession
+        if (sessionError) {
+          console.warn("[AuthContext] getSession:", sessionError.message)
+          if (isInvalidRefreshTokenError(sessionError)) {
+            await clearLocalSupabaseSession()
+            session = null
+          }
+        }
+
+        if (!mounted) return;
+        setSession(session);
+        setUser(session?.user ?? null);
+        setIsLoading(false);
+
+        if (session?.user?.id) {
+          loadUserMetaInBackground(session.user.id);
+        } else {
+          setBanStatus(null);
+          setProfile(null);
+        }
       } catch (error) {
         console.error("AuthContext: Error in initializeAuth:", error);
+        if (isInvalidRefreshTokenError(error)) {
+          await clearLocalSupabaseSession()
+        }
         if (mounted) {
           setSession(null);
           setUser(null);
@@ -187,44 +234,22 @@ export const AuthProvider = ({ children }) => {
 
     initializeAuth();
 
-    // Listen for auth changes
+    const authLoadingFailsafe = setTimeout(() => {
+      if (mounted) setIsLoading(false);
+    }, 8000);
+
     const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (!mounted) return;
-      
-      try {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user?.id) {
-          // Check ban status on auth state change
-          const banStatus = await checkBanStatus(session.user.id);
-          if (mounted) {
-            setBanStatus(banStatus);
-            console.log('Ban status checked on auth change:', banStatus);
-            
-            // Only fetch profile if not banned
-            if (!banStatus.isBanned) {
-              const profile = await fetchProfile(session.user.id);
-              if (mounted) {
-                setProfile(profile);
-                // Save timezone on auth state change (e.g., sign in)
-                saveUserTimezone(session.user.id);
-              }
-            } else {
-              console.log('User is banned, not fetching profile on auth change');
-              setProfile(null);
-            }
-          }
-        } else {
-          setBanStatus(null);
-          setProfile(null);
-        }
-      } catch (error) {
-        console.error("AuthContext: Error handling auth state change:", error);
-      } finally {
-        if (mounted) {
-          setIsLoading(false);
-        }
+
+      setSession(session);
+      setUser(session?.user ?? null);
+      setIsLoading(false);
+
+      if (session?.user?.id) {
+        loadUserMetaInBackground(session.user.id);
+      } else {
+        setBanStatus(null);
+        setProfile(null);
       }
     });
 
@@ -232,8 +257,9 @@ export const AuthProvider = ({ children }) => {
 
     return () => {
       mounted = false;
+      clearTimeout(authLoadingFailsafe);
       if (subscription) {
-      subscription.unsubscribe();
+        subscription.unsubscribe();
       }
     };
   }, []); // Remove fetchProfile from dependencies
@@ -284,10 +310,18 @@ export const AuthProvider = ({ children }) => {
           return { error: onboardingError, user: data.user };
         }
 
+        const { error: domainError } = await supabase.rpc("apply_school_domain_on_profile", {
+          p_user_id: data.user.id,
+          p_email: email,
+        });
+        if (domainError) {
+          console.error("apply_school_domain_on_profile:", domainError);
+        }
+
         console.log("Onboarding data created successfully");
 
-        // Fetch the profile to update the profile state
-        fetchProfile(data.user.id);
+        const nextProfile = await fetchProfile(data.user.id);
+        setProfile(normalizeSchoolProfile(nextProfile));
 
         return { error: null, user: data.user };
       }
@@ -344,6 +378,17 @@ export const AuthProvider = ({ children }) => {
       }
 
       console.log('Sign in successful, user:', data?.user?.id);
+
+      if (data?.user?.id && data.user.email) {
+        const { error: domainError } = await supabase.rpc("apply_school_domain_on_profile", {
+          p_user_id: data.user.id,
+          p_email: data.user.email,
+        });
+        if (domainError) {
+          console.warn("apply_school_domain_on_profile (signIn):", domainError.message);
+        }
+      }
+
       return { error: null, data };
     } catch (error) {
       console.error('Unexpected error during sign in:', error);
@@ -372,7 +417,9 @@ export const AuthProvider = ({ children }) => {
 
       if (!error) {
         // Update local profile state
-        setProfile((prev) => (prev ? { ...prev, ...updates } : null));
+        setProfile((prev) =>
+          prev ? normalizeSchoolProfile({ ...prev, ...updates }) : null
+        );
       }
 
       return { error };

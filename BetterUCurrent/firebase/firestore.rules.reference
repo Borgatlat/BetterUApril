@@ -1,0 +1,82 @@
+/**
+ * Firestore security rules (reference) — parity with Supabase RLS in
+ * `supabase/migrations/20260515000000_school_wellness_b2b2c.sql`.
+ *
+ * BetterU uses Supabase in production; keep this file if you dual-write or migrate.
+ *
+ * Rules intent:
+ * - Public B2C users cannot read org pulse aggregates or other orgs
+ * - Students read/write own pulse docs only
+ * - Staff read aggregates + counselor_alerts in their org only
+ */
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isPublicUser() {
+      return signedIn() &&
+        (userProfile().accountType == 'public' || !('accountType' in userProfile()));
+    }
+
+    function isStudent() {
+      return signedIn() && userProfile().accountType == 'student';
+    }
+
+    function isStaff() {
+      return signedIn() &&
+        (userProfile().accountType in ['admin', 'counselor']);
+    }
+
+    function sameOrg(orgId) {
+      return userProfile().orgId == orgId;
+    }
+
+    match /organizations/{orgSlug} {
+      allow read: if signedIn() && sameOrg(orgSlug);
+      allow write: if false; // provision via backend / console only
+    }
+
+    match /users/{userId} {
+      allow read, update: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId}/dailyPulseHistory/{dayId} {
+      allow read, write: if signedIn() && request.auth.uid == userId;
+    }
+
+    match /counselor_alerts/{alertId} {
+      allow create: if isStudent() &&
+        request.resource.data.studentUid == request.auth.uid &&
+        sameOrg(request.resource.data.orgId);
+      allow read: if (isStaff() && sameOrg(resource.data.orgId))
+        || (signedIn() && resource.data.studentUid == request.auth.uid);
+      allow update: if false; // use Cloud Functions + admin SDK for lifecycle
+    }
+
+    // Deny arbitrary clients from reading raw org-level pulse buckets
+    match /pulseAggregates/{orgSlug}/{document=**} {
+      allow read: if isStaff() && sameOrg(orgSlug);
+      allow write: if false;
+    }
+
+    /*
+     * Spiritual / pastoral parity (maps to Supabase `20260515120000_school_spiritual_pastoral.sql` tables):
+     * - users/{userId}/spiritual_pulses/{id} → spiritual_pulses
+     * - users/{userId}/prayer_intentions/{id} → prayer_intentions
+     * - organizations/{orgId}/spiritual_calendar_events/{id} → spiritual_calendar_events
+     * - organizations/{orgId}/spiritual_bulletin_posts/{id} → spiritual_bulletin_posts
+     * - organizations/{orgId}/service_hour_logs/{id} → service_hour_logs
+     * Global collections (no org segment in Firestore shorthand): LiveTheFourth_prompts defaults, RetreatTrack seeds
+     */
+  }
+}

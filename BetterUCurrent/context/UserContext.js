@@ -7,6 +7,8 @@ import { AppState } from "react-native"
 import { useAuth } from "../context/AuthContext"
 import { preloadFeed } from "../utils/feedPreloader"
 import { setPremiumRefreshCallback } from "../lib/premiumRefresh"
+import { receivesSchoolPartnershipPremium } from "../lib/premiumSchool"
+import { initializePurchases } from "../lib/purchases"
 
 // Create user context with proper type
 const UserContext = createContext({
@@ -21,7 +23,7 @@ const UserContext = createContext({
   checkSubscriptionStatus: () => {},
 });
 
-export const UserProvider = ({ children, onReady }) => {
+export const UserProvider = ({ children }) => {
   console.warn('[UserContext] UserProvider mounted');
   const [userProfile, setUserProfile] = useState({
     name: "",
@@ -53,8 +55,9 @@ export const UserProvider = ({ children, onReady }) => {
       return;
     }
     const cached = profile?.is_premium === true;
-    setIsPremium(cached);
-  }, [user?.id, profile?.is_premium]);
+    const schoolPartnership = receivesSchoolPartnershipPremium(profile);
+    setIsPremium(cached || schoolPartnership);
+  }, [user?.id, profile?.is_premium, profile?.account_type, profile?.org_id]);
 
   /**
    * Single source of truth: active row in `subscriptions` plus date window.
@@ -91,6 +94,20 @@ export const UserProvider = ({ children, onReady }) => {
       }
 
       if (!subscription) {
+        const { data: schoolProfile } = await supabase
+          .from("profiles")
+          .select("account_type, org_id")
+          .eq("id", authUser.id)
+          .maybeSingle();
+
+        /* Partner schools: unlock premium UX even when no IAP / subscriptions row exists. */
+        if (receivesSchoolPartnershipPremium(schoolProfile)) {
+          setIsPremium(true);
+          setSubscriptionEndDate(null);
+          await supabase.from("profiles").update({ is_premium: true }).eq("id", authUser.id);
+          return;
+        }
+
         setIsPremium(false);
         setSubscriptionEndDate(null);
         await supabase.from('profiles').update({ is_premium: false }).eq('id', authUser.id);
@@ -259,34 +276,27 @@ export const UserProvider = ({ children, onReady }) => {
           }
         }
 
-        // Check subscription status first
-        await checkSubscriptionStatus();
+        if (isMounted) {
+          setIsLoading(false);
+        }
 
-        // Set up interval to check subscription status every 5 minutes
+        checkSubscriptionStatus().catch(() => {});
         subscriptionCheckInterval = setInterval(checkSubscriptionStatus, 5 * 60 * 1000);
 
-        // Sync profile from Supabase with retry logic
         let retryCount = 0;
-        const maxRetries = 3;
+        const maxRetries = 2;
         while (retryCount < maxRetries && isMounted) {
           try {
             await syncProfileFromSupabase();
             break;
           } catch (error) {
             retryCount++;
-            if (retryCount === maxRetries) {
-              console.log('[UserContext] Keeping existing profile data after failed sync');
-            } else {
-              await new Promise(resolve => {
-                retryTimeout = setTimeout(resolve, 1000 * retryCount);
+            if (retryCount < maxRetries) {
+              await new Promise((resolve) => {
+                retryTimeout = setTimeout(resolve, 800 * retryCount);
               });
             }
           }
-        }
-
-        if (isMounted) {
-          setIsLoading(false);
-          console.log('[UserContext] Finished loading user data, setIsLoading(false)');
         }
       } catch (error) {
         console.error('[UserContext] Error in loadUserData:', error);
@@ -307,13 +317,12 @@ export const UserProvider = ({ children, onReady }) => {
     };
   }, []);
 
-  // RevenueCat: only call onReady after profile load finished and Supabase user exists (valid appUserID)
   useEffect(() => {
-    if (!isLoading && user?.id && onReady) {
-      console.log('[UserContext] User available, calling onReady with user ID:', user.id);
-      onReady(user);
-    }
-  }, [user?.id, isLoading, onReady]);
+    if (!user?.id) return;
+    initializePurchases(user.id).catch((e) => {
+      console.warn('[UserContext] RevenueCat init:', e?.message);
+    });
+  }, [user?.id]);
 
   // Add AppState listener to check subscription status when app comes to foreground
   useEffect(() => {

@@ -102,7 +102,8 @@ export default function AddAccountabilityPartnerScreen() {
       {friends.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
-            Add friends in Community first, then come back here.
+            Add classmates from the Community → Friends tab first, then pick who you’d like as a
+            partner for weekly accountability check-ins.
           </Text>
         </View>
       ) : (

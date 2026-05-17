@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { nativeFeatureUnavailableMessage } from './runtimeEnvironment';
 
 /**
  * Ensures WebRTC globals (RTCPeerConnection, etc.) are registered for React Native.
@@ -29,11 +30,7 @@ function ensureWebRTCGlobals() {
   }
 
   if (!isNativeWebRTCReady()) {
-    throw new Error(
-      'Voice therapy needs WebRTC in your app binary. Expo Go cannot load native WebRTC.\n\n' +
-        'Use a development build: npx expo prebuild --clean, then npx expo run:android (Windows/Android) ' +
-        'or on a Mac: cd ios && pod install && npx expo run:ios. Rebuild after installing LiveKit packages.'
-    );
+    throw new Error(nativeFeatureUnavailableMessage('Voice therapy'));
   }
   _globalsRegistered = true;
 }
@@ -88,23 +85,10 @@ export const getLiveKitUrl = () => {
  */
 export const getLiveKitToken = async (roomName, participantName, userId) => {
   try {
-    // #region agent log
-    console.log('🔍 [DEBUG] getLiveKitToken called with:', { roomName, participantName, userId });
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:52',message:'getLiveKitToken called',data:{roomName,participantName,userId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-    
     const { supabase } = await import('./supabase');
     const { data: { session } } = await supabase.auth.getSession();
-    
-    // #region agent log
-    console.log('🔍 [DEBUG] Session check:', { hasSession: !!session, userId: session?.user?.id });
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:60',message:'Session check',data:{hasSession:!!session,userId:session?.user?.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
-    
+
     if (!session) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:58',message:'Auth error - no session',data:{},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       throw new Error('User not authenticated');
     }
 
@@ -113,74 +97,36 @@ export const getLiveKitToken = async (roomName, participantName, userId) => {
       participantName: participantName || `user-${userId}`,
       userId: userId || session.user.id,
     };
-    
-    // #region agent log
-    console.log('🔍 [DEBUG] Invoking edge function with request body:', JSON.stringify(requestBody, null, 2));
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:76',message:'Invoking edge function',data:{requestBody,edgeFunction:'generate-livekit-token'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
 
     const { data, error } = await supabase.functions.invoke('generate-livekit-token', {
       body: requestBody,
     });
 
-    // #region agent log
-    console.log('🔍 [DEBUG] Edge function response:', { hasData: !!data, hasError: !!error, error: error ? JSON.stringify(error, null, 2) : null, data: data ? JSON.stringify(data, null, 2) : null });
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:85',message:'Edge function response',data:{hasData:!!data,hasError:!!error,errorMessage:error?.message,errorName:error?.name,errorStatus:error?.status,errorContext:error?.context,errorDetails:JSON.stringify(error),dataKeys:data?Object.keys(data):null,dataContent:data?JSON.stringify(data):null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
-    // #endregion
-
     if (error) {
-      // #region agent log
-      console.error('❌ [DEBUG] Edge function error details:', {
-        message: error.message,
-        name: error.name,
-        status: error.status,
-        statusText: error.statusText,
-        context: error.context,
-        fullError: JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-      });
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:93',message:'Error from edge function',data:{errorMessage:error.message,errorName:error.name,errorStatus:error.status,errorStatusText:error.statusText,errorContext:error.context,fullError:JSON.stringify(error,Object.getOwnPropertyNames(error),2)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
-      // #endregion
-      
-      // Extract status code from error context (Supabase wraps the HTTP response)
       const statusCode = error.context?.status || error.status || 'unknown';
-      
-      // Provide user-friendly error messages based on status code
+
       if (statusCode === 404) {
-        throw new Error('Voice therapy service not available. Please ensure the edge function "generate-livekit-token" is deployed to your Supabase project. Run: supabase functions deploy generate-livekit-token');
-      } else if (statusCode === 401) {
+        throw new Error(
+          'Voice therapy is temporarily unavailable. Please try again later or contact support.'
+        );
+      }
+      if (statusCode === 401) {
         throw new Error('Authentication failed. Please log out and log back in.');
-      } else if (statusCode === 500) {
+      }
+      if (statusCode === 500) {
         const errorDetails = error.context?.error || error.context?.message || error.message || 'Server error';
         throw new Error(`Voice therapy service error: ${errorDetails}`);
-      } else {
-        // Try to extract more details from error context
-        const errorDetails = error.context?.error || error.context?.message || error.message || 'Failed to generate token';
-        throw new Error(`Edge Function error (${statusCode}): ${errorDetails}`);
       }
+      const errorDetails = error.context?.error || error.context?.message || error.message || 'Failed to generate token';
+      throw new Error(`Voice therapy error (${statusCode}): ${errorDetails}`);
     }
 
-    if (!data || !data.token) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:78',message:'Invalid response - no token',data:{hasData:!!data,dataContent:data},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
+    if (!data?.token) {
       throw new Error('Invalid response from token generation service');
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:82',message:'Token received successfully',data:{hasToken:!!data.token,tokenLength:data.token?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-
     return data.token;
   } catch (error) {
-    // #region agent log
-    console.error('❌ [DEBUG] Exception in getLiveKitToken:', {
-      message: error.message,
-      name: error.name,
-      stack: error.stack,
-      fullError: JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-    });
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'livekit.js:112',message:'Exception caught',data:{errorMessage:error.message,errorStack:error.stack,errorName:error.name,fullError:JSON.stringify(error,Object.getOwnPropertyNames(error),2)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
-    // #endregion
     console.error('Error getting LiveKit token:', error);
     throw error;
   }

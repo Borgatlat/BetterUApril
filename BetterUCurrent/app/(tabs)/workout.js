@@ -2037,24 +2037,25 @@ const FinishLineBannerAnimation = ({ visible }) => {
   }, [distance, rawDistance]);
 
   const getDistance = (point1, point2) => {
-    const R = 6371e3; // Earth's radius in meters
-    const φ1 = point1.latitude * Math.PI / 180;
-    const φ2 = point2.latitude * Math.PI / 180;
-    const Δφ = (point2.latitude - point1.latitude) * Math.PI / 180;
-    const Δλ = (point2.longitude - point1.longitude) * Math.PI / 180;
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const R = 6371e3; // Earth's radius in meters (Haversine formula)
+    const phi1 = point1.latitude * Math.PI / 180;
+    const phi2 = point2.latitude * Math.PI / 180;
+    const deltaPhi = (point2.latitude - point1.latitude) * Math.PI / 180;
+    const deltaLambda = (point2.longitude - point1.longitude) * Math.PI / 180;
+    const a =
+      Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+      Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const distance = R * c;
-    
-    // Debug logging for distance calculation
+
     console.log('Distance Calculation:', {
       point1: { lat: point1.latitude.toFixed(6), lng: point1.longitude.toFixed(6) },
       point2: { lat: point2.latitude.toFixed(6), lng: point2.longitude.toFixed(6) },
-      deltaLat: (Δφ * 180 / Math.PI).toFixed(6),
-      deltaLng: (Δλ * 180 / Math.PI).toFixed(6),
-      calculatedDistance: distance.toFixed(3)
+      deltaLat: (deltaPhi * 180 / Math.PI).toFixed(6),
+      deltaLng: (deltaLambda * 180 / Math.PI).toFixed(6),
+      calculatedDistance: distance.toFixed(3),
     });
-    
+
     return distance;
   };
 
@@ -2117,17 +2118,11 @@ const startSprintWithCountdown = () => {
 // Sprint Maxout functions
 const startSprintMaxOut = async () => {
   try {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:1065',message:'startSprintMaxOut called',data:{distanceNeededToTravel,hasDistance:!!distanceNeededToTravel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     if (!distanceNeededToTravel || distanceNeededToTravel <= 0) {
       Alert.alert('Error', 'Please select a distance to sprint');
       return;
     }
 
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:1072',message:'Resetting sprint state',data:{sprintCompleted,previousSprintMode:sprintMode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     setSprintMode(true);
     setRecording(true);
     setPaused(false);
@@ -2149,9 +2144,6 @@ const startSprintMaxOut = async () => {
     accumulatedDistanceRef.current = 0;
     setShowSprintModal(false);
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:1092',message:'Calling startSprintLocationTracking',data:{distanceNeededToTravel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
     sprintStartTimeRef.current = Date.now();
     const useIndoorSteps = sprintIndoorMode && (
       (Platform.OS === 'ios' && queryStatisticsForQuantity) ||
@@ -2182,9 +2174,6 @@ const checkSprintCompletion = () => {
   // Check if sprint distance has been reached (convert km to meters for comparison)
   const distanceInMeters = distance * 1000;
   
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:1105',message:'checkSprintCompletion called',data:{distance,distanceInMeters,distanceNeededToTravel,sprintMode,sprintCompleted,willComplete:distanceInMeters >= distanceNeededToTravel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-  // #endregion
   
   if (sprintMode && distanceInMeters >= distanceNeededToTravel && !sprintCompleted) {
     // Trigger completion animations
@@ -2484,13 +2473,7 @@ const startActivity = async () => {
 
   const startSprintLocationTracking = async () => {
   try {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:1397',message:'startSprintLocationTracking entry',data:{distanceNeededToTravel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
     const { status } = await Location.requestForegroundPermissionsAsync();
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:1399',message:'Location permission status',data:{status,granted:status==='granted'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
     if (status !== 'granted') {
       Alert.alert('Error', 'Location permission required');
       return;
@@ -2501,9 +2484,6 @@ const startActivity = async () => {
       return;
     }
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:1413',message:'Starting location watcher',data:{distanceNeededToTravel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
 
     // Reset recent distances for new sprint
     recentDistanceRef.current = [];
@@ -2576,9 +2556,6 @@ const startActivity = async () => {
             setRawDistance(newRawDistance);
             // Convert to kilometers for distance state (used for display)
             const newDistanceKm = newRawDistance / 1000;
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:1472',message:'Distance updated in sprint mode',data:{newRawDistance,newDistanceKm,distanceNeededToTravel,sprintMode},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-            // #endregion
             setDistance(newDistanceKm);
 
             // Add to path
@@ -2847,9 +2824,7 @@ const startSprintStepTracking = async () => {
         </View>
 
           {/* Monthly Workout Calendar */}
-          {/* #region agent log */}
           {(() => {
-            fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'workout.js:2424',message:'Rendering MonthlyWorkoutCalendar',data:{hasComponent:!!MonthlyWorkoutCalendar,hasRef:!!calendarRef},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
             return null;
           })()}
           {/* #endregion */}

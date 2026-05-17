@@ -1,7 +1,8 @@
 {
   "cli": {
     "version": ">= 5.9.1",
-    "appVersionSource": "local"
+    "appVersionSource": "remote",
+    "promptToConfigurePushNotifications": false
   },
   "build": {
     "development": {
@@ -20,13 +21,15 @@
     },
     "production": {
       "distribution": "store",
+      "autoIncrement": true,
       "ios": {
         "resourceClass": "m-medium",
         "node": "20.18.0",
         "buildConfiguration": "Release",
         "cocoapods": "1.15.2",
         "env": {
-          "EXPO_NEW_ARCH_ENABLED": "true",
+          "EXPO_NO_CAPABILITY_SYNC": "1",
+          "EXPO_NEW_ARCH_ENABLED": "false",
           "NODE_VERSION": "20.18.0",
           "NODE_OPTIONS": "--max-old-space-size=4096",
           "NPM_CONFIG_ENGINE_STRICT": "false",
@@ -45,7 +48,16 @@
         "appleId": "andyjulijohn@yahoo.com",
         "ascAppId": "6744857930",
         "appleTeamId": "3DT3JG9S95",
-        "sku": "betterU_TestFlight_v7"
+        "sku": "betterU_TestFlight_v7",
+        "language": "en-US"
+      }
+    },
+    "preview": {
+      "extends": "production",
+      "ios": {
+        "appleId": "andyjulijohn@yahoo.com",
+        "ascAppId": "6744857930",
+        "appleTeamId": "3DT3JG9S95"
       }
     }
   }

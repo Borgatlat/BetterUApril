@@ -1,9 +1,10 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { useHomePageCustomization } from '../hooks/useHomePageCustomization';
+import { useAuthSession } from '../../hooks/useAuthSession';
+import { useHomePageCustomization } from '../../hooks/useHomePageCustomization';
 import { hexToRgba } from '../../utils/homePageCustomization';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../context/UserContext';
@@ -36,6 +37,7 @@ const motivationalQuotes = [
 
 const HomeScreen = () => {
   const router = useRouter();
+  const { workspace } = useAuthSession();
   const { userProfile } = useUser();
   // Toggles from “Change your home page” — reload when returning from that modal so switches apply immediately
   const { prefs: homePrefs, reload: reloadHomePrefs } = useHomePageCustomization();
@@ -117,7 +119,10 @@ const HomeScreen = () => {
     }, [userProfile?.id])
   );
 
-  const showNutritionSection = homePrefs.showDailyNutrition || homePrefs.showFoodScanner;
+  /** School roster uses School / Spiritual — hide nutrition shortcuts alongside the Nutrition tab. */
+  const hideNutritionForSchoolStudent = workspace === 'student';
+  const showNutritionSection =
+    !hideNutritionForSchoolStudent && (homePrefs.showDailyNutrition || homePrefs.showFoodScanner);
   const showAiSection = homePrefs.showAIServices || homePrefs.showFutureU;
 
   return (
@@ -307,11 +312,35 @@ const HomeScreen = () => {
             
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Community</Text>
-        <TouchableOpacity style={styles.actionCard} onPress={() => router.push({ pathname: '/(tabs)/community', params: { openSearch: '1' } })}>
-          <View style={[styles.actionIconWrap, { backgroundColor: hexToRgba(accent, 0.12) }]}><Ionicons name="people" size={22} color={accent} /></View>
-          <Text style={styles.actionLabel}>Find Friends</Text>
+        <View style={styles.actionRow}>
+          {/* `tab` + `openSearch`: Community screen switches to Friends and opens discover search once */}
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() =>
+              router.push({
+                pathname: '/(tabs)/community',
+                params: { tab: 'friends', openSearch: '1' },
+              })
+            }
+            activeOpacity={0.85}
+          >
+            <View style={[styles.actionIconWrap, { backgroundColor: hexToRgba(accent, 0.12) }]}>
+              <Ionicons name="person-add-outline" size={22} color={accent} />
+            </View>
+            <Text style={styles.actionLabel}>Add friends</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionCard}
+            onPress={() => router.push('/accountability/add-partner')}
+            activeOpacity={0.85}
+          >
+            <View style={[styles.actionIconWrap, { backgroundColor: 'rgba(139,92,246,0.15)' }]}>
+              <Ionicons name="people-circle-outline" size={22} color="#8b5cf6" />
+            </View>
+            <Text style={styles.actionLabel}>Add accountability partner</Text>
           </TouchableOpacity>
         </View>
+      </View>
 
       <View style={styles.section}>
         <TouchableOpacity

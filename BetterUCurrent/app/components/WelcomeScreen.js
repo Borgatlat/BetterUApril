@@ -1,6 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Image, Dimensions, Animated, Platform, Alert, ActivityIndicator } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, StatusBar, Image, Dimensions, Platform, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -10,7 +9,15 @@ import { supabase } from '../../lib/supabase';
 // This project ships app-icon.png (not app-logo.png), which is the same role: splash/welcome logo.
 import appLogo from '../../assets/images/app-icon.png';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
+
+const WELCOME_BENEFITS = [
+  { icon: 'barbell', text: 'Personalized AI workout plans' },
+  { icon: 'leaf', text: 'Mental wellness guidance' },
+  { icon: 'trending-up', text: 'Track progress & achievements' },
+  { icon: 'chatbubble', text: '24/7 AI coaching support' },
+  { icon: 'people', text: 'Connect with fitness community' },
+];
 
 const WelcomeScreen = () => {
   const insets = useSafeAreaInsets();
@@ -88,140 +95,6 @@ const WelcomeScreen = () => {
     }
   };
 
-  // Animation refs for each benefit item
-  const slideAnim1 = useRef(new Animated.Value(0)).current;
-  const slideAnim2 = useRef(new Animated.Value(0)).current;
-  const slideAnim3 = useRef(new Animated.Value(0)).current;
-  const slideAnim4 = useRef(new Animated.Value(0)).current;
-  const slideAnim5 = useRef(new Animated.Value(0)).current;
-
-  // Start sliding animations with proper sequencing
-  useEffect(() => {
-    const startSlides = () => {
-      // First item slides from left to center
-      Animated.timing(slideAnim1, {
-        toValue: 1,
-        duration: 2000,
-        useNativeDriver: true,
-      }).start();
-
-      // Second item slides from right to center after delay
-      setTimeout(() => {
-        Animated.timing(slideAnim2, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }).start();
-      }, 2000);
-
-      // Third item slides from left to center
-      setTimeout(() => {
-        Animated.timing(slideAnim3, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }).start();
-      }, 4000);
-
-      // Fourth item slides from right to center
-      setTimeout(() => {
-        Animated.timing(slideAnim4, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }).start();
-      }, 6000);
-
-      // Fifth item slides from left to center
-      setTimeout(() => {
-        Animated.timing(slideAnim5, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }).start();
-      }, 8000);
-
-      // After all items have appeared, wait a bit, then start sliding them out
-      setTimeout(() => {
-        // Slide out all items in sequence
-        setTimeout(() => {
-          Animated.timing(slideAnim1, {
-            toValue: 0,
-            duration: 2000,
-            useNativeDriver: true,
-          }).start();
-        }, 0);
-
-        setTimeout(() => {
-          Animated.timing(slideAnim2, {
-            toValue: 0,
-            duration: 2000,
-            useNativeDriver: true,
-          }).start();
-        }, 500);
-
-        setTimeout(() => {
-          Animated.timing(slideAnim3, {
-            toValue: 0,
-            duration: 2000,
-            useNativeDriver: true,
-          }).start();
-        }, 1000);
-
-        setTimeout(() => {
-          Animated.timing(slideAnim4, {
-            toValue: 0,
-            duration: 2000,
-            useNativeDriver: true,
-          }).start();
-        }, 1500);
-
-        setTimeout(() => {
-          Animated.timing(slideAnim5, {
-            toValue: 0,
-            duration: 2000,
-            useNativeDriver: true,
-          }).start();
-        }, 2000);
-
-        // After all items have slid out, restart the sequence
-        setTimeout(() => {
-          startSlides();
-        }, 3000);
-      }, 12000); // Wait for all items to complete their initial appearance
-    };
-
-    // Start animations after a short delay
-    const timer = setTimeout(startSlides, 1000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Create slide interpolations - alternating left and right slides
-  const slide1 = slideAnim1.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-width, 0] // Left to center
-  });
-
-  const slide2 = slideAnim2.interpolate({
-    inputRange: [0, 1],
-    outputRange: [width, 0] // Right to center
-  });
-
-  const slide3 = slideAnim3.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-width, 0] // Left to center
-  });
-
-  const slide4 = slideAnim4.interpolate({
-    inputRange: [0, 1],
-    outputRange: [width, 0] // Right to center
-  });
-
-  const slide5 = slideAnim5.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-width, 0] // Left to center
-  });
-
   const handleLogin = () => {
     console.log('Navigating to login...');
     router.push("/login");
@@ -259,42 +132,15 @@ const WelcomeScreen = () => {
             Join millions of people using AI to achieve their fitness and wellness goals
           </Text>
           
-          {/* Benefits list with alternating slide animations */}
           <View style={styles.benefitsList}>
-            <Animated.View style={[styles.benefitItem, { transform: [{ translateX: slide1 }] }]}>
-              <View style={styles.benefitIcon}>
-                <Ionicons name="barbell" size={20} color="#00ffff" />
+            {WELCOME_BENEFITS.map((item) => (
+              <View key={item.text} style={styles.benefitItem}>
+                <View style={styles.benefitIcon}>
+                  <Ionicons name={item.icon} size={20} color="#00ffff" />
+                </View>
+                <Text style={styles.benefitText}>{item.text}</Text>
               </View>
-              <Text style={styles.benefitText}>Personalized AI workout plans</Text>
-            </Animated.View>
-            
-            <Animated.View style={[styles.benefitItem, { transform: [{ translateX: slide2 }] }]}>
-              <View style={styles.benefitIcon}>
-                <Ionicons name="leaf" size={20} color="#00ffff" />
-              </View>
-              <Text style={styles.benefitText}>Mental wellness guidance</Text>
-            </Animated.View>
-            
-            <Animated.View style={[styles.benefitItem, { transform: [{ translateX: slide3 }] }]}>
-              <View style={styles.benefitIcon}>
-                <Ionicons name="trending-up" size={20} color="#00ffff" />
-              </View>
-              <Text style={styles.benefitText}>Track progress & achievements</Text>
-            </Animated.View>
-
-            <Animated.View style={[styles.benefitItem, { transform: [{ translateX: slide4 }] }]}>
-              <View style={styles.benefitIcon}>
-                <Ionicons name="chatbubble" size={20} color="#00ffff" />
-              </View>
-              <Text style={styles.benefitText}>24/7 AI coaching support</Text>
-            </Animated.View>
-
-            <Animated.View style={[styles.benefitItem, { transform: [{ translateX: slide5 }] }]}>
-              <View style={styles.benefitIcon}>
-                <Ionicons name="people" size={20} color="#00ffff" />
-              </View>
-              <Text style={styles.benefitText}>Connect with fitness community</Text>
-            </Animated.View>
+            ))}
           </View>
         </View>
 
@@ -332,6 +178,26 @@ const WelcomeScreen = () => {
             disabled={isAppleLoading}
           >
             <Text style={styles.secondaryButtonText}>Sign in another way</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.schoolPartnerButton}
+            onPress={() => router.push("/signup?mode=school")}
+            activeOpacity={0.85}
+            disabled={isAppleLoading}
+          >
+            <Ionicons name="school-outline" size={18} color="#00ffff" style={styles.schoolPartnerIcon} />
+            <Text style={styles.schoolPartnerButtonText}>School sign up</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.schoolPartnerButton}
+            onPress={() => router.push("/login?mode=school")}
+            activeOpacity={0.85}
+            disabled={isAppleLoading}
+          >
+            <Ionicons name="log-in-outline" size={18} color="#00ffff" style={styles.schoolPartnerIcon} />
+            <Text style={styles.schoolPartnerButtonText}>School sign in</Text>
           </TouchableOpacity>
         </View>
 
@@ -434,7 +300,7 @@ const styles = StyleSheet.create({
   bottomSection: {
     paddingBottom: 20,
     gap: 16,
-    marginTop: 60, // Move buttons down more
+    marginTop: 24,
   },
   appleButton: {
     width: '100%',
@@ -496,6 +362,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     letterSpacing: 0.5,
+  },
+  schoolPartnerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.35)',
+    backgroundColor: 'rgba(0, 255, 255, 0.06)',
+  },
+  schoolPartnerIcon: {
+    marginRight: 10,
+  },
+  schoolPartnerButtonText: {
+    color: '#9dd',
+    fontSize: 15,
+    fontWeight: '600',
   },
   tosSection: {
     paddingBottom: 15, // 15px padding as requested

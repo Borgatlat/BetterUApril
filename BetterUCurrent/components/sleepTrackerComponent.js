@@ -13,7 +13,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-// Converts duration in minutes to a readable string like "7h 30m"
 const formatDuration = (minutes) => {
   if (!minutes) return '--';
   const h = Math.floor(minutes / 60);
@@ -21,7 +20,6 @@ const formatDuration = (minutes) => {
   return m ? `${h}h ${m}m` : `${h}h`;
 };
 
-// Parses "HH:mm" or "H:mm" string to minutes since midnight (for duration calculation)
 const timeToMinutes = (timeStr) => {
   if (!timeStr || !timeStr.trim()) return null;
   const parts = timeStr.trim().split(':');
@@ -44,7 +42,6 @@ export function SleepTracker({
   const [bedtime, setBedtime] = useState(sleep?.bedtime || '');
   const [waketime, setWaketime] = useState(sleep?.waketime || '');
   const [quality, setQuality] = useState(sleep?.quality ?? null);
-  // While true, Save is disabled — avoids double-taps and shows that Supabase work is in progress.
   const [saving, setSaving] = useState(false);
 
   const openModal = () => {
@@ -59,14 +56,11 @@ export function SleepTracker({
     const wakeMins = timeToMinutes(waketime);
     let duration_minutes = 0;
     if (bedMins != null && wakeMins != null) {
-      // Handle overnight: e.g. 23:00 to 07:00 = 8h
       duration_minutes = wakeMins > bedMins
         ? wakeMins - bedMins
         : (24 * 60 - bedMins) + wakeMins;
     }
     setSaving(true);
-    // logSleep lives in TrackingContext: it upserts into Supabase table `sleep_tracking` and updates React state.
-    // It returns true only if the database write succeeded (and you are signed in with a profile id).
     const ok = await logSleep({
       bedtime: bedtime.trim() || null,
       waketime: waketime.trim() || null,
@@ -133,7 +127,7 @@ export function SleepTracker({
           </>
         ) : (
           <Text style={[styles.placeholder, { color: textSecondary }]}>
-            Tap "Log sleep" to record last night
+            Tap &quot;Log sleep&quot; to record last night
           </Text>
         )}
       </View>
@@ -219,7 +213,6 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 16, fontWeight: '600' },
   statLabel: { fontSize: 12, color: '#888' },
   placeholder: { fontSize: 14, marginTop: 4 },
-  // Backdrop behind the sheet: fourth number is opacity (0.8 = 80% opaque black, darker than 0.6).
   modalOverlay: { flex: 1, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.8)', padding: 24 },
   modalContent: { borderRadius: 16, padding: 24 },
   modalTitle: { fontSize: 20, fontWeight: '700', marginBottom: 4 },

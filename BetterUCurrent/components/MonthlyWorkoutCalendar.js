@@ -22,9 +22,6 @@ const getLocalDateString = (date) => {
  * selectedSplit: { id, label, days } (days = 7-element array Sun–Sat). getSplitDayForDate(date, split) returns the label for that day.
  */
 const MonthlyWorkoutCalendar = React.forwardRef(({ onDayPress, selectedSplit, getSplitDayForDate }, ref) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonthlyWorkoutCalendar.js:24',message:'Component initialization started',data:{onDayPress:!!onDayPress},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   const { userProfile } = useUser();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [scheduledWorkouts, setScheduledWorkouts] = useState({});
@@ -54,9 +51,6 @@ const MonthlyWorkoutCalendar = React.forwardRef(({ onDayPress, selectedSplit, ge
    * Each day object has: { date: Date, isCurrentWeek: true }
    */
   const getWeekDays = (date) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonthlyWorkoutCalendar.js:54',message:'getWeekDays called',data:{dateString:date?.toISOString?.()||'invalid'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-    // #endregion
     try {
       const weekStart = getWeekStart(date);
       const days = [];
@@ -68,14 +62,8 @@ const MonthlyWorkoutCalendar = React.forwardRef(({ onDayPress, selectedSplit, ge
         days.push({ date: day, isCurrentWeek: true });
       }
       
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonthlyWorkoutCalendar.js:66',message:'getWeekDays completed',data:{daysCount:days.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       return days;
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonthlyWorkoutCalendar.js:70',message:'getWeekDays error',data:{error:error?.message||'unknown',stack:error?.stack?.substring(0,200)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       throw error;
     }
   };
@@ -186,16 +174,10 @@ const MonthlyWorkoutCalendar = React.forwardRef(({ onDayPress, selectedSplit, ge
     refresh: loadScheduledWorkouts
   }));
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonthlyWorkoutCalendar.js:173',message:'About to call getWeekDays',data:{currentDateString:currentDate?.toISOString?.()||'invalid',hasGetWeekDays:typeof getWeekDays==='function'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-  // #endregion
   let weekDays;
   try {
     weekDays = getWeekDays(currentDate);
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonthlyWorkoutCalendar.js:178',message:'Error calling getWeekDays',data:{error:error?.message||'unknown',stack:error?.stack?.substring(0,300)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-    // #endregion
     // Fallback to empty array if getWeekDays fails
     weekDays = [];
   }
@@ -227,9 +209,6 @@ const MonthlyWorkoutCalendar = React.forwardRef(({ onDayPress, selectedSplit, ge
   const currentWeekStart = getWeekStart(today);
   const isCurrentWeek = weekStart.getTime() === currentWeekStart.getTime();
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonthlyWorkoutCalendar.js:203',message:'Before render',data:{loading,weekDaysLength:weekDays?.length||0,hasWeekDays:!!weekDays},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-  // #endregion
 
   if (loading) {
     return (
@@ -245,9 +224,6 @@ const MonthlyWorkoutCalendar = React.forwardRef(({ onDayPress, selectedSplit, ge
     );
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'MonthlyWorkoutCalendar.js:216',message:'Rendering main view',data:{weekDaysLength:weekDays?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-  // #endregion
   return (
     <View style={styles.container}>
       {/* Header with week navigation */}

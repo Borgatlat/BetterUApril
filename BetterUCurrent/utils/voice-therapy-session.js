@@ -41,24 +41,16 @@ import {
   getAudioLevel,
 } from '../lib/livekit';
 import { Haptics } from 'expo-haptics';
-import Constants from 'expo-constants';
-
-// Check if we're in Expo Go (which doesn't support LiveKit native modules)
-const isExpoGo = Constants.executionEnvironment === 'storeClient';
+import { isExpoGo, nativeFeatureUnavailableMessage } from '../lib/runtimeEnvironment';
 
 const VoiceTherapySession = () => {
   const router = useRouter();
   const { user } = useAuth();
   const { userProfile } = useUser();
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-therapy-session.js:49',message:'VoiceTherapySession component initialized',data:{hasUser:!!user,hasUserProfile:!!userProfile,isExpoGo},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  }, []);
-  // #endregion
   const [room, setRoom] = useState(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [isDemoMode, setIsDemoMode] = useState(isExpoGo);
+  const [isDemoMode, setIsDemoMode] = useState(isExpoGo());
   const [isMicEnabled, setIsMicEnabled] = useState(true);
   const [isSpeakerEnabled, setIsSpeakerEnabled] = useState(true);
   const [error, setError] = useState(null);
@@ -173,22 +165,13 @@ const VoiceTherapySession = () => {
   // 6. The agent identity should include: "Alex-1a47", "agent", "Eleos", or "therapist"
   // 7. Monitor speaking status and update UI indicators
   const connectToSession = async () => {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-therapy-session.js:175',message:'connectToSession called',data:{hasUser:!!user,userId:user?.id,hasUserProfile:!!userProfile},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-    
     if (!user) {
       Alert.alert('Error', 'Please log in to start a voice therapy session');
       return;
     }
 
-    // Expo Go ("storeClient") does not ship the native WebRTC binary — LiveKit cannot work there.
-    if (isExpoGo) {
-      Alert.alert(
-        'Development build required',
-        'Voice therapy uses native WebRTC, which is not included in Expo Go. Install the app with npx expo run:android or npx expo run:ios (or an EAS development build), then try again.',
-        [{ text: 'OK' }]
-      );
+    if (isExpoGo()) {
+      Alert.alert('Voice therapy', nativeFeatureUnavailableMessage('Voice therapy'), [{ text: 'OK' }]);
       return;
     }
 
@@ -200,16 +183,7 @@ const VoiceTherapySession = () => {
       const roomName = generateRoomName(user.id);
       const participantName = userProfile?.full_name || userProfile?.username || `user-${user.id}`;
 
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-therapy-session.js:192',message:'About to call getLiveKitToken',data:{roomName,participantName,userId:user.id},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
-
-      // Get access token
       const token = await getLiveKitToken(roomName, participantName, user.id);
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-therapy-session.js:196',message:'getLiveKitToken succeeded',data:{hasToken:!!token,tokenLength:token?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
 
       // Connect to room
       const newRoom = await connectToRoom(roomName, token, {
@@ -339,13 +313,14 @@ const VoiceTherapySession = () => {
         clearInterval(checkSpeakingStatus);
       });
     } catch (err) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/6dcd3d57-b0cd-48d2-8a84-ff688642c485',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'voice-therapy-session.js:322',message:'Error in connectToSession',data:{errorMessage:err?.message,errorName:err?.name,errorStack:err?.stack?.substring(0,500),errorStatus:err?.status,errorStatusText:err?.statusText,errorContext:err?.context,fullError:JSON.stringify(err,Object.getOwnPropertyNames(err),2)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
-      // #endregion
       console.error('Error connecting to session:', err);
-      setError(err.message || 'Failed to connect to therapy session');
+      const message =
+        err?.message?.includes('Expo Go') || err?.message?.includes('not available')
+          ? nativeFeatureUnavailableMessage('Voice therapy')
+          : err?.message || 'Failed to connect. Please try again.';
+      setError(message);
       setIsConnecting(false);
-      Alert.alert('Connection Error', err.message || 'Failed to connect. Please try again.');
+      Alert.alert('Connection Error', message);
       try {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       } catch (e) {

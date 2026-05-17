@@ -72,7 +72,11 @@ export default function SubscriptionIntroScreen() {
       router.replace('/(tabs)/home');
     } catch (error) {
       console.error('Error completing onboarding:', error);
-      Alert.alert('Something went wrong', 'Failed to complete onboarding. Please try again.');
+      Alert.alert(
+        'Could not save to server',
+        'You can still use the free app. We will open the home screen now.',
+        [{ text: 'Continue', onPress: () => router.replace('/(tabs)/home') }]
+      );
     }
   };
 

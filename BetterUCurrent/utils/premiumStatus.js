@@ -1,4 +1,4 @@
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../lib/supabase';
 
 /**
  * Reads the signed-in user's premium flag from `profiles` (kept in sync by UserContext + purchases).

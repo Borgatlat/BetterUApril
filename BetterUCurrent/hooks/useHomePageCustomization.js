@@ -4,7 +4,7 @@ import {
   HOME_PAGE_CUSTOMIZATION_KEY,
   HOME_PAGE_CUSTOMIZATION_DEFAULTS,
   sanitizeHomePageCustomization,
-} from '../../utils/homePageCustomization';
+} from '../utils/homePageCustomization';
 
 /**
  * Loads saved “Change your home page” toggles from AsyncStorage.

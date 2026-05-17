@@ -7,6 +7,7 @@ import { TherapistProvider } from '../../context/TherapistContext';
 import TutorialGate from '../components/TutorialGate';
 import { useLanguage } from '../../context/LanguageContext';
 import NonPremiumBannerAd from '../components/NonPremiumBannerAd';
+import { useAuthSession } from '../../hooks/useAuthSession';
 
 const { height, width } = Dimensions.get('window');
 const isIphoneX = Platform.OS === 'ios' && (height >= 812 || width >= 812);
@@ -17,6 +18,11 @@ const tabConfig = {
   workout: { key: 'workout', icon: (focused) => focused ? 'barbell' : 'barbell-outline' },
   nutrition: { key: 'nutrition', icon: (focused) => focused ? 'restaurant' : 'restaurant-outline' },
   mental: { key: 'mental', icon: (focused) => focused ? 'leaf' : 'leaf-outline' },
+  spiritual: {
+    key: 'home',
+    icon: (focused) => (focused ? 'compass' : 'compass-outline'),
+  },
+  'school-wellness': { key: 'home', icon: (focused) => focused ? 'school' : 'school-outline' },
   community: { key: 'community', icon: (focused) => focused ? 'people' : 'people-outline' },
   league: { key: 'league', icon: (focused) => focused ? 'trophy' : 'trophy-outline' },
   therapist: { key: 'therapist', icon: (focused) => focused ? 'heart' : 'heart-outline' },
@@ -25,10 +31,14 @@ const tabConfig = {
 
 export default function TabLayout() {
   const { t } = useLanguage();
+  const { workspace } = useAuthSession();
+  const hideNutritionForStudent = workspace === 'student';
+  const showSpiritualTab = workspace === 'student';
 
   const screenOptions = React.useMemo(() => ({ route }) => {
     const config = tabConfig[route.name];
-    const title = config ? t(`tabs.${config.key}`) : route.name;
+    let title = config ? t(`tabs.${config.key}`) : route.name;
+    if (route.name === 'spiritual') title = 'Spiritual';
     const icon = config?.icon ?? (() => (focused) => (focused ? 'help-circle' : 'help-circle-outline'));
 
     return {
@@ -61,9 +71,21 @@ export default function TabLayout() {
         <TherapistProvider>
           <View style={styles.container}>
             <Tabs screenOptions={screenOptions}>
+            <Tabs.Screen name="school-wellness" options={{ href: null }} />
+            <Tabs.Screen
+              name="spiritual"
+              options={
+                showSpiritualTab
+                  ? { title: 'Spiritual' }
+                  : { href: null }
+              }
+            />
             <Tabs.Screen name="home" />
             <Tabs.Screen name="workout" />
-            <Tabs.Screen name="nutrition" />
+            <Tabs.Screen
+              name="nutrition"
+              options={hideNutritionForStudent ? { href: null } : undefined}
+            />
             <Tabs.Screen name="mental" />
             <Tabs.Screen 
               name="therapist" 

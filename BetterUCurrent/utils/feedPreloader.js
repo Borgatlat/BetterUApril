@@ -204,17 +204,10 @@ export const preloadFeed = async (userId) => {
       }
     }
 
-    // Fetch kudos and comments in parallel
-    const kudosPromises = [];
+    // Comments only (likes/kudos UI removed from the app)
     const commentsPromises = [];
 
     if (workouts.length > 0) {
-      kudosPromises.push(
-        supabase
-          .from('workout_kudos')
-          .select('*')
-          .in('workout_id', workouts.map(w => w.id))
-      );
       commentsPromises.push(
         supabase
           .from('workout_comments')
@@ -222,17 +215,10 @@ export const preloadFeed = async (userId) => {
           .in('workout_id', workouts.map(w => w.id))
       );
     } else {
-      kudosPromises.push(Promise.resolve({ data: [] }));
       commentsPromises.push(Promise.resolve({ data: [] }));
     }
 
     if (mentals.length > 0) {
-      kudosPromises.push(
-        supabase
-          .from('mental_session_kudos')
-          .select('*')
-          .in('session_id', mentals.map(m => m.id))
-      );
       commentsPromises.push(
         supabase
           .from('mental_session_comments')
@@ -240,17 +226,10 @@ export const preloadFeed = async (userId) => {
           .in('session_id', mentals.map(m => m.id))
       );
     } else {
-      kudosPromises.push(Promise.resolve({ data: [] }));
       commentsPromises.push(Promise.resolve({ data: [] }));
     }
 
     if (runs.length > 0) {
-      kudosPromises.push(
-        supabase
-          .from('run_kudos')
-          .select('*')
-          .in('run_id', runs.map(r => r.id))
-      );
       commentsPromises.push(
         supabase
           .from('run_comments')
@@ -258,42 +237,16 @@ export const preloadFeed = async (userId) => {
           .in('run_id', runs.map(r => r.id))
       );
     } else {
-      kudosPromises.push(Promise.resolve({ data: [] }));
       commentsPromises.push(Promise.resolve({ data: [] }));
     }
 
-    // Wait for all kudos and comments to load
-    const [workoutKudosResult, mentalKudosResult, runKudosResult] = await Promise.all(kudosPromises);
     const [workoutCommentsResult, mentalCommentsResult, runCommentsResult] = await Promise.all(commentsPromises);
 
-    const workoutKudos = workoutKudosResult.data || [];
-    const mentalKudos = mentalKudosResult.data || [];
-    const runKudos = runKudosResult.data || [];
     const workoutComments = workoutCommentsResult.data || [];
     const mentalComments = mentalCommentsResult.data || [];
     const runComments = runCommentsResult.data || [];
 
-    // Create lookup maps for kudos and comments
-    const kudosMap = {};
     const commentsMap = {};
-
-    // Process workout kudos
-    workoutKudos.forEach(k => {
-      if (!kudosMap[k.workout_id]) kudosMap[k.workout_id] = [];
-      kudosMap[k.workout_id].push(k);
-    });
-
-    // Process mental session kudos
-    mentalKudos.forEach(k => {
-      if (!kudosMap[k.session_id]) kudosMap[k.session_id] = [];
-      kudosMap[k.session_id].push(k);
-    });
-
-    // Process run kudos
-    runKudos.forEach(k => {
-      if (!kudosMap[k.run_id]) kudosMap[k.run_id] = [];
-      kudosMap[k.run_id].push(k);
-    });
 
     // Process workout comments
     workoutComments.forEach(c => {
@@ -334,7 +287,6 @@ export const preloadFeed = async (userId) => {
           type: 'workout',
           date: item.completed_at,
           user_id: item.user_id,
-          kudos: kudosMap[item.id] || [],
           comments: commentsMap[item.id] || [],
           spotify_tracks_preview: previewTracks,
           spotify_track_count: trackCount,
@@ -354,7 +306,6 @@ export const preloadFeed = async (userId) => {
           type: 'mental',
           date: item.completed_at,
           user_id: item.profile_id,
-          kudos: kudosMap[item.id] || [],
           comments: commentsMap[item.id] || [],
         });
       }
@@ -371,7 +322,6 @@ export const preloadFeed = async (userId) => {
           type: 'pr',
           date: item.created_at,
           user_id: item.user_id, // New PR table uses user_id directly
-          kudos: [],
           comments: [],
         });
       }
@@ -390,7 +340,6 @@ export const preloadFeed = async (userId) => {
           type: 'run',
           date: item.start_time,
           user_id: item.user_id,
-          kudos: kudosMap[item.id] || [],
           comments: commentsMap[item.id] || [],
         });
       }
