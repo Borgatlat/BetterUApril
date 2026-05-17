@@ -190,7 +190,9 @@ export const AuthProvider = ({ children }) => {
         null
       );
       if (!mounted) return;
-      setProfile(normalizeSchoolProfile(profile));
+      const normalized = normalizeSchoolProfile(profile);
+      setProfile(normalized);
+      setIsOnboardingComplete(!!normalized?.onboarding_completed);
       saveUserTimezone(userId);
     };
 
