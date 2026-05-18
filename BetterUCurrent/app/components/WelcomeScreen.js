@@ -152,7 +152,7 @@ const WelcomeScreen = () => {
               <AppleAuthentication.AppleAuthenticationButton
                 buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
                 buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                cornerRadius={16}
+                cornerRadius={12}
                 style={[styles.appleButton, isAppleLoading && styles.appleButtonDisabled]}
                 onPress={handleContinueWithApple}
                 disabled={isAppleLoading}
@@ -186,7 +186,7 @@ const WelcomeScreen = () => {
             activeOpacity={0.85}
             disabled={isAppleLoading}
           >
-            <Ionicons name="school-outline" size={18} color="#00ffff" style={styles.schoolPartnerIcon} />
+            <Ionicons name="school-outline" size={16} color="#00ffff" style={styles.schoolPartnerIcon} />
             <Text style={styles.schoolPartnerButtonText}>School sign up</Text>
           </TouchableOpacity>
 
@@ -196,7 +196,7 @@ const WelcomeScreen = () => {
             activeOpacity={0.85}
             disabled={isAppleLoading}
           >
-            <Ionicons name="log-in-outline" size={18} color="#00ffff" style={styles.schoolPartnerIcon} />
+            <Ionicons name="log-in-outline" size={16} color="#00ffff" style={styles.schoolPartnerIcon} />
             <Text style={styles.schoolPartnerButtonText}>School sign in</Text>
           </TouchableOpacity>
         </View>
@@ -236,16 +236,16 @@ const styles = StyleSheet.create({
     paddingBottom: height * 0.02,
   },
   logoWrapper: {
-    width: 150,
-    height: 150,
-    borderRadius: 100, // Perfect circle (half of 160)
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    overflow: 'hidden', // This ensures the logo is clipped to the circle
+    overflow: 'hidden',
   },
   logo: {
-    width: 200, // Slightly zoomed in - shows more of the logo with some cropping
-    height: 200, // Slightly zoomed in - balanced zoom level
+    width: 96,
+    height: 96,
   },
   mainSection: {
     flex: 1,
@@ -298,13 +298,13 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   bottomSection: {
-    paddingBottom: 20,
-    gap: 16,
-    marginTop: 24,
+    paddingBottom: 16,
+    gap: 10,
+    marginTop: 20,
   },
   appleButton: {
     width: '100%',
-    height: 56,
+    height: 46,
     marginBottom: 0,
   },
   appleButtonDisabled: {
@@ -331,8 +331,8 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   primaryButton: {
-    height: 56,
-    borderRadius: 16,
+    height: 46,
+    borderRadius: 12,
     backgroundColor: '#00ffff',
     justifyContent: 'center',
     alignItems: 'center',
@@ -344,13 +344,13 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#000000',
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
     letterSpacing: 0.5,
   },
   secondaryButton: {
-    height: 56,
-    borderRadius: 16,
+    height: 46,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: '#ffffff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     letterSpacing: 0.5,
   },
@@ -367,19 +367,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 255, 0.35)',
     backgroundColor: 'rgba(0, 255, 255, 0.06)',
   },
   schoolPartnerIcon: {
-    marginRight: 10,
+    marginRight: 8,
   },
   schoolPartnerButtonText: {
     color: '#9dd',
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '600',
   },
   tosSection: {

@@ -2317,12 +2317,11 @@ const CommunityScreen = () => {
                 </View>
               )}
             
-                <FlatList
-                data={feed}
-                keyExtractor={item => `${item.type}_${item.id}`}
-                renderItem={({ item }) => {
-                  const profile = profileMap[item.user_id] || {};
-                  const isOwnActivity = item.user_id === userProfile.id;
+                {/* .map() instead of nested FlatList — VirtualizedList inside ScrollView crashes on device when feed loads */}
+                <View style={styles.feedList}>
+                {feed.map((item) => {
+                  const profile = profileMap[item.user_id] || profileMap[item.creator_id] || {};
+                  const isOwnActivity = item.user_id === userProfile?.id;
                   const commentCount = Array.isArray(item.comments) ? item.comments.length : 0;
 
                   if (item.type === 'workout') {
@@ -2333,6 +2332,7 @@ const CommunityScreen = () => {
                       .join(' • ');
                     return (
                       <FeedCard
+                        key={`${item.type}_${item.id}`}
                         avatarUrl={profile.avatar_url}
                         name={profile.full_name || profile.username || 'User'}
                         date={item.completed_at ? new Date(item.completed_at).toLocaleDateString() : '-'}
@@ -2364,6 +2364,7 @@ const CommunityScreen = () => {
                       .join(' • ');
                     return (
                       <FeedCard
+                        key={`${item.type}_${item.id}`}
                         avatarUrl={profile.avatar_url}
                         name={profile.full_name || profile.username || 'User'}
                         date={item.completed_at ? new Date(item.completed_at).toLocaleDateString() : '-'}
@@ -2442,6 +2443,7 @@ const CommunityScreen = () => {
                     
                     return (
                       <FeedCard
+                        key={`${item.type}_${item.id}`}
                         avatarUrl={profile.avatar_url}
                         name={profile.full_name || profile.username || 'User'}
                         date={item.created_at ? new Date(item.created_at).toLocaleDateString() : '-'}
@@ -2516,6 +2518,7 @@ const CommunityScreen = () => {
                     
                      return (
                        <FeedCard
+                         key={`${item.type}_${item.id}`}
                          avatarUrl={profile.avatar_url}
                          name={profile.full_name || profile.username || 'User'}
                          date={item.start_time ? new Date(item.start_time).toLocaleDateString() : '-'}
@@ -2537,6 +2540,7 @@ const CommunityScreen = () => {
                            end_time: item.end_time
                          }}
                          showMapToOthers={item.show_map_to_others !== false}
+                         enableInlineMap={false}
                          borderColor={item.border_color || undefined}
                        />
                      );
@@ -2545,6 +2549,7 @@ const CommunityScreen = () => {
                     const eventDateDisplay = item.date ? new Date(item.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : (item.created_at ? new Date(item.created_at).toLocaleDateString() : '—');
                     return (
                       <FeedCard
+                        key={`${item.type}_${item.id}`}
                         avatarUrl={eventProfile.avatar_url}
                         name={eventProfile.full_name || eventProfile.username || 'User'}
                         date={eventDateDisplay}
@@ -2572,10 +2577,8 @@ const CommunityScreen = () => {
                     );
                   }
                   return null;
-                }}
-                style={{ marginTop: 16 }}
-                scrollEnabled={false}
-              />
+                })}
+                </View>
               
               {/* Load More Button */}
               {hasMoreFeed && (
@@ -4172,6 +4175,9 @@ const styles = StyleSheet.create({
   scrollViewContent: {
     paddingHorizontal: 4,
     paddingBottom: 120, // Increased from 75 to 120 to clear the tab bar
+  },
+  feedList: {
+    marginTop: 16,
   },
   loadMoreButton: {
     backgroundColor: 'rgba(0, 255, 255, 0.1)',

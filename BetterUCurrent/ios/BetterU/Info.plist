@@ -36,6 +36,8 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>9</string>
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-9221552597487164~4144394214</string>
 	<key>GMSApiKey</key>
 	<string></string>
 	<key>ITSAppUsesNonExemptEncryption</key>
@@ -70,7 +72,7 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app uses the photo library to let you select profile pictures.</string>
 	<key>NSSupportsLiveActivities</key>
-	<true/>
+	<false/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<false/>
 	<key>NSUserActivityTypes</key>
@@ -78,9 +80,7 @@
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
 	</array>
 	<key>RCTNewArchEnabled</key>
-	<false/>
-	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-9221552597487164~4144394214</string>
+	<true/>
 	<key>SKAdNetworkItems</key>
 	<array>
 		<dict>

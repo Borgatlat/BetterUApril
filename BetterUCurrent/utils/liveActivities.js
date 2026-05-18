@@ -7,18 +7,24 @@
 
 import { Platform } from 'react-native';
 
+// Disabled until Live Activity app extension is re-enabled in ios/ (personal team cannot register the extension bundle id).
+const LIVE_ACTIVITIES_ENABLED = false;
+
 // Dynamic import - only available in native builds, not Expo Go
 let ExpoLiveActivity = null;
-try {
-  ExpoLiveActivity = require('expo-live-activity');
-} catch (error) {
-  console.log('expo-live-activity not available (expected in Expo Go)');
+if (LIVE_ACTIVITIES_ENABLED) {
+  try {
+    ExpoLiveActivity = require('expo-live-activity');
+  } catch (error) {
+    console.log('expo-live-activity not available (expected in Expo Go)');
+  }
 }
 
 /**
  * Check if Live Activities are supported
  */
 export function checkLiveActivitySupport() {
+  if (!LIVE_ACTIVITIES_ENABLED) return false;
   if (Platform.OS !== 'ios') return false;
   if (!ExpoLiveActivity) return false;
   return true;

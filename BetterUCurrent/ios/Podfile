@@ -21,7 +21,7 @@ platform :ios, podfile_properties['ios.deploymentTarget'] || '15.1'
 prepare_react_native_project!
 
 target 'BetterU' do
-  use_expo_modules!
+  use_expo_modules! :exclude => ['expo-live-activity']
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
     config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
@@ -87,6 +87,16 @@ target 'BetterU' do
           build_config.build_settings['CLANG_ENABLE_MODULES'] = 'NO'
         end
       end
+    end
+
+    # Live Activity app extension is disabled (personal-team signing). Strip native module registration.
+    provider_path = File.join(__dir__, 'Pods/Target Support Files/Pods-BetterU/ExpoModulesProvider.swift')
+    if File.exist?(provider_path)
+      contents = File.read(provider_path)
+      patched = contents
+        .gsub(/^import ExpoLiveActivity\n/, '')
+        .gsub(/\s+ExpoLiveActivityModule\.self,\n/, "\n")
+      File.write(provider_path, patched) if patched != contents
     end
   end
 end

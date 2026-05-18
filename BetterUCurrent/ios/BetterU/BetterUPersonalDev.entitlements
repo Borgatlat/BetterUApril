@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Empty on purpose: free "Personal Team" accounts cannot use Push, Sign in with Apple, or Time Sensitive Notifications. -->
+	<!-- Debug builds use this file. Release/TestFlight uses BetterU.entitlements with the paid Apple Developer team. -->
+</dict>
+</plist>

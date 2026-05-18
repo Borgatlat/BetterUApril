@@ -1,68 +1,82 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Animated } from 'react-native';
+import React, { useState, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, Pressable, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
-const { width, height } = Dimensions.get('window');
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { INTRO_SEEN_KEY } from '../../utils/storageKeys';
 
 const IntroScreen = ({ onComplete }) => {
   const [currentPage, setCurrentPage] = useState(0);
   const insets = useSafeAreaInsets();
+  const finishingRef = useRef(false);
 
   const pages = [
     {
-      title: "Welcome to BetterU",
-      description: "Your personal AI-powered fitness and wellness companion",
-      icon: "fitness"
+      title: 'Welcome to BetterU',
+      description: 'Your personal AI-powered fitness and wellness companion',
+      icon: 'fitness',
     },
     {
-      title: "AI Trainer",
-      description: "Get personalized workout and nutrition advice from your AI coach",
-      icon: "chatbubble-ellipses"
+      title: 'AI Trainer',
+      description: 'Get personalized workout and nutrition advice from your AI coach',
+      icon: 'chatbubble-ellipses',
     },
     {
-      title: "Track Progress",
-      description: "Monitor your workouts, mental sessions, and personal records",
-      icon: "trending-up"
+      title: 'Track Progress',
+      description: 'Monitor your workouts, mental sessions, and personal records',
+      icon: 'trending-up',
     },
     {
-      title: "Mental Wellness",
-      description: "Guided meditation and mental fitness sessions",
-      icon: "leaf"
-    }
+      title: 'Mental Wellness',
+      description: 'Guided meditation and mental fitness sessions',
+      icon: 'leaf',
+    },
   ];
 
-  const handleNext = () => {
-    if (currentPage < pages.length - 1) {
-      setCurrentPage(currentPage + 1);
-    } else {
+  // Dismiss immediately; persist in background so a slow AsyncStorage call cannot block the UI.
+  const finishIntro = useCallback(() => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    if (typeof onComplete === 'function') {
       onComplete();
+    }
+    AsyncStorage.setItem(INTRO_SEEN_KEY, 'true').catch(() => {});
+  }, [onComplete]);
+
+  const handleNext = () => {
+    if (finishingRef.current) return;
+    if (currentPage < pages.length - 1) {
+      setCurrentPage((page) => page + 1);
+    } else {
+      finishIntro();
     }
   };
 
   const handleSkip = () => {
-    onComplete();
+    finishIntro();
   };
 
+  const isLastPage = currentPage === pages.length - 1;
+
   return (
-    <LinearGradient
-      colors={['#00131a', '#00334d', '#000']}
-      style={styles.container}
-    >
+    <LinearGradient colors={['#00131a', '#00334d', '#000']} style={styles.container}>
       <View style={[styles.content, { paddingTop: insets.top }]}>
         <View style={styles.skipContainer}>
-          <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
+          <Pressable
+            onPress={handleSkip}
+            style={({ pressed }) => [styles.skipButton, pressed && styles.pressed]}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Skip intro"
+          >
             <Text style={styles.skipText}>Skip</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         <View style={styles.pageContainer}>
           <View style={styles.iconContainer}>
-            <LinearGradient
-              colors={['#00ffff', '#0088ff']}
-              style={styles.iconGradient}
-            >
+            <LinearGradient colors={['#00ffff', '#0088ff']} style={styles.iconGradient}>
               <Ionicons name={pages[currentPage].icon} size={60} color="#fff" />
             </LinearGradient>
           </View>
@@ -76,27 +90,22 @@ const IntroScreen = ({ onComplete }) => {
             {pages.map((_, index) => (
               <View
                 key={index}
-                style={[
-                  styles.paginationDot,
-                  index === currentPage && styles.paginationDotActive
-                ]}
+                style={[styles.paginationDot, index === currentPage && styles.paginationDotActive]}
               />
             ))}
           </View>
 
-          <TouchableOpacity
-            style={styles.nextButton}
+          <Pressable
             onPress={handleNext}
+            style={({ pressed }) => [styles.nextButton, pressed && styles.pressed]}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={isLastPage ? 'Get started' : 'Next slide'}
           >
-            <LinearGradient
-              colors={['#00ffff', '#0088ff']}
-              style={styles.nextButtonGradient}
-            >
-              <Text style={styles.nextButtonText}>
-                {currentPage === pages.length - 1 ? "Get Started" : "Next"}
-              </Text>
+            <LinearGradient colors={['#00ffff', '#0088ff']} style={styles.nextButtonGradient}>
+              <Text style={styles.nextButtonText}>{isLastPage ? 'Get Started' : 'Next'}</Text>
             </LinearGradient>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </View>
     </LinearGradient>
@@ -114,6 +123,7 @@ const styles = StyleSheet.create({
   skipContainer: {
     alignItems: 'flex-end',
     marginBottom: 20,
+    zIndex: 2,
   },
   skipButton: {
     padding: 10,
@@ -164,6 +174,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingBottom: 40,
+    zIndex: 2,
   },
   pagination: {
     flexDirection: 'row',
@@ -202,6 +213,9 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  pressed: {
+    opacity: 0.85,
+  },
 });
 
-export default IntroScreen; 
+export default IntroScreen;

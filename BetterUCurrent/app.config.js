@@ -53,6 +53,78 @@ const GOOGLE_MOBILE_ADS_SKADNETWORK_IDS = [
   '3qcr597p9d.skadnetwork'
 ];
 
+// Free Apple "Personal Team" cannot provision Push, Sign in with Apple, or Time Sensitive Notifications.
+// Set IOS_PERSONAL_DEV=1 for local device builds; EAS/TestFlight builds omit this (paid team 3DT3JG9S95).
+const isPersonalIosDev =
+  process.env.IOS_PERSONAL_DEV === '1' ||
+  process.env.EXPO_PUBLIC_IOS_PERSONAL_DEV === '1';
+
+const productionIosEntitlements = {
+  // "com.apple.developer.healthkit": true,  // Temporarily disabled for TestFlight
+  'aps-environment': 'production',
+  'com.apple.developer.applesignin': ['Default'],
+  'com.apple.developer.usernotifications.time-sensitive': true
+  // "com.apple.developer.activity-kit": true  // Temporarily disabled for TestFlight
+};
+
+const iosPlugins = [
+  'expo-router',
+  'expo-image-picker',
+  'expo-av',
+  [
+    'expo-location',
+    {
+      isIosBackgroundLocationEnabled: true,
+      isAndroidBackgroundLocationEnabled: true,
+      isAndroidForegroundServiceEnabled: true,
+      locationAlwaysAndWhenInUsePermission:
+        'BetterU uses your location to track runs and walks even when the app is in the background or screen is locked.',
+      locationAlwaysPermission: 'BetterU uses your location to track your runs in the background.',
+      locationWhenInUsePermission:
+        'BetterU uses your location to track your runs and show your position on the map.'
+    }
+  ],
+  [
+    'expo-notifications',
+    {
+      icon: './assets/images/app-icon.png',
+      color: '#00ffff',
+      defaultChannel: 'default'
+    }
+  ],
+  'expo-apple-authentication',
+  [
+    'expo-splash-screen',
+    {
+      image: './assets/images/splash-icon.png',
+      imageWidth: 200,
+      resizeMode: 'contain',
+      backgroundColor: '#000000'
+    }
+  ],
+  [
+    'expo-build-properties',
+    {
+      ios: {
+        newArchEnabled: false,
+        useFrameworks: 'static',
+        deploymentTarget: '16.1',
+        swiftVersion: '5.9'
+      }
+    }
+  ],
+  [
+    'react-native-google-mobile-ads',
+    {
+      androidAppId:
+        process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID || 'ca-app-pub-3940256099942544~3347511713',
+      iosAppId: process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID || 'ca-app-pub-9221552597487164~4144394214'
+    }
+  ]
+];
+
+const personalDevPluginBlocklist = new Set(['expo-notifications', 'expo-apple-authentication']);
+
 export default {
   expo: {
     name: "BetterU",
@@ -78,10 +150,6 @@ export default {
       bundleIdentifier: "com.enriqueortiz.betteru",
       // Bump buildNumber so iOS/TestFlight treats the next build as a new binary
       // (otherwise you can keep seeing the old app icon due to caching / same build).
-      // Note: the LiveActivity extension target reads its version from
-      // `CURRENT_PROJECT_VERSION` in `ios/BetterU.xcodeproj/project.pbxproj`,
-      // so that file MUST be kept in sync with this number, or Apple rejects
-      // the upload with `ITMS-90478` (extension/parent CFBundleVersion mismatch).
       buildNumber: "12",
       infoPlist: {
         NSCameraUsageDescription: "This app uses the camera to let you take profile pictures.",
@@ -91,7 +159,7 @@ export default {
         NSLocationAlwaysAndWhenInUseUsageDescription: "This app uses your location to track your runs in the background.",
         NSLocationAlwaysUsageDescription: "This app uses your location to track your runs in the background.",
         ITSAppUsesNonExemptEncryption: false,
-        UIBackgroundModes: ["remote-notification", "location"],
+        UIBackgroundModes: isPersonalIosDev ? ['location'] : ['remote-notification', 'location'],
         // NSSupportsLiveActivities: true,  // Temporarily disabled for TestFlight
         // NSHealthShareUsageDescription: "This app reads health data to display your health statistics.",  // Temporarily disabled for TestFlight
         // NSHealthUpdateUsageDescription: "This app writes workout data to Apple Health.",  // Temporarily disabled for TestFlight
@@ -106,13 +174,7 @@ export default {
       config: {
         googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.GOOGLE_MAPS_API_KEY
       },
-      entitlements: {
-        // "com.apple.developer.healthkit": true,  // Temporarily disabled for TestFlight
-        "aps-environment": "production",
-        "com.apple.developer.applesignin": ["Default"],
-        "com.apple.developer.usernotifications.time-sensitive": true
-        // "com.apple.developer.activity-kit": true  // Temporarily disabled for TestFlight
-      }
+      entitlements: isPersonalIosDev ? {} : productionIosEntitlements
     },
     android: {
       package: "com.enriqueortiz.betteru",
@@ -127,75 +189,21 @@ export default {
         backgroundColor: "#000000"
       }
     },
-    plugins: [
-      "expo-router",
-      "expo-image-picker",
-      "expo-av",
-      [
-        "expo-location",
-        {
-          "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true,
-          "isAndroidForegroundServiceEnabled": true,
-          "locationAlwaysAndWhenInUsePermission": "BetterU uses your location to track runs and walks even when the app is in the background or screen is locked.",
-          "locationAlwaysPermission": "BetterU uses your location to track your runs in the background.",
-          "locationWhenInUsePermission": "BetterU uses your location to track your runs and show your position on the map."
-        }
-      ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/app-icon.png",
-          "color": "#00ffff",
-          "defaultChannel": "default"
-        }
-      ],
-      "expo-apple-authentication",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
-        }
-      ],
-      [
-        "expo-build-properties",
-        {
-          "ios": {
-            "newArchEnabled": false,
-            "useFrameworks": "static",
-            "deploymentTarget": "16.1",
-            "swiftVersion": "5.9"
-          }
-        }
-      ],
-      [
-        "react-native-google-mobile-ads",
-        {
-          // Android AdMob app IDs are separate from iOS — register the Android app in AdMob, then set EXPO_PUBLIC_ADMOB_ANDROID_APP_ID (or edit AndroidManifest meta-data).
-          "androidAppId": process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID || "ca-app-pub-3940256099942544~3347511713",
-          "iosAppId": process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID || "ca-app-pub-9221552597487164~4144394214"
-        }
-      ]
-      // [
-      //   "@kingstinct/react-native-healthkit",
-      //   {
-      //     healthSharePermission: "This app reads health data to display your health statistics.",
-      //     healthUpdatePermission: "This app writes workout data to Apple Health."
-      //   }
-      // ],  // Temporarily disabled for TestFlight
-      // "expo-live-activity"  // Temporarily disabled for TestFlight
-    ],
+    plugins: isPersonalIosDev
+      ? iosPlugins.filter((plugin) => {
+          const name = Array.isArray(plugin) ? plugin[0] : plugin;
+          return !personalDevPluginBlocklist.has(name);
+        })
+      : iosPlugins,
     experiments: {
       tsconfigPaths: true
     },
     // Keep the package installed in JS, but skip native iOS autolinking for
     // TestFlight until Nitro/HealthKit Swift symbol issues are resolved.
     autolinking: {
+      exclude: ['expo-live-activity'],
       ios: {
-        exclude: ["@kingstinct/react-native-healthkit"]
+        exclude: ['@kingstinct/react-native-healthkit', 'expo-live-activity']
       }
     },
     extra: {

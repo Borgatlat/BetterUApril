@@ -115,15 +115,24 @@ export default function SummaryScreen() {
           username: onboardingData.username,
           training_level: onboardingData.training_level,
           bio: onboardingData.bio || "",
-          onboarding_completed: false // Keep false until after predictions
+          onboarding_completed: true
         }, {
           onConflict: 'id'
         });
 
       if (profileError) throw profileError;
 
-      // Navigate to predictions screen instead of completing onboarding
-      router.push('/(auth)/onboarding/potential-predictions');
+      const { error: deleteError } = await supabase
+        .from('onboarding_data')
+        .delete()
+        .eq('id', onboardingData.id);
+
+      if (deleteError) {
+        console.error('Error deleting onboarding data:', deleteError);
+      }
+
+      await refetchProfile();
+      router.replace('/(tabs)/home');
     } catch (error) {
       console.error('Error submitting profile:', error);
       setError('Failed to save your profile. Please try again.');

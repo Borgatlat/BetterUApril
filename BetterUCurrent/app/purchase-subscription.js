@@ -705,6 +705,15 @@ function PurchaseSubscriptionScreen() {
           >
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
+          {hasExistingSubscription !== true && (
+            <TouchableOpacity
+              style={[styles.freeButton, { marginTop: 16 }]}
+              onPress={handleContinueFree}
+              disabled={loading}
+            >
+              <Text style={styles.freeButtonText}>Continue with free version</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <>

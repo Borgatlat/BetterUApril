@@ -100,6 +100,7 @@ const FeedCard = ({
   // New props for run data
   runData, // { path, distance_meters, duration_seconds, start_time, end_time }
   showMapToOthers = true, // Whether to show the map to others
+  enableInlineMap = true, // false in scrollable feeds — MapView inside ScrollView crashes on device
   borderColor, // Custom border color for workout posts (set with Sparks)
 }) => {
   const [commentCount, setCommentCount] = useState(initialCommentCount);
@@ -142,9 +143,17 @@ const FeedCard = ({
 
   const calculateMapRegion = (coordinates) => {
     if (!coordinates || coordinates.length === 0) return null;
-    
-    const lats = coordinates.map(coord => coord.latitude);
-    const lngs = coordinates.map(coord => coord.longitude);
+
+    const valid = coordinates.filter(
+      (coord) =>
+        coord &&
+        Number.isFinite(coord.latitude) &&
+        Number.isFinite(coord.longitude)
+    );
+    if (valid.length === 0) return null;
+
+    const lats = valid.map((coord) => coord.latitude);
+    const lngs = valid.map((coord) => coord.longitude);
     
     const minLat = Math.min(...lats);
     const maxLat = Math.max(...lats);
@@ -548,7 +557,12 @@ const FeedCard = ({
         </View>
       )}
       {/* Run Map Component - Only show if path has coordinates */}
-      {type === 'run' && runData && showMapToOthers && mapRegion && parseRunPath(runData.path).length > 1 && (
+      {enableInlineMap &&
+        type === 'run' &&
+        runData &&
+        showMapToOthers &&
+        mapRegion &&
+        parseRunPath(runData.path).length > 1 && (
         <View style={styles.mapContainer}>
           {mapLoading ? (
             <View style={styles.mapLoadingContainer}>

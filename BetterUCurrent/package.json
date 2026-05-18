@@ -5,8 +5,11 @@
   "scripts": {
     "start": "expo start --offline",
     "start:online": "expo start",
+    "start:phone": "expo start --lan --clear",
     "android": "node scripts/run-android.js",
     "ios": "expo run:ios",
+    "ios:personal": "IOS_PERSONAL_DEV=1 expo run:ios --configuration Debug",
+    "ios:dev": "expo run:ios --configuration Debug",
     "web": "expo start --web",
     "test": "jest --watchAll",
     "lint": "expo lint",

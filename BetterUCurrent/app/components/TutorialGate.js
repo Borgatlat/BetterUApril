@@ -4,18 +4,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../../context/AuthContext';
 import { INTRO_SEEN_KEY, TUTORIAL_SEEN_KEY } from '../../utils/storageKeys';
 import { HomeScrollProvider } from '../../context/HomeScrollContext';
-import IntroScreen from './IntroScreen';
 import TutorialOverlay from './TutorialOverlay';
 
 /**
- * TutorialGate orchestrates the new-user flow: Intro → Overlay Tutorial → Main App.
- * - If user hasn't seen intro: show IntroScreen (full screen)
- * - If intro done but not overlay: show tabs + TutorialOverlay on top
- * - If both done: show tabs only
+ * TutorialGate: optional home tutorial overlay after login.
+ * Intro carousel removed — INTRO_SEEN_KEY is always set so existing installs skip it.
  */
 export default function TutorialGate({ children }) {
   const { user } = useAuth();
-  const [introSeen, setIntroSeen] = useState(null);
   const [tutorialSeen, setTutorialSeen] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -23,18 +19,14 @@ export default function TutorialGate({ children }) {
     let cancelled = false;
     async function load() {
       try {
-        const [intro, tutorial] = await Promise.all([
-          AsyncStorage.getItem(INTRO_SEEN_KEY),
-          AsyncStorage.getItem(TUTORIAL_SEEN_KEY)
-        ]);
+        await AsyncStorage.setItem(INTRO_SEEN_KEY, 'true');
+        const tutorial = await AsyncStorage.getItem(TUTORIAL_SEEN_KEY);
         if (!cancelled) {
-          setIntroSeen(intro === 'true');
           setTutorialSeen(tutorial === 'true');
           setIsLoading(false);
         }
       } catch (e) {
         if (!cancelled) {
-          setIntroSeen(false);
           setTutorialSeen(false);
           setIsLoading(false);
         }
@@ -42,7 +34,6 @@ export default function TutorialGate({ children }) {
     }
     const failsafe = setTimeout(() => {
       if (!cancelled) {
-        setIntroSeen((v) => v ?? false);
         setTutorialSeen((v) => v ?? false);
         setIsLoading(false);
       }
@@ -54,22 +45,15 @@ export default function TutorialGate({ children }) {
     };
   }, []);
 
-  const handleIntroComplete = async () => {
-    await AsyncStorage.setItem(INTRO_SEEN_KEY, 'true');
-    setIntroSeen(true);
-  };
-
-  const handleTutorialComplete = async () => {
-    await AsyncStorage.setItem(TUTORIAL_SEEN_KEY, 'true');
+  const handleTutorialComplete = () => {
     setTutorialSeen(true);
+    AsyncStorage.setItem(TUTORIAL_SEEN_KEY, 'true').catch(() => {});
   };
 
-  // Not logged in - show children (auth flow handles login/signup)
   if (!user) {
     return children;
   }
 
-  // Still loading storage
   if (isLoading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
@@ -78,13 +62,6 @@ export default function TutorialGate({ children }) {
     );
   }
 
-  // Haven't seen intro - show IntroScreen
-  if (!introSeen) {
-    return <IntroScreen onComplete={handleIntroComplete} />;
-  }
-
-  // Intro done - show main app with overlay if tutorial not seen.
-  // HomeScrollProvider lets HomeScreen register its scroll ref; TutorialOverlay uses it to scroll to each step.
   return (
     <HomeScrollProvider>
       {children}

@@ -1,9 +1,9 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
+  Pressable,
   Modal,
   ScrollView,
   useWindowDimensions
@@ -51,6 +51,7 @@ const TUTORIAL_STEPS = [
 
 const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
   const [currentStep, setCurrentStep] = useState(0);
+  const finishingRef = useRef(false);
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const homeScroll = useHomeScroll();
@@ -61,7 +62,11 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
   // When step changes, scroll home so the spotlighted section is in view.
   // scrollOffsets[i] = pixels to scroll for step i (last step = tab bar, no scroll).
   useEffect(() => {
-    if (!visible || !homeScroll?.scrollToY || !homeScroll?.scrollOffsets) return;
+    if (!visible) {
+      finishingRef.current = false;
+      return;
+    }
+    if (!homeScroll?.scrollToY || !homeScroll?.scrollOffsets) return;
     const isLastStep = currentStep === TUTORIAL_STEPS.length - 1;
     if (isLastStep) return; // Tab bar is always visible
     const y = homeScroll.scrollOffsets[currentStep];
@@ -81,17 +86,24 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
   const tooltipTextSize = isSmallScreen ? 13 : 15;
   const tooltipLineHeight = tooltipTextSize * 1.4;
 
+  const finishTutorial = useCallback(() => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    onSkip?.();
+    onComplete?.();
+  }, [onComplete, onSkip]);
+
   const handleNext = () => {
+    if (finishingRef.current) return;
     if (currentStep < TUTORIAL_STEPS.length - 1) {
-      setCurrentStep(currentStep + 1);
+      setCurrentStep((step) => step + 1);
     } else {
-      onComplete?.();
+      finishTutorial();
     }
   };
 
   const handleSkip = () => {
-    onSkip?.();
-    onComplete?.();
+    finishTutorial();
   };
 
   if (!visible) return null;
@@ -169,11 +181,17 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
           />
         </View>
 
-        {/* Top bar: Skip */}
+        {/* Top bar: Skip — zIndex keeps it above dim overlay touch targets */}
         <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
-          <TouchableOpacity onPress={handleSkip} style={styles.skipButton}>
+          <Pressable
+            onPress={handleSkip}
+            style={({ pressed }) => [styles.skipButton, pressed && styles.pressed]}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Skip tutorial"
+          >
             <Text style={styles.skipText}>Skip</Text>
-          </TouchableOpacity>
+          </Pressable>
           <Text style={styles.stepIndicator}>
             {currentStep + 1} / {TUTORIAL_STEPS.length}
           </Text>
@@ -190,7 +208,19 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
             <Text style={[styles.tooltipTitle, { fontSize: tooltipTitleSize }]}>{step.title}</Text>
             <Text style={[styles.tooltipText, { fontSize: tooltipTextSize, lineHeight: tooltipLineHeight }]}>{step.tooltip}</Text>
           </ScrollView>
-          <TouchableOpacity style={[styles.nextButton, isSmallScreen && styles.nextButtonCompact]} onPress={handleNext}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.nextButton,
+              isSmallScreen && styles.nextButtonCompact,
+              pressed && styles.pressed,
+            ]}
+            onPress={handleNext}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={
+              currentStep === TUTORIAL_STEPS.length - 1 ? 'Get started' : 'Next tutorial step'
+            }
+          >
             <Text style={styles.nextButtonText}>
               {currentStep === TUTORIAL_STEPS.length - 1 ? 'Get Started' : 'Next'}
             </Text>
@@ -199,7 +229,7 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
               size={20}
               color="#000"
             />
-          </TouchableOpacity>
+          </Pressable>
           <View style={[styles.pagination, isSmallScreen && { paddingTop: 8 }]}>
             {TUTORIAL_STEPS.map((_, i) => (
               <View
@@ -240,7 +270,8 @@ const styles = StyleSheet.create({
   bottomPanel: {
     paddingHorizontal: 20,
     alignItems: 'center',
-    gap: 12
+    gap: 12,
+    zIndex: 10,
   },
   tooltip: {
     backgroundColor: 'rgba(0, 0, 0, 0.9)',
@@ -267,7 +298,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingBottom: 10
+    paddingBottom: 10,
+    zIndex: 10,
+  },
+  pressed: {
+    opacity: 0.85,
   },
   skipButton: {
     padding: 10
