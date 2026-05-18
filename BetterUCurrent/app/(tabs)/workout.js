@@ -19,7 +19,7 @@ import { getEngagementLevel } from '../../utils/engagementService';
 import { FloatingAITrainer } from '../../components/FloatingAITrainer';
 import { AIWorkoutGenerator } from '../../components/AIWorkoutGenerator';
 import { WorkoutShareModal } from '../../components/WorkoutShareModal';
-import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from '../../lib/MapView';
+import MapView, { Polyline, Marker, getMapProvider } from '../../lib/MapView';
 import * as Location from 'expo-location';
 // Optional HealthKit for indoor/treadmill timed distance (step-based). Only used on iOS when "Indoor" is on.
 let queryStatisticsForQuantity;
@@ -39,7 +39,12 @@ try {
 }
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import * as Sharing from 'expo-sharing';
+let Sharing = null;
+try {
+  Sharing = require('expo-sharing');
+} catch (_) {
+  Sharing = null;
+}
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getExerciseInfo } from '../../utils/exerciseLibrary';
 import { INJURY_AVOID_TERMS, injuredMusclesOptions } from '../../utils/injuryOptions';
@@ -64,6 +69,7 @@ import {
 } from '../../utils/liveActivities';
 
 const { width, height } = Dimensions.get('window');
+const mapProvider = getMapProvider();
 
 /** Stable key for a workout (used for favorites). Defined outside component so it's not recreated each render. */
 const getFavoriteKey = (workout) => (workout?.id ?? workout?.workout_name ?? workout?.name ?? '').toString();
@@ -2263,8 +2269,7 @@ Average speed: ${speed.toFixed(2)} km/h`;
     
     // Check if sharing is available on the device before attempting to share
     // This prevents errors on devices that don't support sharing
-    if (await Sharing.isAvailableAsync()) {
-      // Share the message - this opens the native share dialog
+    if (Sharing?.isAvailableAsync && (await Sharing.isAvailableAsync())) {
       await Sharing.shareAsync({ message });
     } else {
       // If sharing isn't available, show an alert to the user
@@ -3724,7 +3729,7 @@ const startSprintStepTracking = async () => {
           <MapView
             ref={mapRef}
             style={styles.map}
-            provider={PROVIDER_GOOGLE}
+            {...(mapProvider != null ? { provider: mapProvider } : {})}
             region={region}
             showsUserLocation={true}
             showsMyLocationButton={false}

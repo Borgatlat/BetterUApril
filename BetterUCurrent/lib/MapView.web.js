@@ -31,6 +31,10 @@ export function Marker() {
 // Same constant name the real library uses; value doesn't matter on web.
 export const PROVIDER_GOOGLE = 1;
 
+export function getMapProvider() {
+  return undefined;
+}
+
 const styles = StyleSheet.create({
   placeholder: {
     backgroundColor: '#1a1a1a',
