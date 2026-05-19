@@ -22,6 +22,14 @@ import RecoveryMap from '../../components/RecoveryMap';
 import ProgressRings from '../../components/ProgressRings';
 import AnalyticsAdvice from '../../components/AnalyticsAdvice';
 import { getLocalDateString } from '../../utils/scheduledWorkoutHelpers';
+import {
+  mergeCalorieAndWaterTracking,
+  applyTodayTrackingFromContext,
+  getTrackingCalories,
+  getTrackingWaterLiters,
+  getAnalyticsChartTheme,
+  buildLineChartConfig,
+} from '../../utils/analyticsDataHelpers';
 import { useFocusEffect } from 'expo-router';
 import { useHomePageCustomization } from '../../hooks/useHomePageCustomization';
 import { hexToRgba } from '../../utils/homePageCustomization';
@@ -106,7 +114,7 @@ const AnalyticsScreen = () => {
     if (userProfile?.id) {
       fetchAnalyticsData();
     }
-  }, [userProfile?.id, timePeriod]);
+  }, [userProfile?.id, timePeriod, calories?.consumed, water?.consumed]);
 
   /**
    * Main function to fetch all analytics data
@@ -150,9 +158,10 @@ const AnalyticsScreen = () => {
       // Fetch all data in parallel for better performance
       const [
         workoutsResult,
-        workoutsForProgression, // Separate query for progression with longer date range
+        workoutsForProgression,
         mentalResult,
-        trackingResult,
+        calorieTrackingResult,
+        waterTrackingResult,
       ] = await Promise.all([
         // Fetch workouts for charts (based on selected time period)
         supabase
@@ -168,28 +177,34 @@ const AnalyticsScreen = () => {
         // The exercises field contains: [{ name, sets: [{ weight, reps, completed }] }]
         supabase
           .from('user_workout_logs')
-          .select('completed_at, exercises')
+          .select('completed_at, exercises, workout_name')
           .eq('user_id', userId)
           .gte('completed_at', progressionStartDateString)
           .lte('completed_at', nowTimestampIso)
           .order('completed_at', { ascending: true }),
         
-        // Fetch mental sessions
+        // Same table/columns as Mental tab + session summary
         supabase
           .from('mental_session_logs')
-          .select('completed_at, duration_minutes')
+          .select('completed_at, duration, duration_seconds, session_type, session_name')
           .eq('profile_id', userId)
           .gte('completed_at', startDateString)
           .lte('completed_at', nowTimestampIso)
           .order('completed_at', { ascending: true }),
-        
-        // Fetch daily tracking (calories, water)
-        // Note: user_tracking structure may vary - try to get both user_id and profile_id matches
-        // Also handle different column names (calories vs calories_consumed, water_liters vs water_consumed_ml)
+
+        // Same tables as TrackingContext on the home screen
         supabase
-          .from('user_tracking')
-          .select('date, calories, calories_consumed, water_liters, water_consumed_ml')
-          .or(`user_id.eq.${userId},profile_id.eq.${userId}`)
+          .from('calorie_tracking')
+          .select('date, consumed')
+          .eq('profile_id', userId)
+          .gte('date', startDateString)
+          .lte('date', nowString)
+          .order('date', { ascending: true }),
+
+        supabase
+          .from('water_tracking')
+          .select('date, glasses')
+          .eq('profile_id', userId)
           .gte('date', startDateString)
           .lte('date', nowString)
           .order('date', { ascending: true }),
@@ -197,32 +212,32 @@ const AnalyticsScreen = () => {
 
       if (workoutsResult.error) throw workoutsResult.error;
       if (workoutsForProgression.error) throw workoutsForProgression.error;
-      if (mentalResult.error) throw mentalResult.error;
-      if (trackingResult.error) throw trackingResult.error;
+      if (mentalResult.error) {
+        console.warn('Analytics: mental_session_logs fetch failed:', mentalResult.error);
+      }
+      if (calorieTrackingResult.error) {
+        console.warn('Analytics: calorie_tracking fetch failed:', calorieTrackingResult.error);
+      }
+      if (waterTrackingResult.error) {
+        console.warn('Analytics: water_tracking fetch failed:', waterTrackingResult.error);
+      }
 
-      // Process and set data
+      const mentalRows = mentalResult.error ? [] : mentalResult.data || [];
+      let tracking = mergeCalorieAndWaterTracking(
+        calorieTrackingResult.error ? [] : calorieTrackingResult.data || [],
+        waterTrackingResult.error ? [] : waterTrackingResult.data || []
+      );
+      tracking = applyTodayTrackingFromContext(tracking, calories, water);
+
       setWorkoutData(workoutsResult.data || []);
-      setMentalData(mentalResult.data || []);
-      
-      // Process tracking data
-      const tracking = trackingResult.data || [];
+      setMentalData(mentalRows);
       setCalorieData(tracking);
       setWaterData(tracking);
 
       // Process data into chart format
-      processChartData(
-        workoutsResult.data || [],
-        mentalResult.data || [],
-        tracking,
-        timePeriod
-      );
+      processChartData(workoutsResult.data || [], mentalRows, tracking, timePeriod);
 
-      // Calculate comparison data
-      calculateComparison(
-        workoutsResult.data || [],
-        mentalResult.data || [],
-        tracking
-      );
+      calculateComparison(workoutsResult.data || [], mentalRows, tracking);
 
       // Calculate weight progression from exercises data (using longer date range)
       // This analyzes the exercises JSONB field to track how much weight users increased
@@ -246,7 +261,14 @@ const AnalyticsScreen = () => {
    * Process raw data into chart-ready format
    * Groups data by day/week and calculates totals
    */
-  const processChartData = (workouts, mental, tracking, period) => {
+  const chartTheme = useMemo(
+    () => getAnalyticsChartTheme(homeBg, accent),
+    [homeBg, accent]
+  );
+
+  const chartConfig = useMemo(() => buildLineChartConfig(chartTheme), [chartTheme]);
+
+  const processChartData = (workouts, mental, tracking, period, themeAccent = accent) => {
     const now = new Date();
     let labels = [];
     let workoutValues = [];
@@ -278,13 +300,9 @@ const AnalyticsScreen = () => {
         });
         mentalValues.push(dayMental.length);
         
-        // Get calories and water for this day
-        // Handle different column names in user_tracking table
-        const dayTracking = tracking.find(t => t.date === dateStr);
-        const calories = dayTracking?.calories || dayTracking?.calories_consumed || 0;
-        const water = dayTracking?.water_liters || (dayTracking?.water_consumed_ml ? dayTracking.water_consumed_ml / 1000 : 0);
-        calorieValues.push(calories);
-        waterValues.push(water);
+        const dayTracking = tracking.find((t) => t.date === dateStr);
+        calorieValues.push(getTrackingCalories(dayTracking));
+        waterValues.push(getTrackingWaterLiters(dayTracking));
       }
     } else if (period === 'month') {
       // Last 4 weeks (month view)
@@ -311,19 +329,12 @@ const AnalyticsScreen = () => {
         });
         mentalValues.push(weekMental.length);
         
-        // Sum calories and water for this week
-        // Handle different column names in user_tracking table
-        const weekTracking = tracking.filter(t => {
+        const weekTracking = tracking.filter((t) => {
           const trackDate = new Date(t.date);
           return trackDate >= weekStart && trackDate <= weekEnd;
         });
-        const weekCalories = weekTracking.reduce((sum, t) => {
-          return sum + (t.calories || t.calories_consumed || 0);
-        }, 0);
-        const weekWater = weekTracking.reduce((sum, t) => {
-          const water = t.water_liters || (t.water_consumed_ml ? t.water_consumed_ml / 1000 : 0);
-          return sum + water;
-        }, 0);
+        const weekCalories = weekTracking.reduce((sum, t) => sum + getTrackingCalories(t), 0);
+        const weekWater = weekTracking.reduce((sum, t) => sum + getTrackingWaterLiters(t), 0);
         calorieValues.push(weekCalories);
         waterValues.push(weekWater);
       }
@@ -357,19 +368,12 @@ const AnalyticsScreen = () => {
         });
         mentalValues.push(monthMental.length);
         
-        // Sum calories and water for this month
-        // Handle different column names in user_tracking table
-        const monthTracking = tracking.filter(t => {
+        const monthTracking = tracking.filter((t) => {
           const trackDate = new Date(t.date);
           return trackDate >= monthStart && trackDate <= monthEnd;
         });
-        const monthCalories = monthTracking.reduce((sum, t) => {
-          return sum + (t.calories || t.calories_consumed || 0);
-        }, 0);
-        const monthWater = monthTracking.reduce((sum, t) => {
-          const water = t.water_liters || (t.water_consumed_ml ? t.water_consumed_ml / 1000 : 0);
-          return sum + water;
-        }, 0);
+        const monthCalories = monthTracking.reduce((sum, t) => sum + getTrackingCalories(t), 0);
+        const monthWater = monthTracking.reduce((sum, t) => sum + getTrackingWaterLiters(t), 0);
         calorieValues.push(monthCalories);
         waterValues.push(monthWater);
       }
@@ -380,8 +384,8 @@ const AnalyticsScreen = () => {
       labels,
       datasets: [{
         data: workoutValues,
-        color: (opacity = 1) => hexToRgba(accent, opacity),
-        strokeWidth: 2
+        color: (opacity = 1) => hexToRgba(themeAccent, opacity),
+        strokeWidth: 3
       }]
     });
 
@@ -390,7 +394,7 @@ const AnalyticsScreen = () => {
       datasets: [{
         data: mentalValues,
         color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`, // Purple
-        strokeWidth: 2
+        strokeWidth: 3
       }]
     });
 
@@ -399,7 +403,7 @@ const AnalyticsScreen = () => {
       datasets: [{
         data: calorieValues,
         color: (opacity = 1) => `rgba(255, 68, 68, ${opacity})`, // Red
-        strokeWidth: 2
+        strokeWidth: 3
       }]
     });
 
@@ -408,10 +412,20 @@ const AnalyticsScreen = () => {
       datasets: [{
         data: waterValues,
         color: (opacity = 1) => `rgba(0, 170, 255, ${opacity})`, // Blue
-        strokeWidth: 2
+        strokeWidth: 3
       }]
     });
   };
+
+  useEffect(() => {
+    if (!userProfile?.id) return;
+    const hasData =
+      (workoutData?.length ?? 0) > 0 ||
+      (mentalData?.length ?? 0) > 0 ||
+      (calorieData?.length ?? 0) > 0;
+    if (!hasData) return;
+    processChartData(workoutData, mentalData, calorieData, timePeriod, accent);
+  }, [accent, homeBg, timePeriod, workoutData, mentalData, calorieData, userProfile?.id]);
 
   /**
    * Calculate comparison between current period and previous period
@@ -468,13 +482,8 @@ const AnalyticsScreen = () => {
       const date = new Date(t.date);
       return date >= currentPeriodStart && date <= currentPeriodEnd;
     });
-    const currentCalories = currentTracking.reduce((sum, t) => {
-      return sum + (t.calories || t.calories_consumed || 0);
-    }, 0);
-    const currentWater = currentTracking.reduce((sum, t) => {
-      const water = t.water_liters || (t.water_consumed_ml ? t.water_consumed_ml / 1000 : 0);
-      return sum + water;
-    }, 0);
+    const currentCalories = currentTracking.reduce((sum, t) => sum + getTrackingCalories(t), 0);
+    const currentWater = currentTracking.reduce((sum, t) => sum + getTrackingWaterLiters(t), 0);
 
     // Calculate totals for previous period
     const previousWorkouts = workouts.filter(w => {
@@ -491,13 +500,8 @@ const AnalyticsScreen = () => {
       const date = new Date(t.date);
       return date >= previousPeriodStart && date <= previousPeriodEnd;
     });
-    const previousCalories = previousTracking.reduce((sum, t) => {
-      return sum + (t.calories || t.calories_consumed || 0);
-    }, 0);
-    const previousWater = previousTracking.reduce((sum, t) => {
-      const water = t.water_liters || (t.water_consumed_ml ? t.water_consumed_ml / 1000 : 0);
-      return sum + water;
-    }, 0);
+    const previousCalories = previousTracking.reduce((sum, t) => sum + getTrackingCalories(t), 0);
+    const previousWater = previousTracking.reduce((sum, t) => sum + getTrackingWaterLiters(t), 0);
 
     // Calculate percentage changes
     // Formula: ((current - previous) / previous) * 100
@@ -717,30 +721,6 @@ const AnalyticsScreen = () => {
     setRefreshing(true);
     fetchAnalyticsData();
   };
-
-  // Chart theme: same accent + soft surfaces as the Home tab (see home.js cards / Recovery).
-  const chartConfig = useMemo(
-    () => ({
-      backgroundColor: homeBg,
-      backgroundGradientFrom: 'rgba(255,255,255,0.07)',
-      backgroundGradientTo: 'rgba(255,255,255,0.02)',
-      decimalPlaces: 0,
-      color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-      labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-      style: { borderRadius: 16 },
-      propsForDots: {
-        r: '4',
-        strokeWidth: '2',
-        stroke: accent,
-      },
-      propsForBackgroundLines: {
-        strokeDasharray: '',
-        stroke: 'rgba(255, 255, 255, 0.1)',
-        strokeWidth: 1,
-      },
-    }),
-    [accent, homeBg]
-  );
 
   // Show full layout immediately so the page feels fast (especially on web).
   // Loading indicator appears inside the scroll area instead of blocking the whole screen.
@@ -991,7 +971,15 @@ const AnalyticsScreen = () => {
                   {/* Mini line chart showing weight progression over time */}
                   {/* Only show chart if there are multiple data points (at least 2 workouts) */}
                   {exercise.allWeights.length > 1 && (
-                    <View style={styles.miniChartContainer}>
+                    <View
+                      style={[
+                        styles.miniChartContainer,
+                        {
+                          backgroundColor: chartTheme.containerBg,
+                          borderColor: chartTheme.containerBorder,
+                        },
+                      ]}
+                    >
                       <LineChart
                         data={{
                           // Labels: show "Start" on first point, "Now" on last point, empty for middle points
@@ -1006,18 +994,18 @@ const AnalyticsScreen = () => {
                             data: exercise.allWeights.map(w => w.weight),
                             // Cyan color matching app theme
                             color: (opacity = 1) => hexToRgba(accent, opacity),
-                            strokeWidth: 2
+                            strokeWidth: 3
                           }]
                         }}
                         width={screenWidth - 80}
                         height={80}
                         chartConfig={{
                           ...chartConfig,
-                          decimalPlaces: 0, // No decimals for weight (e.g., 135 not 135.5)
+                          decimalPlaces: 0,
                         }}
-                        bezier // Smooth curved lines instead of sharp angles
-                        withDots={true} // Show dots on each data point
-                        withShadow={false} // No shadow for cleaner mini chart
+                        bezier
+                        withDots={true}
+                        withShadow={false}
                         withInnerLines={false} // No inner grid lines for simplicity
                         withOuterLines={false} // No outer border
                         withVerticalLabels={true} // Show weight values on Y-axis
@@ -1058,8 +1046,8 @@ const AnalyticsScreen = () => {
           <ActivityHeatMap
             workouts={workoutData}
             mentalSessions={mentalData}
-            userId={userProfile?.id}
             accentColor={accent}
+            timePeriod={timePeriod}
           />
         </View>
 
@@ -1067,20 +1055,28 @@ const AnalyticsScreen = () => {
         {workoutChartData && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Workouts</Text>
-            <View style={styles.chartContainer}>
+            <View
+              style={[
+                styles.chartContainer,
+                {
+                  backgroundColor: chartTheme.containerBg,
+                  borderColor: chartTheme.containerBorder,
+                },
+              ]}
+            >
               <LineChart
                 data={workoutChartData}
                 width={screenWidth - 40}
                 height={220}
                 chartConfig={chartConfig}
                 bezier
-                style={styles.chart}
+                style={[styles.chart, { backgroundColor: chartTheme.backgroundColor }]}
                 withInnerLines={true}
                 withOuterLines={false}
                 withVerticalLabels={true}
                 withHorizontalLabels={true}
                 withDots={true}
-                withShadow={true}
+                withShadow={false}
               />
             </View>
           </View>
@@ -1090,20 +1086,28 @@ const AnalyticsScreen = () => {
         {mentalChartData && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Mental Sessions</Text>
-            <View style={styles.chartContainer}>
+            <View
+              style={[
+                styles.chartContainer,
+                {
+                  backgroundColor: chartTheme.containerBg,
+                  borderColor: chartTheme.containerBorder,
+                },
+              ]}
+            >
               <LineChart
                 data={mentalChartData}
                 width={screenWidth - 40}
                 height={220}
                 chartConfig={chartConfig}
                 bezier
-                style={styles.chart}
+                style={[styles.chart, { backgroundColor: chartTheme.backgroundColor }]}
                 withInnerLines={true}
                 withOuterLines={false}
                 withVerticalLabels={true}
                 withHorizontalLabels={true}
                 withDots={true}
-                withShadow={true}
+                withShadow={false}
               />
             </View>
           </View>
@@ -1113,20 +1117,28 @@ const AnalyticsScreen = () => {
         {calorieChartData && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Calories</Text>
-            <View style={styles.chartContainer}>
+            <View
+              style={[
+                styles.chartContainer,
+                {
+                  backgroundColor: chartTheme.containerBg,
+                  borderColor: chartTheme.containerBorder,
+                },
+              ]}
+            >
               <LineChart
                 data={calorieChartData}
                 width={screenWidth - 40}
                 height={220}
                 chartConfig={chartConfig}
                 bezier
-                style={styles.chart}
+                style={[styles.chart, { backgroundColor: chartTheme.backgroundColor }]}
                 withInnerLines={true}
                 withOuterLines={false}
                 withVerticalLabels={true}
                 withHorizontalLabels={true}
                 withDots={true}
-                withShadow={true}
+                withShadow={false}
               />
             </View>
           </View>
@@ -1136,20 +1148,28 @@ const AnalyticsScreen = () => {
         {waterChartData && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Water Intake</Text>
-            <View style={styles.chartContainer}>
+            <View
+              style={[
+                styles.chartContainer,
+                {
+                  backgroundColor: chartTheme.containerBg,
+                  borderColor: chartTheme.containerBorder,
+                },
+              ]}
+            >
               <LineChart
                 data={waterChartData}
                 width={screenWidth - 40}
                 height={220}
                 chartConfig={chartConfig}
                 bezier
-                style={styles.chart}
+                style={[styles.chart, { backgroundColor: chartTheme.backgroundColor }]}
                 withInnerLines={true}
                 withOuterLines={false}
                 withVerticalLabels={true}
                 withHorizontalLabels={true}
                 withDots={true}
-                withShadow={true}
+                withShadow={false}
               />
             </View>
           </View>
@@ -1282,17 +1302,15 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#666',
+    color: 'rgba(255, 255, 255, 0.55)',
     marginBottom: 12,
     letterSpacing: 0.5,
   },
-  /** Same card surface as home `actionCard`: very soft fill + hairline border. */
   chartContainer: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 16,
     padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden',
   },
   chart: {
     borderRadius: 16,
@@ -1436,10 +1454,11 @@ const styles = StyleSheet.create({
   },
   miniChartContainer: {
     marginTop: 10,
-    backgroundColor: 'rgba(0,0,0,0.25)',
     borderRadius: 12,
     padding: 8,
     alignItems: 'center',
+    borderWidth: 1,
+    overflow: 'hidden',
   },
 });
 

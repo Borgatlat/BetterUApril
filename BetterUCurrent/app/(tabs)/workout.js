@@ -47,17 +47,27 @@ try {
 }
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getExerciseInfo } from '../../utils/exerciseLibrary';
-import { INJURY_AVOID_TERMS, injuredMusclesOptions } from '../../utils/injuryOptions';
+import {
+  injuredMusclesOptions,
+  getAvoidTermsForInjuries,
+  isExerciseSafeForInjuries,
+  shouldSkipLegDayForInjuries,
+} from '../../utils/injuryOptions';
+import {
+  isSplitRestDay,
+  splitDayMatches,
+  formatSplitDayLabel,
+} from '../../utils/splitDayUtils';
 import { getScheduledWorkoutForDate } from '../../utils/scheduledWorkoutHelpers';
 import MonthlyWorkoutCalendar from '../../components/MonthlyWorkoutCalendar';
 import InjuryModal from '../components/injuryModal';
+import WorkoutEquipmentModal from '../../components/WorkoutEquipmentModal';
 import {
   ALL_USER_EQUIPMENT_IDS,
-  USER_EQUIPMENT_OPTIONS,
   workoutFitsUserEquipment,
 } from '../../utils/workoutEquipment';
 import ScheduledWorkoutModal from '../../components/ScheduledWorkoutModal';
-import AllSplitsModal from '../(modals)/allSplitsModal';
+import TrainingSplitModal from '../../components/TrainingSplitModal';
 import RecoveryMap from '../../components/RecoveryMap';
 import WorkoutLogs from './workout-logs';
 // Live Activities - shows real-time stats on lock screen during cardio
@@ -70,6 +80,8 @@ import {
 
 const { width, height } = Dimensions.get('window');
 const mapProvider = getMapProvider();
+const USER_EQUIPMENT_STORAGE_KEY = 'user_workout_equipment_ids';
+const EQUIPMENT_FILTER_ENABLED_KEY = 'equipment_filter_enabled';
 
 /** Stable key for a workout (used for favorites). Defined outside component so it's not recreated each render. */
 const getFavoriteKey = (workout) => (workout?.id ?? workout?.workout_name ?? workout?.name ?? '').toString();
@@ -166,9 +178,8 @@ const WorkoutScreen = () => {
   const [userEquipmentIds, setUserEquipmentIds] = useState(ALL_USER_EQUIPMENT_IDS);
   const [equipmentFilterEnabled, setEquipmentFilterEnabled] = useState(false);
   const [showEquipmentModal, setShowEquipmentModal] = useState(false);
-  const [draftEquipmentIds, setDraftEquipmentIds] = useState([]);
   const [showCustomSplitModal, setShowCustomSplitModal] = useState(false);
-  const [showAllSplitsModal, setShowAllSplitsModal] = useState(false);
+  const [showTrainingSplitModal, setShowTrainingSplitModal] = useState(false);
   const [customDaysForEdit, setCustomDaysForEdit] = useState([]); // length-7 array for Sun–Sat when editing custom split
   const [favoriteWorkoutsIds, setFavoriteWorkoutsIds] = useState([]);
   const [recoveryMapRefreshKey, setRecoveryMapRefreshKey] = useState(0);
@@ -338,18 +349,9 @@ const WorkoutScreen = () => {
 const filterExercisesByInjury = (exercises, injuredIds) => {
   if (!Array.isArray(exercises)) return [];
   if (!injuredIds?.length) return exercises;
-  const avoidTerms = [...new Set(injuredIds.flatMap((id) => INJURY_AVOID_TERMS[id] || []))];
+  const avoidTerms = getAvoidTermsForInjuries(injuredIds);
   if (!avoidTerms.length) return exercises;
-  return exercises.filter((ex) => {
-    const name = typeof ex === 'string' ? ex : (ex?.name ?? '');
-    const targetMuscles =
-      typeof ex === 'object' && ex?.targetMuscles
-        ? ex.targetMuscles
-        : (getExerciseInfo(name)?.targetMuscles ?? '');
-    const textToCheck = `${(targetMuscles || '').toLowerCase()} ${name.toLowerCase()}`;
-    const isExcluded = avoidTerms.some((term) => textToCheck.includes(term));
-    return !isExcluded;
-  });
+  return exercises.filter((ex) => isExerciseSafeForInjuries(ex, avoidTerms, getExerciseInfo));
 };
 
   // Default 7-day week: Sun=0 .. Sat=6. Custom split is loaded from AsyncStorage.
@@ -368,11 +370,38 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     }
     return template;
   };
-  const createFrequencySplitOption = (baseId, baseLabel, frequency, rotation) => ({
-    id: `${baseId}_${frequency}`,
-    label: `${baseLabel} (${frequency}x/week)`,
-    days: buildWeeklySplitDays(frequency, rotation),
-  });
+  const getSplitBaseId = (splitId) => {
+    if (!splitId || splitId === 'custom') return 'custom';
+    return String(splitId).replace(/_\d+$/, '');
+  };
+  const SPLIT_SHORT_NAMES = {
+    ppl: 'PPL',
+    upper_lower_ppl: 'UL + PPL',
+    upper_lower: 'Upper/Lower',
+    full_body: 'Full Body',
+    bro_split: 'Bro split',
+    custom: 'Custom',
+  };
+  const SPLIT_FAMILY_DEFAULT_FREQ = {
+    ppl: 4,
+    upper_lower_ppl: 5,
+    upper_lower: 3,
+    full_body: 3,
+    bro_split: 5,
+  };
+  const QUICK_SPLIT_BASE_IDS = ['ppl', 'upper_lower', 'full_body', 'custom'];
+  const createFrequencySplitOption = (baseId, baseLabel, frequency, rotation) => {
+    const short = SPLIT_SHORT_NAMES[baseId] || baseLabel;
+    return {
+      id: `${baseId}_${frequency}`,
+      baseId,
+      frequency,
+      label: `${baseLabel} (${frequency}x/week)`,
+      shortLabel: `${short} · ${frequency}×/wk`,
+      chipLabel: short,
+      days: buildWeeklySplitDays(frequency, rotation),
+    };
+  };
   const SPLIT_OPTIONS = [
     createFrequencySplitOption('ppl', 'Push/Pull/Legs (PPL)', 3, ['push', 'pull', 'legs']),
     createFrequencySplitOption('ppl', 'Push/Pull/Legs (PPL)', 4, ['push', 'pull', 'legs']),
@@ -390,7 +419,15 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     createFrequencySplitOption('bro_split', 'Bro Split', 3, ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms']),
     createFrequencySplitOption('bro_split', 'Bro Split', 4, ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms']),
     createFrequencySplitOption('bro_split', 'Bro Split', 5, ['Chest', 'Back', 'Legs', 'Shoulders', 'Arms']),
-    { id: 'custom', label: 'Custom', days: [...DEFAULT_CUSTOM_DAYS] },
+    {
+      id: 'custom',
+      baseId: 'custom',
+      frequency: null,
+      label: 'Custom week',
+      shortLabel: 'Custom',
+      chipLabel: 'Custom',
+      days: [...DEFAULT_CUSTOM_DAYS],
+    },
   ];
   // Keep previously saved split ids compatible after adding frequency variants.
   const LEGACY_SPLIT_ID_MAP = {
@@ -406,15 +443,45 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
   };
   // Options for the custom split editor (each weekday can be one of these)
   const SPLIT_DAY_OPTIONS = ['Push', 'Pull', 'Legs', 'Upper', 'Lower', 'Full Body', 'Chest', 'Back', 'Shoulders', 'Arms', 'Rest'];
-  const VISIBLE_SPLITS_COUNT = 4; // number of split chips shown in the row before "More splits"
+  // One chip per split family in the quick row (not four PPL frequency variants that looked identical).
+  const { effectiveSplit, visibleSplitOptions, frequencyVariantsForSplit } = useMemo(() => {
+    const effective =
+      selectedSplit && typeof selectedSplit === 'object' && selectedSplit.days
+        ? selectedSplit
+        : findSplitById(selectedSplit?.id ?? selectedSplit) || SPLIT_OPTIONS[0];
+    const effectiveBase = getSplitBaseId(effective.id);
 
-  // Build row so the SELECTED split is always first; the rest fill the row and the displaced one goes into "More splits".
-  const { effectiveSplit, visibleSplitOptions } = useMemo(() => {
-    const effective = selectedSplit && typeof selectedSplit === 'object' && selectedSplit.days
-      ? selectedSplit
-      : findSplitById(selectedSplit?.id ?? selectedSplit) || SPLIT_OPTIONS[0];
-    const others = SPLIT_OPTIONS.filter((o) => o.id !== effective.id).slice(0, VISIBLE_SPLITS_COUNT - 1);
-    return { effectiveSplit: effective, visibleSplitOptions: [effective, ...others] };
+    const quickOptions = QUICK_SPLIT_BASE_IDS.map((base) => {
+      if (base === effectiveBase) return effective;
+      const freq = SPLIT_FAMILY_DEFAULT_FREQ[base] || 3;
+      return (
+        SPLIT_OPTIONS.find((s) => s.id === `${base}_${freq}`) ||
+        SPLIT_OPTIONS.find((s) => getSplitBaseId(s.id) === base)
+      );
+    }).filter(Boolean);
+
+    const seenBases = new Set();
+    const visible = [];
+    for (const opt of quickOptions) {
+      const b = getSplitBaseId(opt.id);
+      if (!seenBases.has(b)) {
+        visible.push(opt);
+        seenBases.add(b);
+      }
+    }
+
+    const frequencyVariants =
+      effectiveBase === 'custom'
+        ? []
+        : SPLIT_OPTIONS.filter((o) => getSplitBaseId(o.id) === effectiveBase).sort(
+            (a, b) => (a.frequency || 0) - (b.frequency || 0)
+          );
+
+    return {
+      effectiveSplit: effective,
+      visibleSplitOptions: visible,
+      frequencyVariantsForSplit: frequencyVariants,
+    };
   }, [selectedSplit]);
 
   // Exercise suggestions per split day (used when user picks a split; you can expand these lists)
@@ -936,11 +1003,15 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     // Legs – bodyweight & dumbbell
     { splitDay: 'legs', goalType: 'muscle_growth', name: 'Leg Day Bodyweight & Dumbbell', description: 'Legs and glutes with minimal equipment', repRange: '10-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Goblet Squat', 'Lunges', 'Romanian Deadlift', 'Calf Raise', 'Bulgarian Split Squat', 'Glute Bridge'], howTo: 'Hold one dumbbell for goblet squats and RDL; bodyweight for lunges and bridges.' },
     { splitDay: 'legs', goalType: 'wellness', name: 'At-Home Legs', description: 'Lower body with squats, lunges and one dumbbell', repRange: '12-15 reps', duration: '35 min', intensity: 'Medium', exercises: ['Squat', 'Lunges', 'Glute Bridge', 'Romanian Deadlift', 'Calf Raise'], howTo: 'No rack needed; use dumbbells for RDL and goblet-style squats if you have them.' },
+    { splitDay: 'legs', goalType: 'strength', name: 'Leg Day Strength', description: 'Heavy squats and compounds for quad, hamstring and glute strength', repRange: '5-8 reps', duration: '60 min', intensity: 'High', exercises: ['Squat', 'Romanian Deadlift', 'Leg Press', 'Leg Curl', 'Calf Raise', 'Hip Thrust'], howTo: 'Warm up thoroughly; rest 2–3 minutes on squat and deadlift sets.' },
+    { splitDay: 'legs', goalType: 'muscle_growth', name: 'Leg Day Hypertrophy', description: 'Volume leg day for size — quads, hamstrings and glutes', repRange: '8-12 reps', duration: '55 min', intensity: 'Medium', exercises: ['Squat', 'Leg Press', 'Romanian Deadlift', 'Leg Curl', 'Walking Lunge', 'Calf Raise'], howTo: 'Control the negative on RDL and leg curl; squeeze glutes at the top of hip thrusts.' },
     { splitDay: 'Lower', goalType: 'strength', name: 'Leg Day Home', description: 'Full leg day with bodyweight and dumbbells only', repRange: '8-12 reps', duration: '50 min', intensity: 'High', exercises: ['Goblet Squat', 'Lunges', 'Bulgarian Split Squat', 'Romanian Deadlift', 'Calf Raise', 'Glute Bridge'], howTo: 'Progressive overload by adding dumbbell weight or slowing the tempo.' },
     // Upper – bodyweight & dumbbell
     { splitDay: 'Upper', goalType: 'strength', name: 'Upper Body Power', description: 'Build upper body strength and power', repRange: '6-10 reps', duration: '55 min', intensity: 'High', exercises: ['Pull-Ups', 'Dips', 'Push-Ups', 'Dumbbell Press', 'Tricep Extensions'], howTo: 'Focus on explosive movements and proper form to build upper body power.' },
     { splitDay: 'Upper', goalType: 'muscle_growth', name: 'Upper Body Minimal Equipment', description: 'Chest, back, shoulders and arms with push-ups and dumbbells', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Push-Up', 'Bent Over Row', 'Pike Push-Up', 'Bicep Curl', 'Tricep Extension'], howTo: 'Alternate push and pull; use a table or bar for rows if needed.' },
     { splitDay: 'Upper', goalType: 'muscle_growth', name: 'Upper Body Dumbbell Only', description: 'Complete upper body with only dumbbells', repRange: '8-12 reps', duration: '50 min', intensity: 'Medium', exercises: ['Dumbbell Press', 'Bent Over Row', 'Shoulder Press', 'Lateral Raise', 'Bicep Curl', 'Tricep Extension'], howTo: 'One pair of dumbbells can cover every exercise; adjust weight per movement.' },
+    { splitDay: 'Upper', goalType: 'strength', name: 'Upper Body Strength (Gym)', description: 'Barbell and compound upper day for strength', repRange: '5-8 reps', duration: '60 min', intensity: 'High', exercises: ['Bench Press', 'Barbell Row', 'Overhead Press', 'Pull-Ups', 'Barbell Curl', 'Tricep Pushdown'], howTo: 'Alternate pressing and pulling; rest 2–3 min on heavy compounds.' },
+    { splitDay: 'Upper', goalType: 'muscle_growth', name: 'Upper Body Hypertrophy', description: 'Chest, back, shoulders and arms for muscle growth', repRange: '8-12 reps', duration: '55 min', intensity: 'Medium', exercises: ['Incline Dumbbell Press', 'Lat Pulldown', 'Cable Row', 'Lateral Raise', 'Bicep Curl', 'Tricep Pushdown'], howTo: 'Hit each muscle group with 2–3 exercises; keep rest around 60–90 seconds.' },
     // Full body – bodyweight & dumbbell
     { splitDay: 'Full Body', goalType: 'wellness', name: 'Full Body Bodyweight', description: 'No equipment. Push, pull, legs and core with bodyweight only.', repRange: '12-15 reps', duration: '35 min', intensity: 'Medium', exercises: ['Push-Up', 'Squat', 'Lunges', 'Plank', 'Mountain Climber', 'Burpee'], howTo: 'Great for travel or home; do circuits or straight sets with short rest.' },
     { splitDay: 'Full Body', goalType: 'strength', name: 'Full Body Dumbbell', description: 'One set of dumbbells for a full-body workout', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Goblet Squat', 'Dumbbell Press', 'Bent Over Row', 'Romanian Deadlift', 'Shoulder Press', 'Bicep Curl'], howTo: 'Compound moves first; finish with curls and tricep work if time allows.' },
@@ -957,53 +1028,67 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     { splitDay: 'Lower', goalType: 'wellness', name: 'Lower Body Bodyweight', description: 'Legs and glutes with no equipment', repRange: '15-20 reps', duration: '35 min', intensity: 'Medium', exercises: ['Squat', 'Lunges', 'Glute Bridge', 'Calf Raise', 'Step-Up', 'Wall Sit'], howTo: 'Use bodyweight and tempo (slow negatives) to increase difficulty.' },
     // Bro split – Chest, Back, Shoulders, Arms, Legs
     { splitDay: 'Chest', goalType: 'muscle_growth', name: 'Chest Bodyweight & Dumbbell', description: 'Chest and triceps with push-ups and dumbbells only', repRange: '8-12 reps', duration: '40 min', intensity: 'Medium', exercises: ['Push-Up', 'Incline Push-Up', 'Dumbbell Press', 'Dumbbell Flyes', 'Tricep Extension'], howTo: 'Wide push-ups for chest; close grip or diamond for triceps emphasis.' },
+    { splitDay: 'Chest', goalType: 'strength', name: 'Chest Day Strength', description: 'Heavy bench focus with triceps finishers', repRange: '5-8 reps', duration: '50 min', intensity: 'High', exercises: ['Bench Press', 'Incline Barbell Press', 'Dumbbell Flyes', 'Dips', 'Tricep Pushdown'], howTo: 'Work up to a heavy set on bench; keep shoulders packed and feet planted.' },
+    { splitDay: 'Chest', goalType: 'muscle_growth', name: 'Chest Hypertrophy', description: 'Chest volume with incline and fly work', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Incline Dumbbell Press', 'Bench Press', 'Cable Flyes', 'Dumbbell Flyes', 'Close-Grip Bench Press'], howTo: 'Squeeze at the top of flyes; control the stretch on the way down.' },
     { splitDay: 'Back', goalType: 'strength', name: 'Back Dumbbell Only', description: 'Back and biceps with dumbbells and optional pull-up bar', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Bent Over Row', 'Single-Arm Row', 'Rear Delt Fly', 'Bicep Curl', 'Pull-Up'], howTo: 'Keep back flat on rows; squeeze at the top of each rep.' },
+    { splitDay: 'Back', goalType: 'strength', name: 'Back Day Strength', description: 'Heavy rows and deadlifts for a thick back', repRange: '5-8 reps', duration: '55 min', intensity: 'High', exercises: ['Deadlift', 'Barbell Row', 'Lat Pulldown', 'Face Pull', 'Barbell Curl'], howTo: 'Brace your core on deadlifts; pull elbows to your hips on rows.' },
+    { splitDay: 'Back', goalType: 'muscle_growth', name: 'Back Hypertrophy', description: 'Width and thickness — lats, traps and biceps', repRange: '8-12 reps', duration: '50 min', intensity: 'Medium', exercises: ['Lat Pulldown', 'Seated Cable Row', 'T-Bar Row', 'Face Pull', 'Bicep Curl', 'Hammer Curl'], howTo: 'Vary grip width on pulldowns; pause at peak contraction on rows.' },
     { splitDay: 'Shoulders', goalType: 'muscle_growth', name: 'Shoulders Bodyweight & Dumbbell', description: 'Delt focus with pike push-ups and dumbbells', repRange: '10-12 reps', duration: '35 min', intensity: 'Medium', exercises: ['Pike Push-Up', 'Shoulder Press', 'Lateral Raise', 'Front Raise', 'Rear Delt Fly'], howTo: 'Pike push-ups target shoulders; add dumbbells for isolation.' },
+    { splitDay: 'Shoulders', goalType: 'strength', name: 'Shoulder Day Strength', description: 'Overhead pressing and heavy delt work', repRange: '6-10 reps', duration: '45 min', intensity: 'High', exercises: ['Overhead Press', 'Arnold Press', 'Lateral Raise', 'Face Pull', 'Upright Row'], howTo: 'Keep ribs down on overhead press; avoid swinging on lateral raises.' },
+    { splitDay: 'Shoulders', goalType: 'muscle_growth', name: 'Shoulder Hypertrophy', description: 'All three delt heads for round, full shoulders', repRange: '10-15 reps', duration: '40 min', intensity: 'Medium', exercises: ['Dumbbell Shoulder Press', 'Lateral Raise', 'Front Raise', 'Rear Delt Fly', 'Cable Lateral Raise'], howTo: 'Light weight, strict form on laterals; rear delts balance pressing volume.' },
     { splitDay: 'Arms', goalType: 'muscle_growth', name: 'Arms Dumbbell Only', description: 'Biceps and triceps with dumbbells only', repRange: '10-12 reps', duration: '30 min', intensity: 'Medium', exercises: ['Bicep Curl', 'Hammer Curl', 'Tricep Extension', 'Overhead Tricep Extension', 'Lateral Raise'], howTo: 'Control the negative and squeeze at the top of each curl and extension.' },
     { splitDay: 'Arms', goalType: 'strength', name: 'Arms Bodyweight & Dumbbell', description: 'Arms with push-ups, dips and dumbbell curls', repRange: '8-12 reps', duration: '35 min', intensity: 'Medium', exercises: ['Diamond Push-Up', 'Tricep Extension', 'Bicep Curl', 'Hammer Curl', 'Close-Grip Push-Up'], howTo: 'Diamond and close-grip push-ups hit triceps; finish with curls.' },
   ];
-
-  const LOWER_BODY_INJURY_IDS = ['ACL', 'Knee', 'Hip', 'Hamstring', 'Groin', 'Calf'];
 
   /**
    * Memoized "recommended for today" list and injury-skip flag.
    * useMemo recomputes only when deps change, so we avoid recalculating on every render
    * (e.g. when unrelated state like showShareModal changes). Heavy filter/sort runs only when needed.
    */
-  const { reccomendedWorkouts, daySkippedBecauseOfInjury } = useMemo(() => {
+  const { reccomendedWorkouts, injuryBlockReason, isTodaySplitRest } = useMemo(() => {
     const split = selectedSplit && typeof selectedSplit === 'object' && selectedSplit.days
       ? selectedSplit
       : SPLIT_OPTIONS.find((s) => s.id === selectedSplit) || SPLIT_OPTIONS[0];
     const todaySplitDay = getSplitDayForDate(new Date(), split);
-    if (!todaySplitDay || todaySplitDay === 'rest') {
-      return { reccomendedWorkouts: [], daySkippedBecauseOfInjury: false };
+    if (isSplitRestDay(todaySplitDay)) {
+      return { reccomendedWorkouts: [], injuryBlockReason: null, isTodaySplitRest: true };
+    }
+
+    if (shouldSkipLegDayForInjuries(todaySplitDay, injuredMuscleIds)) {
+      return { reccomendedWorkouts: [], injuryBlockReason: 'leg_day', isTodaySplitRest: false };
     }
 
     const dayLower = todaySplitDay.toLowerCase();
-    const isLowerOrLegsDay = dayLower === 'lower' || dayLower === 'legs';
-    const hasLowerBodyInjury = injuredMuscleIds.some((id) => LOWER_BODY_INJURY_IDS.includes(id));
-    if (isLowerOrLegsDay && hasLowerBodyInjury) {
-      return { reccomendedWorkouts: [], daySkippedBecauseOfInjury: true };
-    }
 
-    const filteredPremium = premiumWorkouts.filter((w) => {
-      if (!w.splitDay) return false;
-      const wDay = w.splitDay.toLowerCase();
-      if (wDay === dayLower) return true;
-      if ((dayLower === 'lower' && wDay === 'legs') || (dayLower === 'legs' && wDay === 'lower')) return true;
-      return false;
-    });
+    const filteredPremium = premiumWorkouts.filter(
+      (w) => w.splitDay && splitDayMatches(w.splitDay, todaySplitDay)
+    );
     const filteredUser = userWorkouts.filter((w) => {
-      if (w.split_day) return w.split_day.toLowerCase() === dayLower;
+      if (w.split_day) return splitDayMatches(w.split_day, todaySplitDay);
       const name = (w.workout_name || w.name || '').toLowerCase();
-      return dayLower === 'push' ? name.includes('push') : dayLower === 'pull' ? name.includes('pull') : dayLower === 'legs' ? name.includes('leg') : dayLower === 'upper' ? name.includes('upper') : dayLower === 'lower' ? name.includes('lower') : dayLower === 'full body' ? name.includes('full') : false;
+      if (dayLower === 'push') return name.includes('push');
+      if (dayLower === 'pull') return name.includes('pull');
+      if (dayLower === 'legs' || dayLower === 'lower') return name.includes('leg') || name.includes('lower');
+      if (dayLower === 'upper') return name.includes('upper');
+      if (dayLower === 'full body') return name.includes('full');
+      if (dayLower === 'chest') return name.includes('chest');
+      if (dayLower === 'back') return name.includes('back');
+      if (dayLower === 'shoulders' || dayLower === 'shoulder') return name.includes('shoulder');
+      if (dayLower === 'arms' || dayLower === 'arm') return name.includes('arm') || name.includes('bicep') || name.includes('tricep');
+      return false;
     });
 
     const combined = [...filteredPremium, ...filteredUser];
-    const withFilteredExercises = combined.map((w) => ({
-      ...w,
-      exercises: filterExercisesByInjury(Array.isArray(w.exercises) ? w.exercises : [], injuredMuscleIds),
-    }));
+    const withFilteredExercises = combined
+      .map((w) => ({
+        ...w,
+        exercises: filterExercisesByInjury(Array.isArray(w.exercises) ? w.exercises : [], injuredMuscleIds),
+      }))
+      .filter((w) => (w.exercises?.length ?? 0) > 0);
+
+    if (withFilteredExercises.length === 0 && injuredMuscleIds.length > 0) {
+      return { reccomendedWorkouts: [], injuryBlockReason: 'injury', isTodaySplitRest: false };
+    }
 
     const userGoal = userProfile?.fitness_goal || null;
     const getKey = (w) => (w.id ?? w.workout_name ?? w.name ?? '').toString();
@@ -1027,8 +1112,86 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     const equipmentFiltered = equipmentFilterEnabled
       ? sorted.filter((w) => workoutFitsUserEquipment(w, userEquipmentIds, true))
       : sorted;
-    return { reccomendedWorkouts: equipmentFiltered, daySkippedBecauseOfInjury: false };
+    if (equipmentFiltered.length === 0 && equipmentFilterEnabled) {
+      return { reccomendedWorkouts: [], injuryBlockReason: 'equipment', isTodaySplitRest: false };
+    }
+    return {
+      reccomendedWorkouts: equipmentFiltered,
+      injuryBlockReason: null,
+      isTodaySplitRest: false,
+    };
   }, [selectedSplit, userWorkouts, injuredMuscleIds, favoriteWorkoutsIds, userProfile?.fitness_goal, equipmentFilterEnabled, userEquipmentIds]);
+
+  const isCustomSplitSelected = getSplitBaseId(effectiveSplit?.id) === 'custom';
+
+  /** Workouts to offer when scheduling a day on the calendar (custom = pick any). */
+  const getScheduleContextForDate = useCallback(
+    (date) => {
+      const split =
+        selectedSplit && typeof selectedSplit === 'object' && selectedSplit.days
+          ? selectedSplit
+          : SPLIT_OPTIONS.find((s) => s.id === (selectedSplit?.id ?? selectedSplit)) || SPLIT_OPTIONS[0];
+      const splitDay = getSplitDayForDate(date, split);
+      const isRest = isSplitRestDay(splitDay);
+
+      if (isRest) {
+        return {
+          splitDay: 'Rest',
+          isRest: true,
+          isCustom: isCustomSplitSelected,
+          suggested: [],
+          templates: [],
+        };
+      }
+
+      const suggestedPremium = premiumWorkouts.filter(
+        (w) => w.splitDay && splitDayMatches(w.splitDay, splitDay)
+      );
+      const suggestedUser = userWorkouts.filter((w) => {
+        if (w.split_day) return splitDayMatches(w.split_day, splitDay);
+        const name = (w.workout_name || w.name || '').toLowerCase();
+        const dayLower = String(splitDay).toLowerCase();
+        if (dayLower === 'push') return name.includes('push');
+        if (dayLower === 'pull') return name.includes('pull');
+        if (dayLower === 'legs' || dayLower === 'lower') return name.includes('leg') || name.includes('lower');
+        if (dayLower === 'upper') return name.includes('upper');
+        if (dayLower === 'full body') return name.includes('full');
+        if (dayLower === 'chest') return name.includes('chest');
+        if (dayLower === 'back') return name.includes('back');
+        if (dayLower === 'shoulders' || dayLower === 'shoulder') return name.includes('shoulder');
+        if (dayLower === 'arms' || dayLower === 'arm') {
+          return name.includes('arm') || name.includes('bicep') || name.includes('tricep');
+        }
+        return false;
+      });
+
+      const toSchedulable = (w, isTemplate = false) => ({
+        id: w.id || (isTemplate ? `template-${w.name}` : w.id),
+        workout_name: w.workout_name || w.name,
+        name: w.workout_name || w.name,
+        exercises: w.exercises || [],
+        isTemplate,
+        description: w.description,
+      });
+
+      const suggested = [
+        ...suggestedPremium.map((w) => toSchedulable(w, true)),
+        ...suggestedUser.map((w) => toSchedulable(w, false)),
+      ];
+
+      const allTemplates = premiumWorkouts.map((w) => toSchedulable(w, true));
+      const allUser = userWorkouts.map((w) => toSchedulable(w, false));
+
+      return {
+        splitDay: formatSplitDayLabel(splitDay),
+        isRest: false,
+        isCustom: isCustomSplitSelected,
+        suggested,
+        templates: isCustomSplitSelected ? allTemplates : suggestedPremium.map((w) => toSchedulable(w, true)),
+      };
+    },
+    [selectedSplit, userWorkouts, isCustomSplitSelected]
+  );
 
   // Load saved training split from AsyncStorage so selection persists. Custom split loads its 7-day schedule from a separate key.
   const WORKOUT_SPLIT_STORAGE_KEY = 'workout_split_id';
@@ -1045,7 +1208,8 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
             const raw = await AsyncStorage.getItem(WORKOUT_SPLIT_CUSTOM_DAYS_KEY);
             const parsed = raw ? JSON.parse(raw) : null;
             const days = Array.isArray(parsed) && parsed.length === 7 ? parsed : DEFAULT_CUSTOM_DAYS;
-            setSelectedSplit({ id: 'custom', label: 'Custom', days });
+            const customOpt = SPLIT_OPTIONS.find((s) => s.id === 'custom');
+            setSelectedSplit({ ...(customOpt || { id: 'custom', chipLabel: 'Custom' }), days });
           } else {
             setSelectedSplit(found || SPLIT_OPTIONS[0]);
           }
@@ -1057,16 +1221,22 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     return () => { isMounted = false; };
   }, []);
 
-  // Sync temporary checklist every time equipment modal opens.
-  useEffect(() => {
-    if (showEquipmentModal) {
-      setDraftEquipmentIds(Array.isArray(userEquipmentIds) ? [...userEquipmentIds] : []);
+  const handleSaveEquipmentSettings = useCallback(async ({ equipmentIds, filterEnabled }) => {
+    try {
+      const ids =
+        Array.isArray(equipmentIds) && equipmentIds.length > 0
+          ? equipmentIds
+          : [...ALL_USER_EQUIPMENT_IDS];
+      await AsyncStorage.setItem(USER_EQUIPMENT_STORAGE_KEY, JSON.stringify(ids));
+      await AsyncStorage.setItem(EQUIPMENT_FILTER_ENABLED_KEY, filterEnabled ? 'true' : 'false');
+      setUserEquipmentIds(ids);
+      setEquipmentFilterEnabled(filterEnabled);
+      setShowEquipmentModal(false);
+    } catch (e) {
+      console.warn('Failed to save equipment settings:', e);
+      Alert.alert('Could not save', 'Equipment settings failed to save. Please try again.');
     }
-  }, [showEquipmentModal, userEquipmentIds]);
-
-  const toggleDraftEquipment = (id) => {
-    setDraftEquipmentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
-  };
+  }, []);
 
   const scrollToRecommended = useCallback(() => {
     workoutScrollViewRef.current?.scrollTo({
@@ -1081,9 +1251,9 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
         const raw = await AsyncStorage.getItem(WORKOUT_SPLIT_CUSTOM_DAYS_KEY);
         const parsed = raw ? JSON.parse(raw) : null;
         const days = Array.isArray(parsed) && parsed.length === 7 ? parsed : [...DEFAULT_CUSTOM_DAYS];
-        setSelectedSplit({ id: 'custom', label: 'Custom', days });
+        setSelectedSplit({ ...opt, days });
       } catch (e) {
-        setSelectedSplit({ id: 'custom', label: 'Custom', days: [...DEFAULT_CUSTOM_DAYS] });
+        setSelectedSplit({ ...opt, days: [...DEFAULT_CUSTOM_DAYS] });
       }
     } else {
       setSelectedSplit(opt);
@@ -1093,7 +1263,6 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     } catch (e) {
       console.warn('Failed to save workout split:', e);
     }
-    setShowAllSplitsModal(false);
   }, []);
 
   // Load saved injured muscles (for filtering out exercises that target injured areas)
@@ -1113,9 +1282,6 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     })();
     return () => { isMounted = false; };
   }, []);
-
-  const USER_EQUIPMENT_STORAGE_KEY = 'user_workout_equipment_ids';
-  const EQUIPMENT_FILTER_ENABLED_KEY = 'equipment_filter_enabled';
 
   // Restore equipment checklist + whether filtering is on (persists across app restarts).
   useEffect(() => {
@@ -2811,11 +2977,11 @@ const startSprintStepTracking = async () => {
         <ScrollView ref={workoutScrollViewRef} style={styles.scrollView}>
           {/* Recovery Map - muscle group recovery at top */}
           {userProfile?.id && (
-            <View style={{ marginBottom: 12 }}>
+            <View style={styles.recoveryMapWrap}>
               <RecoveryMap userId={userProfile.id} refreshKey={recoveryMapRefreshKey} />
             </View>
           )}
-          <View style={styles.header}>
+          <View style={[styles.header, userProfile?.id && styles.headerBelowRecovery]}>
             <View style={styles.sectionHeader}>
             <Text style={styles.title}>Workouts</Text>
               <TouchableOpacity 
@@ -2827,121 +2993,6 @@ const startSprintStepTracking = async () => {
               </TouchableOpacity>
           </View>
         </View>
-
-          {/* Monthly Workout Calendar */}
-          {(() => {
-            return null;
-          })()}
-          {/* #endregion */}
-          <MonthlyWorkoutCalendar
-            ref={calendarRef}
-            selectedSplit={selectedSplit && selectedSplit.days ? selectedSplit : SPLIT_OPTIONS.find((s) => s.id === (selectedSplit?.id ?? selectedSplit)) || SPLIT_OPTIONS[0]}
-            getSplitDayForDate={getSplitDayForDate}
-            onDayPress={(date, existingWorkout) => {
-              setSelectedScheduledDate(date);
-              setSelectedScheduledWorkout(existingWorkout);
-              setShowScheduledWorkoutModal(true);
-            }}
-          />
-
-          {/* Scheduled Workout or Rest Day for Today */}
-          {todayScheduledWorkout && (
-            <View style={styles.scheduledWorkoutSection}>
-              {todayScheduledWorkout.is_rest_day ? (
-                // Rest Day Display
-                <>
-                  <Text style={styles.scheduledRestDayHeader}>TODAY'S SCHEDULE</Text>
-                  <View style={styles.scheduledRestDayCard}>
-                    <View style={styles.restDayIconContainer}>
-                      <Ionicons name="bed-outline" size={48} color="#ffa500" />
-                    </View>
-                    <Text style={styles.restDayTitle}>Rest Day</Text>
-                    <Text style={styles.restDayMessage}>
-                      Recovery is an essential part of training. Take time to rest and let your muscles rebuild.
-                    </Text>
-                    {todayScheduledWorkout.notes && todayScheduledWorkout.notes !== 'Rest day' && (
-                      <View style={styles.restDayNotesBox}>
-                        <Text style={styles.restDayNotesText}>{todayScheduledWorkout.notes}</Text>
-                      </View>
-                    )}
-                  </View>
-                </>
-              ) : (
-                // Workout Display
-                <>
-                  <Text style={styles.scheduledWorkoutHeader}>SCHEDULED WORKOUT</Text>
-                  <View style={styles.scheduledWorkoutCard}>
-                    <View style={styles.scheduledWorkoutHeader}>
-                      <View style={styles.scheduledWorkoutTitleContainer}>
-                        <Ionicons name="calendar" size={20} color="#00ffff" />
-                        <Text style={styles.scheduledWorkoutTitle}>
-                          {todayScheduledWorkout.workout_name}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.exercises}>
-                      <Text style={styles.exercisesTitle}>Exercises:</Text>
-                      {todayScheduledWorkout.workout_exercises && 
-                        todayScheduledWorkout.workout_exercises.slice(0, 3).map((exercise, index) => (
-                          <Text key={index} style={styles.exercisesList}>
-                            • {typeof exercise === 'string' ? exercise : exercise.name}
-                            {exercise.sets && exercise.reps && ` (${exercise.sets} x ${exercise.reps})`}
-                          </Text>
-                        ))
-                      }
-                      {todayScheduledWorkout.workout_exercises && 
-                        todayScheduledWorkout.workout_exercises.length > 3 && (
-                          <Text style={styles.exercisesList}>
-                            ... and {todayScheduledWorkout.workout_exercises.length - 3} more
-                          </Text>
-                        )
-                      }
-                    </View>
-                    <TouchableOpacity
-                      style={styles.startScheduledButton}
-                      onPress={() => startWorkout({
-                        id: todayScheduledWorkout.id,
-                        name: todayScheduledWorkout.workout_name,
-                        workout_name: todayScheduledWorkout.workout_name,
-                        exercises: todayScheduledWorkout.workout_exercises,
-                        isScheduled: true
-                      })}
-                    >
-                      <Ionicons name="play" size={20} color="#000" />
-                      <Text style={styles.startScheduledButtonText}>Start Scheduled Workout</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-            </View>
-          )}
-
-          {/* Compact today strip: split + recommended count, tap to scroll to full list */}
-          <TouchableOpacity
-            style={styles.todayStrip}
-            onPress={scrollToRecommended}
-            activeOpacity={0.8}
-          >
-            <View style={styles.todayStripLeft}>
-              <Text style={styles.todayStripLabel}>Today</Text>
-              <Text style={styles.todayStripSplit}>
-                {getSplitDayForDate(
-                  new Date(),
-                  selectedSplit && selectedSplit.days
-                    ? selectedSplit
-                    : SPLIT_OPTIONS.find((s) => s.id === (selectedSplit?.id ?? selectedSplit)) || SPLIT_OPTIONS[0]
-                ) ?? '—'}
-              </Text>
-            </View>
-            <View style={styles.todayStripRight}>
-              <Text style={styles.todayStripCount}>
-                {reccomendedWorkouts.length > 0
-                  ? `${reccomendedWorkouts.length} recommended`
-                  : 'No recommended'}
-              </Text>
-              <Ionicons name="chevron-forward" size={16} color="rgba(0, 255, 255, 0.8)" />
-            </View>
-          </TouchableOpacity>
 
           {/* Main Workout Content */}
             <View style={{marginHorizontal: 20, marginTop: 10, marginBottom: 0}}>
@@ -2996,6 +3047,135 @@ const startSprintStepTracking = async () => {
             </TouchableOpacity>
           </View>
         </View>
+
+          {/* Workout schedule — below quick actions */}
+          <View style={styles.scheduleSection}>
+            <Text style={styles.scheduleSectionTitle}>Workout schedule</Text>
+            <MonthlyWorkoutCalendar
+              ref={calendarRef}
+              selectedSplit={
+                selectedSplit && selectedSplit.days
+                  ? selectedSplit
+                  : SPLIT_OPTIONS.find((s) => s.id === (selectedSplit?.id ?? selectedSplit)) ||
+                    SPLIT_OPTIONS[0]
+              }
+              getSplitDayForDate={getSplitDayForDate}
+              onDayPress={(date, existingWorkout) => {
+                setSelectedScheduledDate(date);
+                setSelectedScheduledWorkout(existingWorkout);
+                setShowScheduledWorkoutModal(true);
+              }}
+            />
+
+            {todayScheduledWorkout && (
+              <View style={styles.scheduledWorkoutSection}>
+                {todayScheduledWorkout.is_rest_day ? (
+                  <>
+                    <Text style={styles.scheduledRestDayHeader}>TODAY'S SCHEDULE</Text>
+                    <View style={styles.scheduledRestDayCard}>
+                      <View style={styles.restDayIconContainer}>
+                        <Ionicons name="bed-outline" size={48} color="#ffa500" />
+                      </View>
+                      <Text style={styles.restDayTitle}>Rest Day</Text>
+                      <Text style={styles.restDayMessage}>
+                        Recovery is an essential part of training. Take time to rest and let your
+                        muscles rebuild.
+                      </Text>
+                      {todayScheduledWorkout.notes &&
+                        todayScheduledWorkout.notes !== 'Rest day' && (
+                          <View style={styles.restDayNotesBox}>
+                            <Text style={styles.restDayNotesText}>{todayScheduledWorkout.notes}</Text>
+                          </View>
+                        )}
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.scheduledWorkoutHeader}>SCHEDULED WORKOUT</Text>
+                    <View style={styles.scheduledWorkoutCard}>
+                      <View style={styles.scheduledWorkoutHeader}>
+                        <View style={styles.scheduledWorkoutTitleContainer}>
+                          <Ionicons name="calendar" size={20} color="#00ffff" />
+                          <Text style={styles.scheduledWorkoutTitle}>
+                            {todayScheduledWorkout.workout_name}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.exercises}>
+                        <Text style={styles.exercisesTitle}>Exercises:</Text>
+                        {todayScheduledWorkout.workout_exercises &&
+                          todayScheduledWorkout.workout_exercises
+                            .slice(0, 3)
+                            .map((exercise, index) => (
+                              <Text key={index} style={styles.exercisesList}>
+                                • {typeof exercise === 'string' ? exercise : exercise.name}
+                                {exercise.sets &&
+                                  exercise.reps &&
+                                  ` (${exercise.sets} x ${exercise.reps})`}
+                              </Text>
+                            ))}
+                        {todayScheduledWorkout.workout_exercises &&
+                          todayScheduledWorkout.workout_exercises.length > 3 && (
+                            <Text style={styles.exercisesList}>
+                              ... and {todayScheduledWorkout.workout_exercises.length - 3} more
+                            </Text>
+                          )}
+                      </View>
+                      <TouchableOpacity
+                        style={styles.startScheduledButton}
+                        onPress={() =>
+                          startWorkout({
+                            id: todayScheduledWorkout.id,
+                            name: todayScheduledWorkout.workout_name,
+                            workout_name: todayScheduledWorkout.workout_name,
+                            exercises: todayScheduledWorkout.workout_exercises,
+                            isScheduled: true,
+                          })
+                        }
+                      >
+                        <Ionicons name="play" size={20} color="#000" />
+                        <Text style={styles.startScheduledButtonText}>Start Scheduled Workout</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                )}
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[styles.todayStrip, isTodaySplitRest && styles.todayStripRest]}
+              onPress={scrollToRecommended}
+              activeOpacity={0.8}
+            >
+              <View style={styles.todayStripLeft}>
+                <Text style={[styles.todayStripLabel, isTodaySplitRest && styles.todayStripLabelRest]}>
+                  Today
+                </Text>
+                <Text style={[styles.todayStripSplit, isTodaySplitRest && styles.todayStripSplitRest]}>
+                  {formatSplitDayLabel(getSplitDayForDate(new Date(), effectiveSplit))}
+                </Text>
+              </View>
+              <View style={styles.todayStripRight}>
+                {isTodaySplitRest ? (
+                  <>
+                    <Ionicons name="bed-outline" size={18} color="#ffa500" style={{ marginRight: 4 }} />
+                    <Text style={styles.todayStripRestBadge}>Rest day</Text>
+                  </>
+                ) : (
+                  <Text style={styles.todayStripCount}>
+                    {reccomendedWorkouts.length > 0
+                      ? `${reccomendedWorkouts.length} recommended`
+                      : 'No recommended'}
+                  </Text>
+                )}
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color={isTodaySplitRest ? 'rgba(255, 165, 0, 0.9)' : 'rgba(0, 255, 255, 0.8)'}
+                />
+              </View>
+            </TouchableOpacity>
+          </View>
 
         {/* Pending Workout Shares */}
         {pendingShares.length > 0 && (
@@ -3113,97 +3293,85 @@ const startSprintStepTracking = async () => {
           </View>
         )}
 
-        {/* Split selector + Recommended for today */}
+        {/* Recommended for today + training split button */}
         <View
           ref={recommendedSectionRef}
           style={styles.section}
           onLayout={(e) => { recommendedSectionYRef.current = e.nativeEvent.layout.y; }}
         >
-          <View style={[styles.sectionHeader, { marginBottom: 12 }]}>
-            <Text style={styles.sectionTitle}>Training split</Text>
-            <View style={styles.splitHeaderActions}>
-              <TouchableOpacity
-                onPress={() => setShowEquipmentModal(true)}
-                style={styles.injuryButton}
-              >
-                <Ionicons name="barbell-outline" size={18} color="#00ffff" />
-                <Text style={styles.injuryButtonText}>
-                  {equipmentFilterEnabled ? 'Equipment (on)' : 'Equipment'}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setShowInjuryModal(true)}
-                style={styles.injuryButton}
-              >
-                <Ionicons name="body-outline" size={18} color="#00ffff" />
-                <Text style={styles.injuryButtonText}>
-                  {injuredMuscleIds.length > 0 ? `Injuries (${injuredMuscleIds.length})` : 'Injuries'}
-                </Text>
-              </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.trainingSplitButton}
+            onPress={() => setShowTrainingSplitModal(true)}
+            activeOpacity={0.85}
+          >
+            <View style={styles.trainingSplitButtonIcon}>
+              <Ionicons name="grid-outline" size={22} color="#00ffff" />
             </View>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-            {visibleSplitOptions.map((opt) => {
-              const isSelected = effectiveSplit.id === opt.id;
-              return (
-                <TouchableOpacity
-                  key={opt.id}
-                  onPress={async () => {
-                    if (opt.id === 'custom') {
-                      try {
-                        const raw = await AsyncStorage.getItem(WORKOUT_SPLIT_CUSTOM_DAYS_KEY);
-                        const parsed = raw ? JSON.parse(raw) : null;
-                        const days = Array.isArray(parsed) && parsed.length === 7 ? parsed : [...DEFAULT_CUSTOM_DAYS];
-                        setSelectedSplit({ id: 'custom', label: 'Custom', days });
-                      } catch (e) {
-                        setSelectedSplit({ id: 'custom', label: 'Custom', days: [...DEFAULT_CUSTOM_DAYS] });
-                      }
-                    } else {
-                      setSelectedSplit(opt);
-                    }
-                    try {
-                      await AsyncStorage.setItem(WORKOUT_SPLIT_STORAGE_KEY, opt.id);
-                    } catch (e) {
-                      console.warn('Failed to save workout split:', e);
-                    }
-                  }}
-                  style={[styles.periodButton, isSelected && styles.periodButtonActive, { marginRight: 8 }]}
-                >
-                  <Text style={[styles.periodButtonText, isSelected && styles.periodButtonTextActive]} numberOfLines={1}>{opt.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-            {SPLIT_OPTIONS.length > VISIBLE_SPLITS_COUNT && (
-              <TouchableOpacity
-                style={[styles.periodButton, { marginRight: 8 }]}
-                onPress={() => setShowAllSplitsModal(true)}
-              >
-                <Text style={styles.moreSplitsButtonText}>More splits</Text>
-              </TouchableOpacity>
-            )}
-          </ScrollView>
-          {selectedSplit?.id === 'custom' && (
+            <View style={styles.trainingSplitButtonTextWrap}>
+              <Text style={styles.trainingSplitButtonTitle}>Training split</Text>
+              <Text style={styles.trainingSplitButtonValue} numberOfLines={1}>
+                {effectiveSplit?.shortLabel || effectiveSplit?.chipLabel || 'Choose split'}
+              </Text>
+              <Text style={styles.trainingSplitButtonToday}>
+                Today: {formatSplitDayLabel(getSplitDayForDate(new Date(), effectiveSplit))}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color="rgba(0, 255, 255, 0.7)" />
+          </TouchableOpacity>
+
+          <Text style={styles.splitSubLabel}>Workout filters</Text>
+          <View style={styles.splitFiltersRow}>
             <TouchableOpacity
-              style={styles.customSplitEditButton}
-              onPress={() => {
-                const current = selectedSplit?.days && selectedSplit.days.length === 7 ? selectedSplit.days : DEFAULT_CUSTOM_DAYS;
-                const toDisplay = (d) => {
-                  const s = (typeof d === 'string' ? d.trim() : String(d)) || 'rest';
-                  const match = SPLIT_DAY_OPTIONS.find((o) => o.toLowerCase() === s.toLowerCase());
-                  return match || (s.charAt(0).toUpperCase() + s.slice(1).toLowerCase());
-                };
-                setCustomDaysForEdit(current.map(toDisplay));
-                setShowCustomSplitModal(true);
-              }}
+              onPress={() => setShowEquipmentModal(true)}
+              style={[styles.filterChipButton, equipmentFilterEnabled && styles.filterChipButtonActive]}
             >
-              <Ionicons name="create-outline" size={18} color="#00ffff" />
-              <Text style={styles.customSplitEditButtonText}>Edit week</Text>
+              <Ionicons name="barbell-outline" size={18} color="#00ffff" />
+              <Text style={styles.filterChipButtonText}>
+                {equipmentFilterEnabled ? 'Equipment · on' : 'Equipment'}
+              </Text>
             </TouchableOpacity>
-          )}
-          {reccomendedWorkouts.length > 0 ? (
+            <TouchableOpacity
+              onPress={() => setShowInjuryModal(true)}
+              style={[styles.filterChipButton, injuredMuscleIds.length > 0 && styles.filterChipButtonActive]}
+            >
+              <Ionicons name="body-outline" size={18} color="#00ffff" />
+              <Text style={styles.filterChipButtonText}>
+                {injuredMuscleIds.length > 0
+                  ? `Injuries · ${injuredMuscleIds.length}`
+                  : 'Injuries'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          {isTodaySplitRest &&
+          !(todayScheduledWorkout && !todayScheduledWorkout.is_rest_day) ? (
+            <>
+              <Text style={styles.splitRestSectionTitle}>Today's plan</Text>
+              <View style={styles.scheduledRestDayCard}>
+                <View style={styles.restDayIconContainer}>
+                  <Ionicons name="bed-outline" size={48} color="#ffa500" />
+                </View>
+                <Text style={styles.restDayTitle}>Rest day</Text>
+                <Text style={styles.restDayMessage}>
+                  Your training split has recovery scheduled for today. Rest, stretch lightly, or
+                  tap the calendar to schedule an optional workout.
+                </Text>
+                <TouchableOpacity
+                  style={styles.splitRestScheduleLink}
+                  onPress={() => {
+                    setSelectedScheduledDate(new Date());
+                    setSelectedScheduledWorkout(todayScheduledWorkout || null);
+                    setShowScheduledWorkoutModal(true);
+                  }}
+                >
+                  <Ionicons name="calendar-outline" size={18} color="#ffa500" />
+                  <Text style={styles.splitRestScheduleLinkText}>Schedule something anyway</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : reccomendedWorkouts.length > 0 ? (
             <>
               <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>
-                Recommended for today ({getSplitDayForDate(new Date(), effectiveSplit)})
+                Recommended for today ({formatSplitDayLabel(getSplitDayForDate(new Date(), effectiveSplit))})
               </Text>
               <View style={styles.workoutCardsContainer}>
                 {reccomendedWorkouts.map((workout, idx) => (
@@ -3218,29 +3386,18 @@ const startSprintStepTracking = async () => {
                 ))}
               </View>
             </>
-          ) : daySkippedBecauseOfInjury ? (
+          ) : injuryBlockReason ? (
             <>
               <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>
-                Recommended for today ({getSplitDayForDate(new Date(), effectiveSplit)})
+                Recommended for today ({formatSplitDayLabel(getSplitDayForDate(new Date(), effectiveSplit))})
               </Text>
               <Text style={styles.workoutDescription}>
-                Lower/leg day skipped because of your injuries. Rest or do light mobility.
-              </Text>
-            </>
-          ) : equipmentFilterEnabled &&
-            (() => {
-              const splitForToday = getSplitDayForDate(
-                new Date(),
-                effectiveSplit
-              );
-              return splitForToday && String(splitForToday).toLowerCase() !== 'rest';
-            })() ? (
-            <>
-              <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>
-                Recommended for today ({getSplitDayForDate(new Date(), effectiveSplit)})
-              </Text>
-              <Text style={styles.workoutDescription}>
-                No workouts match your equipment filter. Open Equipment to select more gear, or turn the filter off to see every option.
+                {injuryBlockReason === 'leg_day' &&
+                  'Lower/leg day is paused because of your injury settings. Rest or do light mobility.'}
+                {injuryBlockReason === 'injury' &&
+                  'No workouts left after applying your injury filters. Tap Injuries to adjust, or pick a different training day.'}
+                {injuryBlockReason === 'equipment' &&
+                  'No workouts match your equipment. Open Equipment, select more gear, or turn off “Filter recommendations.”'}
               </Text>
             </>
           ) : null}
@@ -4246,73 +4403,14 @@ const startSprintStepTracking = async () => {
         <FinishLineBannerAnimation visible={showConfetti} />
       )}
 
-      {/* Equipment picker modal (inline to guarantee it renders from this screen state) */}
-      <Modal
+      <WorkoutEquipmentModal
         visible={showEquipmentModal}
-        animationType="slide"
-        transparent
-        onRequestClose={() => setShowEquipmentModal(false)}
-      >
-        <View style={styles.customSplitModalOverlay}>
-          <View style={styles.customSplitModalContent}>
-            <Text style={styles.customSplitModalTitle}>Available equipment</Text>
-            <Text style={styles.customSplitModalSubtitle}>
-              Select the equipment you have. We filter recommended workouts based on this.
-            </Text>
+        onClose={() => setShowEquipmentModal(false)}
+        initialEquipmentIds={userEquipmentIds}
+        initialFilterEnabled={equipmentFilterEnabled}
+        onSave={handleSaveEquipmentSettings}
+      />
 
-            <ScrollView style={styles.customSplitModalScroll} showsVerticalScrollIndicator={false}>
-              {USER_EQUIPMENT_OPTIONS.map((opt) => {
-                const selected = draftEquipmentIds.includes(opt.id);
-                return (
-                  <TouchableOpacity
-                    key={opt.id}
-                    onPress={() => toggleDraftEquipment(opt.id)}
-                    style={[
-                      styles.customSplitOptionChip,
-                      { marginBottom: 10, justifyContent: 'flex-start' },
-                      selected && styles.customSplitOptionChipSelected,
-                    ]}
-                  >
-                    <Ionicons
-                      name={selected ? 'checkbox-outline' : 'square-outline'}
-                      size={18}
-                      color={selected ? '#000' : '#00ffff'}
-                      style={{ marginRight: 8 }}
-                    />
-                    <Text style={[styles.customSplitOptionText, selected && styles.customSplitOptionTextSelected]}>
-                      {opt.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            <View style={styles.customSplitModalActions}>
-              <TouchableOpacity style={styles.customSplitCancelButton} onPress={() => setShowEquipmentModal(false)}>
-                <Text style={styles.customSplitCancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.customSplitSaveButton}
-                onPress={async () => {
-                  try {
-                    await AsyncStorage.setItem(USER_EQUIPMENT_STORAGE_KEY, JSON.stringify(draftEquipmentIds));
-                    await AsyncStorage.setItem(EQUIPMENT_FILTER_ENABLED_KEY, 'true');
-                    setUserEquipmentIds(draftEquipmentIds);
-                    setEquipmentFilterEnabled(true);
-                    setShowEquipmentModal(false);
-                  } catch (e) {
-                    console.warn('Failed to save equipment settings:', e);
-                  }
-                }}
-              >
-                <Text style={styles.customSplitSaveButtonText}>Save equipment</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Scheduled Workout Modal */}
       <InjuryModal
         visible={showInjuryModal}
         onClose={() => setShowInjuryModal(false)}
@@ -4321,10 +4419,10 @@ const startSprintStepTracking = async () => {
         onSave={async (ids) => {
           try {
             await AsyncStorage.setItem('injuredMuscles', JSON.stringify(ids));
-            setInjuredMuscleIds(ids);
-            setShowInjuryModal(false);
+            setInjuredMuscleIds(Array.isArray(ids) ? ids : []);
           } catch (e) {
             console.warn('Failed to save injuries:', e);
+            Alert.alert('Could not save', 'Injury settings failed to save. Please try again.');
           }
         }}
       />
@@ -4338,8 +4436,10 @@ const startSprintStepTracking = async () => {
         }}
         selectedDate={selectedScheduledDate}
         existingWorkout={selectedScheduledWorkout}
+        scheduleContext={
+          selectedScheduledDate ? getScheduleContextForDate(selectedScheduledDate) : null
+        }
         onWorkoutUpdated={() => {
-          // Refresh the calendar and today's scheduled workout
           if (calendarRef.current && calendarRef.current.refresh) {
             calendarRef.current.refresh();
           }
@@ -4347,12 +4447,30 @@ const startSprintStepTracking = async () => {
         }}
       />
 
-      <AllSplitsModal
-        visible={showAllSplitsModal}
-        onClose={() => setShowAllSplitsModal(false)}
-        options={SPLIT_OPTIONS}
+      <TrainingSplitModal
+        visible={showTrainingSplitModal}
+        onClose={() => setShowTrainingSplitModal(false)}
+        effectiveSplit={effectiveSplit}
+        visibleSplitOptions={visibleSplitOptions}
+        frequencyVariantsForSplit={frequencyVariantsForSplit}
+        allSplitOptions={SPLIT_OPTIONS}
         selectedSplit={selectedSplit}
-        onSelect={handleSelectSplitFromModal}
+        onSelectSplit={handleSelectSplitFromModal}
+        todaySplitLabel={formatSplitDayLabel(getSplitDayForDate(new Date(), effectiveSplit))}
+        onEditCustomWeek={() => {
+          setShowTrainingSplitModal(false);
+          const current =
+            selectedSplit?.days && selectedSplit.days.length === 7
+              ? selectedSplit.days
+              : DEFAULT_CUSTOM_DAYS;
+          const toDisplay = (d) => {
+            const s = (typeof d === 'string' ? d.trim() : String(d)) || 'rest';
+            const match = SPLIT_DAY_OPTIONS.find((o) => o.toLowerCase() === s.toLowerCase());
+            return match || (s.charAt(0).toUpperCase() + s.slice(1).toLowerCase());
+          };
+          setCustomDaysForEdit(current.map(toDisplay));
+          setShowCustomSplitModal(true);
+        }}
       />
 
       {/* Custom split: edit which day of the week is Push, Pull, Legs, Rest, etc. */}
@@ -4451,9 +4569,18 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  recoveryMapWrap: {
+    paddingTop: 8,
+    marginBottom: 10,
+    paddingHorizontal: 20,
+  },
   header: {
     padding: 20,
     paddingTop: 60,
+  },
+  headerBelowRecovery: {
+    paddingTop: 10,
+    paddingBottom: 8,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -4497,6 +4624,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
   },
+  injuryButtonActive: {
+    backgroundColor: 'rgba(0, 255, 255, 0.12)',
+    borderColor: 'rgba(0, 255, 255, 0.45)',
+  },
   injuryButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4513,13 +4644,100 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#00ffff',
   },
-  splitHeaderActions: {
+  trainingSplitButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-end',
+    marginBottom: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 255, 255, 0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.35)',
+  },
+  trainingSplitButtonIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 255, 255, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  trainingSplitButtonTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  trainingSplitButtonTitle: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    marginBottom: 2,
+  },
+  trainingSplitButtonValue: {
+    color: '#00ffff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  trainingSplitButtonToday: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 13,
+    marginTop: 4,
+  },
+  splitSubLabel: {
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  splitChipScroll: {
+    marginBottom: 14,
+  },
+  splitChipScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
-    maxWidth: '62%',
+    paddingRight: 4,
+  },
+  splitTypeChip: {
+    marginRight: 0,
+  },
+  frequencyChip: {
+    minWidth: 48,
+    alignItems: 'center',
+  },
+  splitFiltersRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 16,
+  },
+  filterChipButton: {
+    flex: 1,
+    minWidth: '46%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.35)',
+    backgroundColor: 'rgba(0, 255, 255, 0.06)',
+  },
+  filterChipButtonActive: {
+    backgroundColor: 'rgba(0, 255, 255, 0.14)',
+    borderColor: 'rgba(0, 255, 255, 0.55)',
+  },
+  filterChipButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#00ffff',
   },
   workoutCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.03)',
@@ -4645,7 +4863,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     fontSize: 13,
     fontWeight: '600',
-    maxWidth: 140,
   },
   periodButtonTextActive: {
     color: '#00ffff',
@@ -4654,6 +4871,17 @@ const styles = StyleSheet.create({
     color: '#00ffff',
     fontSize: 13,
     fontWeight: '600',
+  },
+  scheduleSection: {
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  scheduleSectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginHorizontal: 20,
+    marginBottom: 12,
   },
   todayStrip: {
     flexDirection: 'row',
@@ -4668,6 +4896,46 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 255, 0.15)',
+  },
+  todayStripRest: {
+    backgroundColor: 'rgba(255, 165, 0, 0.08)',
+    borderColor: 'rgba(255, 165, 0, 0.45)',
+  },
+  todayStripLabelRest: {
+    color: 'rgba(255, 165, 0, 0.75)',
+  },
+  todayStripSplitRest: {
+    color: '#ffa500',
+  },
+  todayStripRestBadge: {
+    color: '#ffa500',
+    fontSize: 14,
+    fontWeight: '700',
+    marginRight: 4,
+  },
+  splitRestSectionTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#ffa500',
+    letterSpacing: 1,
+    marginBottom: 10,
+    textTransform: 'uppercase',
+  },
+  splitRestScheduleLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 165, 0, 0.4)',
+  },
+  splitRestScheduleLinkText: {
+    color: '#ffa500',
+    fontSize: 14,
+    fontWeight: '600',
   },
   todayStripLeft: {
     flexDirection: 'row',

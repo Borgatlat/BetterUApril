@@ -24,13 +24,20 @@ import {
  * ScheduledWorkoutModal Component
  * Enhanced modal for managing scheduled workouts with improved UI/UX
  */
-const ScheduledWorkoutModal = ({ visible, onClose, selectedDate, existingWorkout, onWorkoutUpdated }) => {
+const ScheduledWorkoutModal = ({
+  visible,
+  onClose,
+  selectedDate,
+  existingWorkout,
+  scheduleContext,
+  onWorkoutUpdated,
+}) => {
   const router = useRouter();
   const { userProfile } = useUser();
   const [userWorkouts, setUserWorkouts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [savingWorkout, setSavingWorkout] = useState(false);
-  const [viewMode, setViewMode] = useState('existing'); // 'existing', 'choose', or 'rest'
+  const [viewMode, setViewMode] = useState('existing'); // existing | choose | rest | split_rest
 
   /**
    * Format date for display
@@ -86,20 +93,24 @@ const ScheduledWorkoutModal = ({ visible, onClose, selectedDate, existingWorkout
     }
   };
 
-  // Load workouts when modal opens
   useEffect(() => {
-    if (visible) {
-      fetchUserWorkouts();
-      // Set view mode based on what exists
-      if (existingWorkout?.is_rest_day) {
-        setViewMode('rest');
-      } else if (existingWorkout) {
-        setViewMode('existing');
-      } else {
-        setViewMode('choose');
-      }
+    if (!visible) return;
+    fetchUserWorkouts();
+    if (existingWorkout?.is_rest_day) {
+      setViewMode('rest');
+    } else if (existingWorkout) {
+      setViewMode('existing');
+    } else if (scheduleContext?.isRest) {
+      setViewMode('split_rest');
+    } else {
+      setViewMode('choose');
     }
-  }, [visible, existingWorkout]);
+  }, [visible, existingWorkout, scheduleContext?.isRest]);
+
+  const planDayLabel = scheduleContext?.splitDay || '';
+  const isCustomPlan = scheduleContext?.isCustom === true;
+  const templateOptions = scheduleContext?.templates || [];
+  const suggestedOptions = scheduleContext?.suggested || [];
 
   /**
    * Handle scheduling a workout
@@ -296,7 +307,44 @@ const ScheduledWorkoutModal = ({ visible, onClose, selectedDate, existingWorkout
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContentContainer}
           >
-            {/* Rest day view */}
+            {/* Split plan says rest (no DB entry yet) */}
+            {viewMode === 'split_rest' && !existingWorkout && (
+              <View style={styles.restDayContainer}>
+                <View style={styles.sectionHeaderContainer}>
+                  <Ionicons name="bed" size={20} color="#ffa500" />
+                  <Text style={styles.sectionTitle}>Rest day on your split</Text>
+                </View>
+                <View style={styles.restDayCard}>
+                  <View style={styles.restDayIcon}>
+                    <Ionicons name="bed-outline" size={48} color="#ffa500" />
+                  </View>
+                  <Text style={styles.restDayTitle}>Recovery day</Text>
+                  <Text style={styles.restDayDescription}>
+                    Your training split marks this day as rest. You can keep it open or schedule a
+                    workout below.
+                  </Text>
+                </View>
+                <View style={styles.actionButtonsGrid}>
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={handleMarkRestDay}
+                    disabled={savingWorkout}
+                  >
+                    <Ionicons name="checkmark-circle" size={24} color="#000" />
+                    <Text style={styles.primaryButtonText}>Confirm rest day</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.secondaryButton}
+                    onPress={() => setViewMode('choose')}
+                  >
+                    <Ionicons name="barbell" size={20} color="#00ffff" />
+                    <Text style={styles.secondaryButtonText}>Pick a workout instead</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {/* Rest day view (saved in schedule) */}
             {existingWorkout && viewMode === 'rest' && (
               <View style={styles.restDayContainer}>
                 <View style={styles.sectionHeaderContainer}>
@@ -443,16 +491,46 @@ const ScheduledWorkoutModal = ({ visible, onClose, selectedDate, existingWorkout
                       <Ionicons name="fitness" size={20} color="#00ffff" />
                       <Text style={styles.sectionTitle}>Choose Different Workout</Text>
                     </View>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.backButton}
-                      onPress={() => setViewMode(existingWorkout?.is_rest_day ? 'rest' : 'existing')}
+                      onPress={() =>
+                        setViewMode(existingWorkout?.is_rest_day ? 'rest' : 'existing')
+                      }
                     >
                       <Ionicons name="arrow-back" size={16} color="#00ffff" />
                       <Text style={styles.backButtonText}>
-                        {existingWorkout?.is_rest_day ? 'Back to Rest Day' : 'Back to Scheduled Workout'}
+                        {existingWorkout?.is_rest_day
+                          ? 'Back to Rest Day'
+                          : 'Back to Scheduled Workout'}
                       </Text>
                     </TouchableOpacity>
                   </>
+                )}
+
+                {!existingWorkout && scheduleContext && (
+                  <View style={styles.planDayBanner}>
+                    <Text style={styles.planDayBannerLabel}>
+                      {isCustomPlan ? 'Custom week · this day' : 'Your split plan'}
+                    </Text>
+                    <Text style={styles.planDayBannerValue}>{planDayLabel}</Text>
+                    {isCustomPlan && (
+                      <Text style={styles.planDayBannerHint}>
+                        Pick any workout below — your week is fully customizable.
+                      </Text>
+                    )}
+                  </View>
+                )}
+
+                {!existingWorkout && scheduleContext?.isRest && (
+                  <TouchableOpacity
+                    style={styles.backButton}
+                    onPress={() => setViewMode('split_rest')}
+                  >
+                    <Ionicons name="arrow-back" size={16} color="#ffa500" />
+                    <Text style={[styles.backButtonText, { color: '#ffa500' }]}>
+                      Back to rest day
+                    </Text>
+                  </TouchableOpacity>
                 )}
 
                 {loading ? (
@@ -460,15 +538,8 @@ const ScheduledWorkoutModal = ({ visible, onClose, selectedDate, existingWorkout
                     <ActivityIndicator size="large" color="#00ffff" />
                     <Text style={styles.loadingText}>Loading your workouts...</Text>
                   </View>
-                ) : userWorkouts.length === 0 ? (
-                  <View style={styles.emptyContainer}>
-                    <Ionicons name="barbell-outline" size={64} color="#444" />
-                    <Text style={styles.emptyText}>No Workouts Created Yet</Text>
-                    <Text style={styles.emptySubtext}>Create a workout first to schedule it</Text>
-                  </View>
                 ) : (
                   <>
-                    {/* Rest Day Option - Moved to top */}
                     <View style={styles.restDayOptionTop}>
                       <TouchableOpacity
                         style={styles.restDayOptionButton}
@@ -480,40 +551,102 @@ const ScheduledWorkoutModal = ({ visible, onClose, selectedDate, existingWorkout
                       </TouchableOpacity>
                     </View>
 
-                    {/* Divider */}
+                    {!isCustomPlan && suggestedOptions.length > 0 && (
+                      <>
+                        <Text style={styles.listSectionTitle}>
+                          Suggested for {planDayLabel}
+                        </Text>
+                        <View style={styles.workoutList}>
+                          {suggestedOptions.map((workout, index) => (
+                            <TouchableOpacity
+                              key={`sug-${workout.id || workout.name}-${index}`}
+                              style={styles.workoutListItem}
+                              onPress={() => handleScheduleWorkout(workout)}
+                              disabled={savingWorkout}
+                            >
+                              <View style={styles.workoutListContent}>
+                                <Text style={styles.workoutListName}>
+                                  {workout.workout_name || workout.name}
+                                </Text>
+                                <Text style={styles.workoutListTag}>
+                                  {workout.isTemplate ? 'Built-in template' : 'Your workout'}
+                                </Text>
+                              </View>
+                              <Ionicons name="chevron-forward-circle" size={24} color="#00ffff" />
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </>
+                    )}
+
+                    {isCustomPlan && templateOptions.length > 0 && (
+                      <>
+                        <Text style={styles.listSectionTitle}>Workout templates</Text>
+                        <View style={styles.workoutList}>
+                          {templateOptions.map((workout, index) => (
+                            <TouchableOpacity
+                              key={`tpl-${workout.id || workout.name}-${index}`}
+                              style={styles.workoutListItem}
+                              onPress={() => handleScheduleWorkout(workout)}
+                              disabled={savingWorkout}
+                            >
+                              <View style={styles.workoutListContent}>
+                                <Text style={styles.workoutListName}>
+                                  {workout.workout_name || workout.name}
+                                </Text>
+                                <Text style={styles.workoutListTag}>Template</Text>
+                              </View>
+                              <Ionicons name="chevron-forward-circle" size={24} color="#00ffff" />
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </>
+                    )}
+
                     <View style={styles.dividerContainer}>
                       <View style={styles.dividerLine} />
-                      <Text style={styles.dividerText}>OR CHOOSE WORKOUT</Text>
+                      <Text style={styles.dividerText}>
+                        {isCustomPlan ? 'YOUR WORKOUTS' : 'MORE WORKOUTS'}
+                      </Text>
                       <View style={styles.dividerLine} />
                     </View>
 
-                    {/* Workouts List */}
-                    <View style={styles.workoutList}>
-                      {userWorkouts.map((workout, index) => (
-                        <TouchableOpacity
-                          key={workout.id}
-                          style={styles.workoutListItem}
-                          onPress={() => handleScheduleWorkout(workout)}
-                          disabled={savingWorkout}
-                        >
-                          <View style={styles.workoutListNumber}>
-                            <Text style={styles.workoutListNumberText}>{index + 1}</Text>
-                          </View>
-                          <View style={styles.workoutListContent}>
-                            <Text style={styles.workoutListName}>
-                              {workout.workout_name || workout.name}
-                            </Text>
-                            <View style={styles.workoutListMeta}>
-                              <Ionicons name="barbell" size={14} color="#666" />
-                              <Text style={styles.workoutListExercises}>
-                                {workout.exercises?.length || 0} exercises
-                              </Text>
+                    {userWorkouts.length === 0 ? (
+                      <View style={styles.emptyContainer}>
+                        <Ionicons name="barbell-outline" size={48} color="#444" />
+                        <Text style={styles.emptyText}>No saved workouts yet</Text>
+                        <Text style={styles.emptySubtext}>
+                          Create a workout in Your Workouts, then schedule it here.
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.workoutList}>
+                        {userWorkouts.map((workout, index) => (
+                          <TouchableOpacity
+                            key={workout.id || `user-${index}`}
+                            style={styles.workoutListItem}
+                            onPress={() => handleScheduleWorkout(workout)}
+                            disabled={savingWorkout}
+                          >
+                            <View style={styles.workoutListNumber}>
+                              <Text style={styles.workoutListNumberText}>{index + 1}</Text>
                             </View>
-                          </View>
-                          <Ionicons name="chevron-forward-circle" size={24} color="#00ffff" />
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                            <View style={styles.workoutListContent}>
+                              <Text style={styles.workoutListName}>
+                                {workout.workout_name || workout.name}
+                              </Text>
+                              <View style={styles.workoutListMeta}>
+                                <Ionicons name="barbell" size={14} color="#666" />
+                                <Text style={styles.workoutListExercises}>
+                                  {workout.exercises?.length || 0} exercises
+                                </Text>
+                              </View>
+                            </View>
+                            <Ionicons name="chevron-forward-circle" size={24} color="#00ffff" />
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    )}
                   </>
                 )}
               </View>
@@ -976,6 +1109,47 @@ const styles = StyleSheet.create({
     color: '#ffa500',
     fontSize: 17,
     fontWeight: 'bold',
+  },
+  planDayBanner: {
+    backgroundColor: 'rgba(0, 255, 255, 0.06)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.2)',
+  },
+  planDayBannerLabel: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  planDayBannerValue: {
+    color: '#00ffff',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  planDayBannerHint: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 13,
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  listSectionTitle: {
+    color: '#00ffff',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 10,
+    marginTop: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  workoutListTag: {
+    color: 'rgba(255, 255, 255, 0.45)',
+    fontSize: 12,
+    marginTop: 4,
   },
 });
 

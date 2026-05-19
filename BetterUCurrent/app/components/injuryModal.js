@@ -6,9 +6,10 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView,
+  Pressable,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 const ACCENT = '#00ffff';
@@ -16,13 +17,6 @@ const ACCENT = '#00ffff';
 /**
  * Modal for selecting which body areas are injured. Selections are used to filter
  * out exercises that target those areas (e.g. ACL → no leg exercises).
- *
- * PROPS:
- * - visible: boolean
- * - onClose: () => void
- * - options: Array<{ id, label }>  (e.g. injuredMusclesOptions from utils/injuryOptions)
- * - initialSelectedIds: string[]   (e.g. injuredMuscleIds from workout screen)
- * - onSave: (selectedIds: string[]) => void  (parent saves to AsyncStorage and updates state)
  */
 export default function InjuryModal({
   visible,
@@ -35,6 +29,7 @@ export default function InjuryModal({
   onSave,
 }) {
   const [selectedIds, setSelectedIds] = useState([]);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (visible) {
@@ -53,8 +48,6 @@ export default function InjuryModal({
     onClose?.();
   };
 
-  if (!visible) return null;
-
   return (
     <Modal
       visible={visible}
@@ -63,82 +56,67 @@ export default function InjuryModal({
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
+        <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" />
         <View style={styles.modalBox}>
-          <SafeAreaView style={styles.safe}>
-            <View style={styles.header}>
-              <Text style={styles.title}>{title}</Text>
-              <Text style={styles.subtitle}>
-                {subtitle}
-              </Text>
-              <TouchableOpacity
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                onPress={onClose}
-                style={styles.closeButton}
-              >
-                <Ionicons name="close" size={28} color="#fff" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.scroll}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
+          <View style={styles.header}>
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.subtitle}>{subtitle}</Text>
+            <TouchableOpacity
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              onPress={onClose}
+              style={styles.closeButton}
             >
-              <View style={styles.table}>
-                {options.map((option, index) => {
-                  const isSelected = selectedIds.includes(option.id);
-                  return (
-                    <TouchableOpacity
-                      key={option.id}
-                      activeOpacity={0.7}
-                      onPress={() => toggleOption(option.id)}
-                      style={[
-                        styles.row,
-                        index === 0 && styles.rowFirst,
-                        isSelected && styles.rowSelected,
-                      ]}
-                    >
-                      <View style={styles.rowLeft}>
-                        <View
-                          style={[
-                            styles.checkbox,
-                            isSelected && styles.checkboxSelected,
-                          ]}
-                        >
-                          {isSelected && (
-                            <Ionicons
-                              name="checkmark"
-                              size={16}
-                              color="#000"
-                            />
-                          )}
-                        </View>
-                        <Text
-                          style={[
-                            styles.rowLabel,
-                            isSelected && styles.rowLabelSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {option.label}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
+              <Ionicons name="close" size={28} color="#fff" />
+            </TouchableOpacity>
+          </View>
 
-            <View style={styles.footer}>
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={handleSave}
-                style={styles.saveButton}
-              >
-                <Text style={styles.saveButtonText}>{saveLabel}</Text>
-              </TouchableOpacity>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <View style={styles.table}>
+              {options.map((option, index) => {
+                const isSelected = selectedIds.includes(option.id);
+                return (
+                  <TouchableOpacity
+                    key={option.id}
+                    activeOpacity={0.7}
+                    onPress={() => toggleOption(option.id)}
+                    style={[styles.row, isSelected && styles.rowSelected]}
+                  >
+                    <View style={styles.rowLeft}>
+                      <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                        {isSelected && <Ionicons name="checkmark" size={16} color="#000" />}
+                      </View>
+                      <Text
+                        style={[styles.rowLabel, isSelected && styles.rowLabelSelected]}
+                        numberOfLines={2}
+                      >
+                        {option.label}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-          </SafeAreaView>
+          </ScrollView>
+
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setSelectedIds([])}
+              style={styles.clearButton}
+            >
+              <Text style={styles.clearButtonText}>Clear all</Text>
+            </TouchableOpacity>
+            <TouchableOpacity activeOpacity={0.8} onPress={handleSave} style={styles.saveButton}>
+              <Text style={styles.saveButtonText}>
+                {selectedIds.length === 0 ? saveLabel : `${saveLabel} (${selectedIds.length})`}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -148,25 +126,27 @@ export default function InjuryModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     justifyContent: 'flex-end',
   },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
   modalBox: {
-    backgroundColor: '#000',
+    width: '100%',
+    maxHeight: '85%',
+    backgroundColor: '#0a0a0a',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '85%',
     borderWidth: 1,
     borderBottomWidth: 0,
     borderColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  safe: {
-    flex: 1,
+    overflow: 'hidden',
   },
   header: {
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.08)',
   },
@@ -189,12 +169,12 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   scroll: {
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 1,
   },
   scrollContent: {
     paddingHorizontal: 20,
     paddingVertical: 16,
-    paddingBottom: 24,
   },
   table: {
     backgroundColor: 'rgba(255, 255, 255, 0.03)',
@@ -211,7 +191,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
-  rowFirst: {},
   rowSelected: {
     backgroundColor: 'rgba(0, 255, 255, 0.08)',
     borderLeftWidth: 3,
@@ -247,10 +226,22 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 20,
+    paddingTop: 14,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    gap: 10,
+  },
+  clearButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  clearButtonText: {
+    color: '#aaa',
+    fontSize: 15,
+    fontWeight: '600',
   },
   saveButton: {
     backgroundColor: 'rgba(0, 255, 255, 0.15)',

@@ -19,6 +19,16 @@ export const ALL_USER_EQUIPMENT_IDS = [
   'specialty',
 ];
 
+/** Quick-select presets in the equipment modal. */
+export const EQUIPMENT_PRESETS = {
+  full_gym: { label: 'Full gym', ids: [...ALL_USER_EQUIPMENT_IDS] },
+  home: {
+    label: 'Home',
+    ids: ['dumbbells', 'bench', 'pull_up_bar', 'resistance_bands'],
+  },
+  minimal: { label: 'Minimal', ids: ['dumbbells'] },
+};
+
 export const USER_EQUIPMENT_OPTIONS = [
   { id: 'dumbbells', label: 'Dumbbells', description: 'Free weights for presses, rows, curls, etc.' },
   { id: 'barbell', label: 'Barbell & plates', description: 'Squats, deadlifts, rows, presses with a bar.' },
@@ -97,8 +107,11 @@ const EXERCISE_EQUIPMENT = {
   'squat': ['barbell'],
   'squats': ['barbell'],
   'back squat': ['barbell'],
-  'romanian deadlift': ['dumbbells'],
-  'romanian deadlifts': ['dumbbells'],
+  'romanian deadlift': ['barbell'],
+  'romanian deadlifts': ['barbell'],
+  'stiff-leg deadlift': ['barbell'],
+  'good morning': ['barbell'],
+  't-bar row': ['barbell'],
   'goblet squat': ['dumbbells'],
   'dumbbell press': ['dumbbells', 'bench'],
   'dumbbell flyes': ['dumbbells', 'bench'],
@@ -134,7 +147,6 @@ const EXERCISE_EQUIPMENT = {
   'chin-ups': ['pull_up_bar'],
   'chin ups': ['pull_up_bar'],
   'burpee pull-ups': ['pull_up_bar', 'specialty'],
-  't-bar row': ['barbell'],
   'leg press': ['machines'],
   'leg curl': ['machines'],
   'leg extension': ['machines'],

@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../context/UserContext';
 import { isSameDay } from '../utils/scheduledWorkoutHelpers';
+import { isSplitRestDay, formatSplitDayLabel } from '../utils/splitDayUtils';
 import { supabase } from '../lib/supabase';
 
 /**
@@ -274,18 +275,25 @@ const MonthlyWorkoutCalendar = React.forwardRef(({ onDayPress, selectedSplit, ge
           const dateStr = getLocalDateString(date);
           const scheduled = scheduledWorkouts[dateStr];
           const isToday = isSameDay(date, today);
-          const isRestDay = scheduled?.is_rest_day;
-          const hasWorkout = scheduled && !isRestDay;
-          const splitDayLabel = selectedSplit && typeof getSplitDayForDate === 'function' ? getSplitDayForDate(date, selectedSplit) : null;
-          
+          const isScheduledRest = scheduled?.is_rest_day;
+          const hasWorkout = scheduled && !isScheduledRest;
+          const splitDayRaw =
+            selectedSplit && typeof getSplitDayForDate === 'function'
+              ? getSplitDayForDate(date, selectedSplit)
+              : null;
+          const isPlanRestDay = isSplitRestDay(splitDayRaw);
+          const showRestStyle = (isScheduledRest || (isPlanRestDay && !hasWorkout));
+          const splitDayLabel = splitDayRaw != null ? formatSplitDayLabel(splitDayRaw) : null;
+
           return (
             <TouchableOpacity
               key={index}
               style={[
                 styles.dayCell,
                 hasWorkout && styles.hasWorkoutCell,
-                isRestDay && styles.restDayCell,
-                isToday && styles.todayCell,
+                showRestStyle && styles.restDayCell,
+                isToday && !showRestStyle && styles.todayCell,
+                isToday && showRestStyle && styles.todayRestCell,
               ]}
               onPress={() => handleDayPress(date)}
               activeOpacity={0.7}
@@ -301,14 +309,20 @@ const MonthlyWorkoutCalendar = React.forwardRef(({ onDayPress, selectedSplit, ge
               <Text style={[
                 styles.dayNumber,
                 hasWorkout && styles.hasWorkoutText,
-                isRestDay && styles.restDayText,
+                showRestStyle && styles.restDayText,
               ]}>
                 {date.getDate()}
               </Text>
-              {/* Split day label (e.g. Push, Pull, Rest) from the selected weekly schedule */}
               {splitDayLabel != null && splitDayLabel !== '' && (
-                <Text style={[styles.splitDayLabel, isToday && styles.splitDayLabelToday]} numberOfLines={1}>
-                  {typeof splitDayLabel === 'string' ? (splitDayLabel.charAt(0).toUpperCase() + splitDayLabel.slice(1).toLowerCase()) : splitDayLabel}
+                <Text
+                  style={[
+                    styles.splitDayLabel,
+                    isToday && !showRestStyle && styles.splitDayLabelToday,
+                    showRestStyle && styles.splitDayLabelRest,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {splitDayLabel}
                 </Text>
               )}
             </TouchableOpacity>
@@ -407,6 +421,18 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     paddingVertical: 6,
+  },
+  todayRestCell: {
+    borderColor: '#ffa500',
+    borderWidth: 2,
+    backgroundColor: 'rgba(255, 165, 0, 0.12)',
+  },
+  splitDayLabelRest: {
+    color: '#ffa500',
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+    textAlign: 'center',
   },
   todayCell: {
     flex: 1,

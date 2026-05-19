@@ -2333,7 +2333,7 @@ const ActiveWorkoutScreen = () => {
                 // If not found, use default info or create basic exercise
                 return {
                   name: ex,
-                  targetMuscles: 'Full Body',
+                  targetMuscles: getExerciseInfo(ex)?.targetMuscles || 'Full Body',
                   instructions: ['No specific instructions available.'],
                   sets: Array.from({ length: 3 }, () => ({
                     weight: '',
@@ -2345,7 +2345,10 @@ const ActiveWorkoutScreen = () => {
               // If ex is an object, use its data
               return {
                 name: ex.name,
-                targetMuscles: ex.targetMuscles || 'Full Body',
+                targetMuscles:
+                  ex.targetMuscles ||
+                  getExerciseInfo(ex.name)?.targetMuscles ||
+                  'Full Body',
                 instructions: ex.instructions || ['No specific instructions available.'],
                 sets: Array.from({ length: parseInt(ex.sets) || 3 }, () => ({
                   weight: '',
@@ -3133,7 +3136,10 @@ const ActiveWorkoutScreen = () => {
       // Build exercises payload - mark sets with weight+reps as completed so they show in logs
       const exercisesPayload = workout.exercises.map(exercise => ({
         name: exercise.name,
-        targetMuscles: exercise.targetMuscles || [],
+        targetMuscles:
+          (typeof exercise.targetMuscles === 'string' && exercise.targetMuscles.trim()) ||
+          getExerciseInfo(exercise.name)?.targetMuscles ||
+          '',
         sets: exercise.sets.map(set => {
           const weight = getWeight(set);
           const reps = getReps(set);
