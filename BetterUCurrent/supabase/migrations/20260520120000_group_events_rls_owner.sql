@@ -1,15 +1,10 @@
 -- ============================================================
--- GROUP EVENTS: so "Share to groups" and group Events section work
--- Copy ALL of this file into Supabase Dashboard → SQL Editor → Run
---
--- If you see: relation "group_events" does not exist
---   → Run THIS file (not the policies-only snippet).
--- Same SQL lives in: supabase/migrations/20260520120000_group_events_rls_owner.sql
+-- GROUP EVENTS (full setup): tables + RLS
+-- Run this in Supabase Dashboard → SQL Editor if you see:
+--   relation "group_events" does not exist
 -- ============================================================
--- When you share an event to a group (Add Event modal → Share to groups),
--- the app inserts a row here. The group page shows only these rows.
 
--- 1) group_events: one row per event shared to a group (or created on group page)
+-- 1) group_events
 CREATE TABLE IF NOT EXISTS group_events (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     group_id UUID NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
@@ -73,7 +68,7 @@ CREATE POLICY "Creator can delete own group event"
     TO authenticated
     USING (auth.uid() = created_by);
 
--- 2) group_event_attendees: who is attending (Join Event on group page)
+-- 2) group_event_attendees
 CREATE TABLE IF NOT EXISTS group_event_attendees (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     event_id UUID NOT NULL REFERENCES group_events(id) ON DELETE CASCADE,

@@ -1,5 +1,16 @@
+import { Dimensions } from 'react-native';
 import { getLocalDateString } from './scheduledWorkoutHelpers';
 import { hexToRgba } from './homePageCustomization';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+/** Section padding (20×2) + chart card padding (16×2). */
+export const ANALYTICS_CHART_HORIZONTAL_INSET = 72;
+
+/** Inner drawable width for react-native-chart-kit (avoids clipped labels). */
+export function getAnalyticsChartWidth() {
+  return Math.max(260, SCREEN_WIDTH - ANALYTICS_CHART_HORIZONTAL_INSET);
+}
 
 /** Dark chart surfaces that match Home / Analytics (react-native-chart-kit). */
 export function getAnalyticsChartTheme(homeBg = '#000000', accent = '#00ffff') {
@@ -19,23 +30,24 @@ export function getAnalyticsChartTheme(homeBg = '#000000', accent = '#00ffff') {
   };
 }
 
-export function buildLineChartConfig(theme) {
+const chartLabelProps = {
+  fontSize: 11,
+  fontWeight: '500',
+};
+
+function baseChartConfig(theme, decimalPlaces = 0) {
   return {
     backgroundColor: theme.backgroundColor,
     backgroundGradientFrom: theme.backgroundGradientFrom,
     backgroundGradientTo: theme.backgroundGradientTo,
-    decimalPlaces: 0,
+    decimalPlaces,
     color: theme.line,
     labelColor: theme.labelColor,
-    style: { borderRadius: 16 },
-    propsForDots: {
-      r: '5',
-      strokeWidth: '2',
-      stroke: theme.dotStroke,
-      fill: theme.dotFill,
-    },
+    style: { borderRadius: 12 },
+    propsForLabels: chartLabelProps,
+    propsForVerticalLabels: { ...chartLabelProps, fontSize: 10 },
     propsForBackgroundLines: {
-      strokeDasharray: '',
+      strokeDasharray: '4 8',
       stroke: theme.gridStroke,
       strokeWidth: 1,
     },
@@ -44,6 +56,42 @@ export function buildLineChartConfig(theme) {
     fillShadowGradientOpacity: 0,
     useShadowColorFromDataset: false,
   };
+}
+
+export function buildLineChartConfig(theme, decimalPlaces = 0) {
+  return {
+    ...baseChartConfig(theme, decimalPlaces),
+    propsForDots: {
+      r: '4',
+      strokeWidth: '2',
+      stroke: theme.dotStroke,
+      fill: theme.dotFill,
+    },
+  };
+}
+
+export function buildBarChartConfig(theme, decimalPlaces = 0) {
+  return {
+    ...baseChartConfig(theme, decimalPlaces),
+    barPercentage: 0.55,
+    propsForBackgroundLines: {
+      strokeDasharray: '4 8',
+      stroke: theme.gridStroke,
+      strokeWidth: 1,
+    },
+  };
+}
+
+/** Prevent chart-kit from breaking when every value is 0. */
+export function sanitizeChartDataset(values = []) {
+  const nums = values.map((v) => Number(v) || 0);
+  if (nums.length === 0) return [0];
+  if (nums.every((n) => n === 0)) return nums.map(() => 0);
+  return nums;
+}
+
+export function sumChartValues(values = []) {
+  return (values || []).reduce((s, v) => s + (Number(v) || 0), 0);
 }
 
 /**

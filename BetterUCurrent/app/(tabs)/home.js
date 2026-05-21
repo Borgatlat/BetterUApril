@@ -21,6 +21,8 @@ import { RecoveryBreakdownModal } from '../../components/RecoveryBreakdownModal'
 import { computeRecoveryScore } from '../../utils/recoveryScore';
 import WeeklyWellnessCalendar from '../../components/WeeklyWellnessCalendar';
 import TodaysScheduleSection from '../../components/TodaysScheduleSection';
+import { useScheduleRefresh } from '../../context/ScheduleRefreshContext';
+import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 
 const motivationalQuotes = [
   { text: "The only bad workout is the one that didn't happen", author: 'Unknown' },
@@ -56,7 +58,8 @@ const HomeScreen = () => {
   const [showTherapistModal, setShowTherapistModal] = useState(false);
   const [showStreakModal, setShowStreakModal] = useState(false);
   const [streakRefreshKey, setStreakRefreshKey] = useState(0);
-  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
+  const { refreshKey: scheduleRefreshKey, notifyScheduleUpdated } = useScheduleRefresh();
+  const { scrollPaddingBottom } = useBottomChromeInsets();
   const [recoveryScore, setRecoveryScore] = useState(null);
   const [recoveryHoursLabel, setRecoveryHoursLabel] = useState('Fully recovered');
   const [recoveryBreakdown, setRecoveryBreakdown] = useState({ draggingDown: [], bringingUp: [] });
@@ -96,7 +99,7 @@ const HomeScreen = () => {
         setRecoveryBreakdown(res.breakdown || { draggingDown: [], bringingUp: [] });
       })
       .catch(() => {
-        if (!cancelled) setRecoveryScore(75);
+        if (!cancelled) setRecoveryScore(100);
       })
       .finally(() => {
         if (!cancelled) setRecoveryLoading(false);
@@ -126,7 +129,11 @@ const HomeScreen = () => {
   const showAiSection = homePrefs.showAIServices || homePrefs.showFutureU;
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: homeBg }]} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+    <ScrollView
+      style={[styles.container, { backgroundColor: homeBg }]}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}
+    >
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.greeting}>Hello, {userProfile?.full_name?.split(' ')[0] || userProfile?.username || 'there'}! 👋</Text>
@@ -181,9 +188,26 @@ const HomeScreen = () => {
       )}
 
       <View style={styles.section}>
-        <Text style={styles.sectionLabel}>Recovery</Text>
+        <View style={styles.recoverySectionHeader}>
+          <Text style={styles.sectionLabel}>Recovery</Text>
+          <TouchableOpacity
+            style={styles.recoveryMapLinkRow}
+            onPress={() =>
+              router.push({
+                pathname: '/(tabs)/workout',
+                params: { scrollToRecovery: '1' },
+              })
+            }
+            hitSlop={8}
+            accessibilityLabel="View muscle recovery map on Workout tab"
+            accessibilityRole="button"
+          >
+            <Text style={[styles.recoveryMapLink, { color: accent }]}>Muscle map</Text>
+            <Ionicons name="chevron-forward" size={14} color={accent} />
+          </TouchableOpacity>
+        </View>
         <RecoveryScoreCard
-          score={recoveryScore ?? 75}
+          score={recoveryScore ?? 100}
           hoursToRecoverLabel={recoveryHoursLabel}
           loading={recoveryLoading}
           accentColor={accent}
@@ -214,15 +238,11 @@ const HomeScreen = () => {
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Plan Your Week</Text>
-        <WeeklyWellnessCalendar
-          refreshKey={scheduleRefreshKey}
-          accentColor={accent}
-          onScheduleUpdated={() => setScheduleRefreshKey((k) => k + 1)}
-        />
+        <WeeklyWellnessCalendar accentColor={accent} />
         <TodaysScheduleSection
           refreshKey={scheduleRefreshKey}
           accentColor={accent}
-          onFutureuChecklistChanged={() => setScheduleRefreshKey((k) => k + 1)}
+          onFutureuChecklistChanged={notifyScheduleUpdated}
         />
             </View>
 
@@ -361,9 +381,16 @@ const HomeScreen = () => {
       <RecoveryBreakdownModal
         visible={showRecoveryBreakdown}
         onClose={() => setShowRecoveryBreakdown(false)}
-        score={recoveryScore ?? 75}
+        score={recoveryScore ?? 100}
         hoursToRecoverLabel={recoveryHoursLabel}
         breakdown={recoveryBreakdown}
+        onViewRecoveryMap={() => {
+          setShowRecoveryBreakdown(false);
+          router.push({
+            pathname: '/(tabs)/workout',
+            params: { scrollToRecovery: '1' },
+          });
+        }}
         onWhatShouldIDo={() => {
           setShowRecoveryBreakdown(false);
           setShowRecoverySuggestions(true);
@@ -387,7 +414,7 @@ const HomeScreen = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
-  scrollContent: { paddingBottom: 80 },
+  scrollContent: {},
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 60, paddingBottom: 20 },
   headerLeft: { flex: 1 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -401,7 +428,15 @@ const styles = StyleSheet.create({
   quoteAuthor: { fontSize: 14, color: '#666' },
   streakContainer: { alignItems: 'center', marginTop: 12, marginBottom: 16, paddingHorizontal: 20, width: '100%' },
   section: { width: '100%', paddingHorizontal: 20, marginBottom: 24 },
-  sectionLabel: { fontSize: 13, fontWeight: '600', color: '#666', marginBottom: 12, letterSpacing: 0.5 },
+  recoverySectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  recoveryMapLinkRow: { flexDirection: 'row', alignItems: 'center' },
+  recoveryMapLink: { fontSize: 13, fontWeight: '600', marginRight: 2 },
+  sectionLabel: { fontSize: 13, fontWeight: '600', color: '#666', marginBottom: 0, letterSpacing: 0.5 },
   actionRow: { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
   actionCard: { flex: 1, minWidth: 100, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', padding: 16, alignItems: 'center' },
   actionIconWrap: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },

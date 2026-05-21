@@ -59,7 +59,8 @@ import {
   formatSplitDayLabel,
 } from '../../utils/splitDayUtils';
 import { getScheduledWorkoutForDate } from '../../utils/scheduledWorkoutHelpers';
-import MonthlyWorkoutCalendar from '../../components/MonthlyWorkoutCalendar';
+import WorkoutWeekSchedule from '../../components/WorkoutWeekSchedule';
+import { useScheduleRefresh } from '../../context/ScheduleRefreshContext';
 import InjuryModal from '../components/injuryModal';
 import WorkoutEquipmentModal from '../../components/WorkoutEquipmentModal';
 import {
@@ -69,6 +70,7 @@ import {
 import ScheduledWorkoutModal from '../../components/ScheduledWorkoutModal';
 import TrainingSplitModal from '../../components/TrainingSplitModal';
 import RecoveryMap from '../../components/RecoveryMap';
+import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 import WorkoutLogs from './workout-logs';
 // Live Activities - shows real-time stats on lock screen during cardio
 import { 
@@ -163,7 +165,8 @@ const WorkoutScreen = () => {
   const [showScheduledWorkoutModal, setShowScheduledWorkoutModal] = useState(false);
   const [selectedScheduledDate, setSelectedScheduledDate] = useState(null);
   const [selectedScheduledWorkout, setSelectedScheduledWorkout] = useState(null);
-  const calendarRef = useRef(null);
+  const { refreshKey: scheduleRefreshKey, notifyScheduleUpdated } = useScheduleRefresh();
+  const { scrollPaddingBottom } = useBottomChromeInsets();
   const [sprintCompleted, setSprintCompleted] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [countdown, setCountdown] = useState(null);
@@ -660,6 +663,10 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     fetchTodayScheduledWorkout();
   }, []);
 
+  useEffect(() => {
+    fetchTodayScheduledWorkout();
+  }, [scheduleRefreshKey]);
+
   useFocusEffect(
     useCallback(() => {
       refreshWorkoutData();
@@ -687,6 +694,22 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
       setActiveTab('run');
     }
   }, [params.tab]);
+
+  // Deep link: Home recovery score → scroll to muscle recovery map
+  useFocusEffect(
+    useCallback(() => {
+      const flag = Array.isArray(params.scrollToRecovery)
+        ? params.scrollToRecovery[0]
+        : params.scrollToRecovery;
+      if (flag !== '1' && flag !== 'true') return;
+
+      setActiveTab('workout');
+      const timer = setTimeout(() => {
+        workoutScrollViewRef.current?.scrollTo({ y: 0, animated: true });
+      }, 150);
+      return () => clearTimeout(timer);
+    }, [params.scrollToRecovery])
+  );
 
 
   const handleDeleteWorkout = async (workoutId) => {
@@ -2974,7 +2997,11 @@ const startSprintStepTracking = async () => {
 
       {/* Workout Tab Content */}
       {activeTab === 'workout' && (
-        <ScrollView ref={workoutScrollViewRef} style={styles.scrollView}>
+        <ScrollView
+          ref={workoutScrollViewRef}
+          style={styles.scrollView}
+          contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}
+        >
           {/* Recovery Map - muscle group recovery at top */}
           {userProfile?.id && (
             <View style={styles.recoveryMapWrap}>
@@ -3051,20 +3078,10 @@ const startSprintStepTracking = async () => {
           {/* Workout schedule — below quick actions */}
           <View style={styles.scheduleSection}>
             <Text style={styles.scheduleSectionTitle}>Workout schedule</Text>
-            <MonthlyWorkoutCalendar
-              ref={calendarRef}
-              selectedSplit={
-                selectedSplit && selectedSplit.days
-                  ? selectedSplit
-                  : SPLIT_OPTIONS.find((s) => s.id === (selectedSplit?.id ?? selectedSplit)) ||
-                    SPLIT_OPTIONS[0]
-              }
-              getSplitDayForDate={getSplitDayForDate}
-              onDayPress={(date, existingWorkout) => {
-                setSelectedScheduledDate(date);
-                setSelectedScheduledWorkout(existingWorkout);
-                setShowScheduledWorkoutModal(true);
-              }}
+            <WorkoutWeekSchedule
+              accentColor="#00ffff"
+              getSplitDayForDate={(date) => getSplitDayForDate(date, effectiveSplit)}
+              scheduleContextForDate={getScheduleContextForDate}
             />
 
             {todayScheduledWorkout && (
@@ -4440,9 +4457,7 @@ const startSprintStepTracking = async () => {
           selectedScheduledDate ? getScheduleContextForDate(selectedScheduledDate) : null
         }
         onWorkoutUpdated={() => {
-          if (calendarRef.current && calendarRef.current.refresh) {
-            calendarRef.current.refresh();
-          }
+          notifyScheduleUpdated();
           fetchTodayScheduledWorkout();
         }}
       />
@@ -4875,6 +4890,7 @@ const styles = StyleSheet.create({
   scheduleSection: {
     marginTop: 8,
     marginBottom: 8,
+    paddingHorizontal: 4,
   },
   scheduleSectionTitle: {
     fontSize: 20,

@@ -34,6 +34,7 @@ import { getAIGenerationUsageInfo, incrementAIGenerationUsage, FEATURE_TYPES } f
 import { getLocalDateString } from '../../../utils/dateUtils';
 import { presentPremiumPaywall } from '../../../lib/purchases';
 import * as ImagePicker from 'expo-image-picker';
+import { useBottomChromeInsets } from '../../../context/BottomChromeContext';
 
 function TodayMealRow({ item, onDelete, onPress }) {
   const meal = item.meal || item;
@@ -390,6 +391,7 @@ export default function NutritionDashboard() {
   const params = useLocalSearchParams();
   const { user } = useAuth();
   const { userProfile, isPremium } = useUser();
+  const { scrollPaddingBottom } = useBottomChromeInsets();
   const { requestAIConsent } = useAIConsent();
   const tracking = useTracking();
 
@@ -687,7 +689,7 @@ export default function NutritionDashboard() {
     <SafeAreaView style={styles.container}>
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={T.primary} />}
       >

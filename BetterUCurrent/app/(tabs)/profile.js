@@ -17,6 +17,7 @@ import SpotifyConnectButton from '../components/SpotifyConnectButton';
 import { Share } from 'react-native';
 import { useSettings } from '../../context/SettingsContext';
 import { useLanguage } from '../../context/LanguageContext';
+import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 import BadgeDisplay from '../../components/BadgeDisplay';
 import BadgeModal from '../../components/BadgeModal';
 import BadgeCollection from '../../components/BadgeCollection';
@@ -53,6 +54,7 @@ try {
 
 const ProfileScreen = () => {
   const { userProfile, isLoading, updateProfile } = useUser();
+  const { scrollPaddingBottom } = useBottomChromeInsets();
   const {
     convertWeight,
     convertHeight,
@@ -2130,7 +2132,7 @@ const ProfileScreen = () => {
   return (
     <View style={[styles.container, { backgroundColor: currentTheme.backgroundColor }]}>
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.headerSection}>
@@ -3340,7 +3342,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 100,
   },
   headerSection: {
     marginBottom: 30,

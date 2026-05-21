@@ -8,6 +8,9 @@ import TutorialGate from '../components/TutorialGate';
 import { useLanguage } from '../../context/LanguageContext';
 import NonPremiumBannerAd from '../components/NonPremiumBannerAd';
 import { useAuthSession } from '../../hooks/useAuthSession';
+import { ScheduleRefreshProvider } from '../../context/ScheduleRefreshContext';
+import { BottomChromeProvider } from '../../context/BottomChromeContext';
+import { getBannerDockBottom } from '../../utils/bottomChromeInsets';
 
 const { height, width } = Dimensions.get('window');
 const isIphoneX = Platform.OS === 'ios' && (height >= 812 || width >= 812);
@@ -67,6 +70,8 @@ export default function TabLayout() {
 
   return (
     <TutorialGate>
+      <ScheduleRefreshProvider>
+      <BottomChromeProvider>
       <TrainerProvider>
         <TherapistProvider>
           <View style={styles.container}>
@@ -184,6 +189,8 @@ export default function TabLayout() {
           </View>
         </TherapistProvider>
       </TrainerProvider>
+      </BottomChromeProvider>
+      </ScheduleRefreshProvider>
     </TutorialGate>
   );
 }
@@ -196,6 +203,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: Platform.OS === 'ios' ? (isIphoneX ? 82 : 62) : 62,
+    bottom: getBannerDockBottom(),
+    zIndex: 8,
+    elevation: 8,
   },
 });

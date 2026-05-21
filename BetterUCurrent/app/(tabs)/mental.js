@@ -17,6 +17,7 @@ import { SharedMentalSessionsList } from '../../components/SharedMentalSessionsL
 import { StudentDailyPulseCard } from '../../components/school/StudentDailyPulseCard';
 import { VolunteerPromoCard } from '../../components/school/VolunteerPromoCard';
 import { DAILY_EXAMEN_CATEGORY } from '../../lib/dailyExamNavigation';
+import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 
 const mentalSessions = {
   meditation: [
@@ -128,6 +129,7 @@ const moodOptions = [
 const MentalScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { scrollPaddingBottom } = useBottomChromeInsets();
   const { user } = useAuth();
   const { updateMood, incrementStat, mood } = useTracking();
   const [showMoodModal, setShowMoodModal] = useState(false);
@@ -597,7 +599,7 @@ const MentalScreen = () => {
     <View style={styles.container}>
       <ScrollView
         style={{ paddingHorizontal: 20, paddingBottom: 20 }}
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}
       >
         {/* Title first (safe area) so school pulse card below is fully visible */}
         <View style={[styles.headerSection, { paddingTop: Math.max(insets.top, 12) + 4 }]}>

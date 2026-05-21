@@ -1,13 +1,17 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { getLocalDateString } from '../utils/scheduledWorkoutHelpers';
 import { hexToRgba } from '../utils/homePageCustomization';
 
-const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-const CELL_SIZE = 11;
-const CELL_GAP = 2;
-const ROW_LABEL_WIDTH = 24;
+const MONTH_LABEL_WIDTH = 34;
+const WEEK_LABEL_WIDTH = 26;
+const CELL_GAP = 5;
 
 const ActivityHeatMap = ({
   workouts,
@@ -16,10 +20,16 @@ const ActivityHeatMap = ({
   timePeriod = 'week',
 }) => {
   const [selectedKey, setSelectedKey] = useState(null);
+  const [contentWidth, setContentWidth] = useState(0);
 
   useEffect(() => {
     setSelectedKey(null);
   }, [timePeriod]);
+
+  const onContentLayout = useCallback((e) => {
+    const w = e.nativeEvent.layout.width;
+    if (w > 0) setContentWidth(w);
+  }, []);
 
   const heatData = useMemo(() => {
     const now = new Date();
@@ -47,6 +57,8 @@ const ActivityHeatMap = ({
         key: dateStr,
         dateStr,
         count: countForDate(dateStr),
+        dayNum: date.getDate(),
+        weekday: date.toLocaleDateString('en-US', { weekday: 'short' }),
       };
     };
 
@@ -59,33 +71,26 @@ const ActivityHeatMap = ({
         const year = monthStart.getFullYear();
         const month = monthStart.getMonth();
         const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const startDow = monthStart.getDay();
-        const totalSlots = startDow + daysInMonth;
-        const numRows = Math.ceil(totalSlots / 7);
-        const rows = Array.from({ length: numRows }, () => Array(7).fill(null));
+        const cells = [];
 
         for (let day = 1; day <= daysInMonth; day++) {
           const date = new Date(year, month, day);
           if (date > now) break;
-
-          const slot = startDow + day - 1;
-          const rowIndex = Math.floor(slot / 7);
-          const colIndex = slot % 7;
           const cell = buildDayCell(date);
-          rows[rowIndex][colIndex] = cell;
+          cells.push(cell);
           flat.push(cell);
         }
 
         yearMonths.push({
           key: `${year}-${month}`,
           label: monthStart.toLocaleDateString('en-US', { month: 'short' }),
-          rows,
+          cells,
         });
       }
 
       return {
-        layoutType: 'yearStack',
-        subtitle: 'Last 12 months — oldest at top, today at bottom',
+        layoutType: 'yearWrap',
+        subtitle: 'Last 12 months',
         allCells: flat,
         yearMonths,
       };
@@ -109,7 +114,7 @@ const ActivityHeatMap = ({
       }
       return {
         layoutType: 'monthGrid',
-        subtitle: 'Last 4 weeks — one square per day',
+        subtitle: 'Last 4 weeks',
         allCells: flat,
         monthRows,
       };
@@ -123,7 +128,7 @@ const ActivityHeatMap = ({
     }
     return {
       layoutType: 'weekRow',
-      subtitle: 'Last 7 days — one square per day',
+      subtitle: 'Last 7 days',
       allCells: days,
     };
   }, [workouts, mentalSessions, timePeriod]);
@@ -131,13 +136,21 @@ const ActivityHeatMap = ({
   const { layoutType, subtitle, allCells, monthRows, yearMonths } = heatData;
   const maxCount = Math.max(1, ...allCells.map((c) => c.count));
 
+  const yearCellSize = useMemo(() => {
+    if (!contentWidth || layoutType !== 'yearWrap') return 12;
+    const gridW = contentWidth - MONTH_LABEL_WIDTH;
+    const target = 13;
+    const cols = Math.max(6, Math.floor((gridW + CELL_GAP) / (target + CELL_GAP)));
+    return Math.floor((gridW - (cols - 1) * CELL_GAP) / cols);
+  }, [contentWidth, layoutType]);
+
   const getActivityColor = (count) => {
-    if (!count || count === 0) return 'rgba(255, 255, 255, 0.06)';
+    if (!count || count === 0) return 'rgba(255, 255, 255, 0.08)';
     const ratio = count / maxCount;
-    if (ratio <= 0.25) return hexToRgba(accentColor, 0.28);
-    if (ratio <= 0.5) return hexToRgba(accentColor, 0.45);
-    if (ratio <= 0.75) return hexToRgba(accentColor, 0.62);
-    return hexToRgba(accentColor, 0.88);
+    if (ratio <= 0.25) return hexToRgba(accentColor, 0.35);
+    if (ratio <= 0.5) return hexToRgba(accentColor, 0.55);
+    if (ratio <= 0.75) return hexToRgba(accentColor, 0.72);
+    return hexToRgba(accentColor, 0.95);
   };
 
   const selectedInfo = useMemo(() => {
@@ -156,41 +169,43 @@ const ActivityHeatMap = ({
     };
   }, [selectedKey, allCells]);
 
-  const renderSquare = (cell, cellKey) => {
+  const renderSquare = (cell, cellKey, size, styleOverride) => {
     if (!cell) {
       return (
         <View
           key={cellKey}
-          style={{
-            width: CELL_SIZE,
-            height: CELL_SIZE,
-            marginRight: CELL_GAP,
-            marginBottom: CELL_GAP,
-          }}
+          style={[
+            { width: size, height: size, marginBottom: CELL_GAP },
+            styleOverride,
+          ]}
         />
       );
     }
     const isSelected = selectedKey === cell.key;
+    const radius = Math.max(3, Math.floor(size * 0.2));
     return (
       <TouchableOpacity
         key={cellKey}
         onPress={() => setSelectedKey(isSelected ? null : cell.key)}
         activeOpacity={0.7}
-        style={{
-          width: CELL_SIZE,
-          height: CELL_SIZE,
-          marginRight: CELL_GAP,
-          marginBottom: CELL_GAP,
-        }}
+        style={[
+          {
+            width: size,
+            height: size,
+            marginBottom: CELL_GAP,
+            borderRadius: radius,
+          },
+          styleOverride,
+        ]}
+        accessibilityLabel={`${cell.dateStr}, ${cell.count} activities`}
       >
         <View
           style={[
-            styles.square,
+            styles.squareFill,
             {
-              width: CELL_SIZE,
-              height: CELL_SIZE,
+              borderRadius: radius,
               backgroundColor: getActivityColor(cell.count),
-              borderWidth: isSelected ? 1.5 : 0,
+              borderWidth: isSelected ? 2 : 0,
               borderColor: accentColor,
             },
           ]}
@@ -199,35 +214,8 @@ const ActivityHeatMap = ({
     );
   };
 
-  const renderDayRow = (cells, rowKey) => (
-    <View key={rowKey} style={styles.dayRow}>
-      {cells.map((cell, colIndex) =>
-        renderSquare(cell, `${rowKey}-${colIndex}`)
-      )}
-    </View>
-  );
-
-  const renderWeekdayHeader = () => (
-    <View style={styles.headerRow}>
-      <View style={styles.rowLabelSpacer} />
-      <View style={styles.dayRow}>
-        {WEEKDAY_LABELS.map((label, i) => (
-          <Text
-            key={`wd-${i}`}
-            style={[
-              styles.weekdayHeader,
-              {
-                width: CELL_SIZE,
-                marginRight: CELL_GAP,
-              },
-            ]}
-          >
-            {label}
-          </Text>
-        ))}
-      </View>
-    </View>
-  );
+  const legendSize =
+    layoutType === 'yearWrap' ? yearCellSize : layoutType === 'monthGrid' ? 14 : 12;
 
   return (
     <View
@@ -241,68 +229,116 @@ const ActivityHeatMap = ({
     >
       <Text style={styles.subtitle}>{subtitle}</Text>
 
-      {layoutType === 'weekRow' && (
-        <View style={styles.block}>
-          <View style={styles.headerRow}>
-            <View style={styles.rowLabelSpacer} />
-            <View style={styles.dayRow}>
-              {allCells.map((cell) => {
-                const label = new Date(`${cell.dateStr}T12:00:00`).toLocaleDateString(
-                  'en-US',
-                  { weekday: 'narrow' }
-                );
-                return (
-                  <Text
-                    key={`wh-${cell.key}`}
-                    style={[
-                      styles.weekdayHeader,
-                      { width: CELL_SIZE, marginRight: CELL_GAP },
-                    ]}
-                  >
-                    {label}
+      <View style={styles.content} onLayout={onContentLayout}>
+        {layoutType === 'weekRow' && (
+          <View style={styles.weekCardsRow}>
+            {allCells.map((cell) => {
+              const isSelected = selectedKey === cell.key;
+              const isToday = cell.dateStr === getLocalDateString(new Date());
+              return (
+                <TouchableOpacity
+                  key={cell.key}
+                  style={[
+                    styles.weekCard,
+                    {
+                      borderColor: isSelected
+                        ? accentColor
+                        : isToday
+                          ? hexToRgba(accentColor, 0.45)
+                          : 'rgba(255,255,255,0.08)',
+                      backgroundColor: isSelected
+                        ? hexToRgba(accentColor, 0.12)
+                        : 'rgba(255,255,255,0.04)',
+                    },
+                  ]}
+                  onPress={() => setSelectedKey(isSelected ? null : cell.key)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.weekCardDow, isToday && { color: accentColor }]}>
+                    {cell.weekday.slice(0, 3)}
                   </Text>
-                );
-              })}
-            </View>
+                  <View
+                    style={[
+                      styles.weekCardDot,
+                      { backgroundColor: getActivityColor(cell.count) },
+                    ]}
+                  />
+                  <Text style={styles.weekCardNum}>{cell.dayNum}</Text>
+                  {cell.count > 0 ? (
+                    <Text style={[styles.weekCardCount, { color: accentColor }]}>
+                      {cell.count}
+                    </Text>
+                  ) : (
+                    <Text style={styles.weekCardCountEmpty}>—</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
-          <View style={styles.headerRow}>
-            <View style={styles.rowLabelSpacer} />
-            <View style={styles.dayRow}>
-              {allCells.map((cell) => renderSquare(cell, cell.key))}
-            </View>
+        )}
+
+        {layoutType === 'monthGrid' && monthRows && contentWidth > 0 && (
+          <View style={styles.monthBlock}>
+            {monthRows.map((row) => (
+              <View key={row.weekLabel} style={styles.monthWeekRow}>
+                <View style={styles.weekLabelCol}>
+                  <Text style={styles.rowLabel}>{row.weekLabel}</Text>
+                </View>
+                <View style={styles.monthCellsRow}>
+                  {row.cells.map((cell, colIndex) => (
+                    <View key={`${row.weekLabel}-${colIndex}`} style={styles.monthCellSlot}>
+                      <TouchableOpacity
+                        onPress={() =>
+                          setSelectedKey(
+                            selectedKey === cell.key ? null : cell.key
+                          )
+                        }
+                        activeOpacity={0.7}
+                        style={[
+                          styles.monthSquare,
+                          {
+                            backgroundColor: getActivityColor(cell.count),
+                            borderWidth: selectedKey === cell.key ? 2 : 0,
+                            borderColor: accentColor,
+                          },
+                        ]}
+                        accessibilityLabel={`${cell.dateStr}, ${cell.count} activities`}
+                      />
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ))}
           </View>
-        </View>
-      )}
+        )}
 
-      {layoutType === 'monthGrid' && monthRows && (
-        <View style={styles.block}>
-          {renderWeekdayHeader()}
-          {monthRows.map((row) => (
-            <View key={row.weekLabel} style={styles.headerRow}>
-              <Text style={styles.rowLabel}>{row.weekLabel}</Text>
-              {renderDayRow(row.cells, row.weekLabel)}
-            </View>
-          ))}
-        </View>
-      )}
-
-      {layoutType === 'yearStack' && yearMonths && (
-        <View style={styles.block}>
-          {renderWeekdayHeader()}
-          {yearMonths.map((month) => (
-            <View key={month.key} style={styles.yearMonthBlock}>
-              <View style={styles.headerRow}>
-                <Text style={styles.rowLabel}>{month.label}</Text>
-                <View>
-                  {month.rows.map((row, rowIndex) =>
-                    renderDayRow(row, `${month.key}-r${rowIndex}`)
+        {layoutType === 'yearWrap' && yearMonths && contentWidth > 0 && (
+          <View style={styles.yearBlock}>
+            {yearMonths.map((month) => (
+              <View key={month.key} style={styles.yearMonthRow}>
+                <View style={styles.monthLabelCol}>
+                  <Text style={styles.monthLabel}>{month.label}</Text>
+                </View>
+                <View
+                  style={[
+                    styles.yearWrapGrid,
+                    { width: contentWidth - MONTH_LABEL_WIDTH },
+                  ]}
+                >
+                  {month.cells.map((cell, idx) =>
+                    renderSquare(
+                      cell,
+                      `${month.key}-${idx}`,
+                      yearCellSize,
+                      { marginRight: CELL_GAP }
+                    )
                   )}
                 </View>
               </View>
-            </View>
-          ))}
-        </View>
-      )}
+            ))}
+          </View>
+        )}
+      </View>
 
       <View style={styles.legend}>
         <Text style={styles.legendText}>Less</Text>
@@ -313,6 +349,9 @@ const ActivityHeatMap = ({
               style={[
                 styles.legendSquare,
                 {
+                  width: legendSize,
+                  height: legendSize,
+                  borderRadius: Math.max(2, Math.floor(legendSize * 0.2)),
                   backgroundColor: getActivityColor(
                     ratio === 0 ? 0 : Math.max(1, Math.round(ratio * maxCount))
                   ),
@@ -350,55 +389,132 @@ const ActivityHeatMap = ({
 const styles = StyleSheet.create({
   container: {
     borderRadius: 16,
-    padding: 15,
+    padding: 16,
     borderWidth: 1,
+    alignSelf: 'stretch',
   },
   subtitle: {
     color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 12,
     marginBottom: 14,
-    lineHeight: 17,
+    fontWeight: '500',
   },
-  block: {
-    marginBottom: 12,
+  content: {
+    width: '100%',
+    alignSelf: 'stretch',
   },
-  headerRow: {
+  squareFill: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  monthBlock: {
+    width: '100%',
+    gap: 6,
+  },
+  monthWeekRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    width: '100%',
   },
-  rowLabelSpacer: {
-    width: ROW_LABEL_WIDTH,
+  weekLabelCol: {
+    width: WEEK_LABEL_WIDTH,
+    justifyContent: 'center',
   },
   rowLabel: {
-    width: ROW_LABEL_WIDTH,
-    color: 'rgba(255, 255, 255, 0.45)',
-    fontSize: 10,
-    fontWeight: '600',
-    paddingTop: 1,
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 11,
+    fontWeight: '700',
   },
-  weekdayHeader: {
-    color: 'rgba(255, 255, 255, 0.45)',
-    fontSize: 9,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: CELL_GAP,
-  },
-  dayRow: {
+  monthCellsRow: {
+    flex: 1,
     flexDirection: 'row',
-    flexWrap: 'nowrap',
+    gap: CELL_GAP,
+    alignItems: 'center',
   },
-  yearMonthBlock: {
-    marginBottom: 10,
+  monthCellSlot: {
+    flex: 1,
+    aspectRatio: 1,
+    maxHeight: 42,
   },
-  square: {
-    borderRadius: 2,
+  monthSquare: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 7,
+    minHeight: 28,
+  },
+  yearBlock: {
+    width: '100%',
+    gap: 10,
+  },
+  yearMonthRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+  },
+  monthLabelCol: {
+    width: MONTH_LABEL_WIDTH,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingRight: 4,
+  },
+  monthLabel: {
+    color: 'rgba(255, 255, 255, 0.55)',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  yearWrapGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignContent: 'flex-start',
+  },
+  weekCardsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    width: '100%',
+  },
+  weekCard: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    minHeight: 88,
+  },
+  weekCardDow: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  weekCardDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  weekCardNum: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  weekCardCount: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  weekCardCountEmpty: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.25)',
+    marginTop: 2,
   },
   legend: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    marginTop: 4,
+    gap: 10,
+    marginTop: 12,
   },
   legendText: {
     color: 'rgba(255, 255, 255, 0.45)',
@@ -406,12 +522,7 @@ const styles = StyleSheet.create({
   },
   legendSquares: {
     flexDirection: 'row',
-    gap: 3,
-  },
-  legendSquare: {
-    width: 11,
-    height: 11,
-    borderRadius: 2,
+    gap: CELL_GAP,
   },
   selectedInfo: {
     marginTop: 14,

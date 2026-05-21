@@ -1,8 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Modal, FlatList, TextInput, SafeAreaView, Animated, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import AddEventModal from '../(modals)/AddEventModal';
+import {
+  fetchGroupEventsForFeed,
+  getLocalDateIso,
+  resolveRouteId,
+} from '../../utils/groupEventHelpers';
 import { supabase } from '../../lib/supabase';
+import { COMMUNITY_THEME as T } from '../../config/communityTheme';
 import { useUser } from '../../context/UserContext';
 import { Ionicons } from '@expo/vector-icons';
 import { PremiumAvatar } from '../components/PremiumAvatar';
@@ -15,6 +22,7 @@ const { width, height } = Dimensions.get('window');
 
 const GroupDetailScreen = () => {
  const { id } = useLocalSearchParams();
+ const groupId = resolveRouteId(id);
  const router = useRouter();
  const { userProfile } = useUser();
  const [group, setGroup] = useState(null);
@@ -63,11 +71,6 @@ const GroupDetailScreen = () => {
  const [groupEvents, setGroupEvents] = useState([]);
  const [loadingEvents, setLoadingEvents] = useState(false);
  const [showCreateEventModal, setShowCreateEventModal] = useState(false);
- const [eventTitle, setEventTitle] = useState('');
- const [eventDescription, setEventDescription] = useState('');
- const [eventDate, setEventDate] = useState('');
- const [eventTime, setEventTime] = useState('');
- const [creatingEvent, setCreatingEvent] = useState(false);
 
  // Animation state variables
  const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -95,15 +98,16 @@ const GroupDetailScreen = () => {
      })
    ]).start();
  },
- [id]);
+ [groupId]);
 
  const fetchGroupDetails = async () => {
+   if (!groupId) return;
    try {
      // Fetch group details
      const { data: groupData, error: groupError } = await supabase
        .from('groups')
        .select('*')
-       .eq('id', id)
+       .eq('id', groupId)
        .single();
 
 
@@ -115,7 +119,7 @@ const GroupDetailScreen = () => {
      const { data: memberData, error: memberError } = await supabase
        .from('group_members')
        .select('*')
-       .eq('group_id', id);
+       .eq('group_id', groupId);
 
 
      if (memberError) throw memberError;
@@ -290,7 +294,7 @@ const GroupDetailScreen = () => {
      const { error } = await supabase
        .from('group_members')
        .delete()
-       .eq('group_id', id)
+       .eq('group_id', groupId)
        .eq('user_id', userProfile.id);
 
 
@@ -322,7 +326,7 @@ const GroupDetailScreen = () => {
              const { error } = await supabase
                .from('groups')
                .delete()
-               .eq('id', id)
+               .eq('id', groupId)
                .eq('created_by', userProfile.id);
 
 
@@ -397,7 +401,7 @@ const GroupDetailScreen = () => {
        const { data: currentMembers, error: membersError } = await supabase
          .from('group_members')
          .select('user_id')
-         .eq('group_id', id);
+         .eq('group_id', groupId);
 
 
        if (membersError) throw membersError;
@@ -408,7 +412,7 @@ const GroupDetailScreen = () => {
        const { data: pendingInvitations, error: invitationsError } = await supabase
          .from('group_invitations')
          .select('invited_user_id')
-         .eq('group_id', id)
+         .eq('group_id', groupId)
          .eq('status', 'pending');
 
 
@@ -452,7 +456,7 @@ const GroupDetailScreen = () => {
      const { data: existingInvitation, error: checkError } = await supabase
        .from('group_invitations')
        .select('*')
-       .eq('group_id', id)
+       .eq('group_id', groupId)
        .eq('invited_user_id', friendId)
        .eq('status', 'pending')
        .single();
@@ -514,7 +518,7 @@ const GroupDetailScreen = () => {
      const { data: requests, error: requestsError } = await supabase
        .from('join_requests')
        .select('*')
-       .eq('group_id', id)
+       .eq('group_id', groupId)
        .eq('status', 'pending');
 
 
@@ -580,7 +584,7 @@ const GroupDetailScreen = () => {
      const { data, error } = await supabase
        .from('join_requests')
        .select('*')
-       .eq('group_id', id)
+       .eq('group_id', groupId)
        .eq('user_id', userProfile.id)
        .eq('status', 'pending')
        .single();
@@ -682,7 +686,7 @@ const GroupDetailScreen = () => {
              const { data: currentMember, error: fetchError } = await supabase
                .from('group_members')
                .select('role')
-               .eq('group_id', id)
+               .eq('group_id', groupId)
                .eq('user_id', memberId)
                .single();
 
@@ -702,7 +706,7 @@ const GroupDetailScreen = () => {
              const { error } = await supabase
                .from('group_members')
                .update({ role: 'admin' })
-               .eq('group_id', id)
+               .eq('group_id', groupId)
                .eq('user_id', memberId);
 
 
@@ -744,7 +748,7 @@ const GroupDetailScreen = () => {
              const { error } = await supabase
                .from('group_members')
                .delete()
-               .eq('group_id', id)
+               .eq('group_id', groupId)
                .eq('user_id', memberId);
 
 
@@ -881,7 +885,7 @@ const GroupDetailScreen = () => {
              const { data: currentMember, error: fetchError } = await supabase
                .from('group_members')
                .select('role')
-               .eq('group_id', id)
+               .eq('group_id', groupId)
                .eq('user_id', memberId)
                .single();
 
@@ -901,7 +905,7 @@ const GroupDetailScreen = () => {
              const { error } = await supabase
                .from('group_members')
                .update({ role: 'member' })
-               .eq('group_id', id)
+               .eq('group_id', groupId)
                .eq('user_id', memberId);
 
 
@@ -1004,7 +1008,7 @@ const GroupDetailScreen = () => {
            full_name
          )
        `)
-       .eq('group_id', id)
+       .eq('group_id', groupId)
        .eq('invited_by_id', userProfile.id)
        .eq('status', 'pending');
 
@@ -1179,38 +1183,75 @@ const handlePostUpload = async () => {
 
 // Fetch only events shared to this group (from group_events table)
 const fetchGroupEvents = async () => {
+  if (!groupId) {
+    setGroupEvents([]);
+    return;
+  }
   try {
     setLoadingEvents(true);
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateIso();
 
-    const { data: events, error } = await supabase
+    let events = null;
+    let fetchErr = null;
+
+    const withAttendees = await supabase
       .from('group_events')
-      .select(`
-        *,
-        group_event_attendees(
-          user_id,
-          profiles!group_event_attendees_user_id_fkey(
-            id,
-            username,
-            avatar_url,
-            full_name
-          )
-        )
-      `)
-      .eq('group_id', id)
+      .select('*, group_event_attendees(user_id)')
+      .eq('group_id', groupId)
       .gte('event_date', today)
       .order('event_date', { ascending: true })
       .order('event_time', { ascending: true });
 
-    if (error) throw error;
+    if (withAttendees.error) {
+      console.warn('group_events with attendees:', withAttendees.error.message);
+      const fallback = await supabase
+        .from('group_events')
+        .select('*')
+        .eq('group_id', groupId)
+        .gte('event_date', today)
+        .order('event_date', { ascending: true })
+        .order('event_time', { ascending: true });
+      events = fallback.data;
+      fetchErr = fallback.error;
+    } else {
+      events = withAttendees.data;
+    }
+
+    if (fetchErr) throw fetchErr;
+
+    console.log('fetchGroupEvents', {
+      groupId,
+      today,
+      count: events?.length ?? 0,
+    });
+
+    const attendeeUserIds = [
+      ...new Set(
+        (events || []).flatMap((e) =>
+          (e.group_event_attendees || []).map((a) => a.user_id).filter(Boolean)
+        )
+      ),
+    ];
+
+    const profileById = {};
+    if (attendeeUserIds.length > 0) {
+      const { data: profiles, error: profErr } = await supabase
+        .from('profiles')
+        .select('id, username, avatar_url, full_name')
+        .in('id', attendeeUserIds);
+      if (profErr) throw profErr;
+      (profiles || []).forEach((p) => {
+        profileById[p.id] = p;
+      });
+    }
 
     const processedEvents = (events || []).map((event) => {
       const attendees = event.group_event_attendees || [];
-      const attendeeProfiles = (attendees
-        .map((a) => a.profiles)
+      const attendeeProfiles = attendees
+        .map((a) => profileById[a.user_id])
         .filter(Boolean)
-        .slice(0, 3)) || [];
+        .slice(0, 3);
       return {
         ...event,
         attendees: attendees.map((a) => ({ user_id: a.user_id })),
@@ -1228,60 +1269,16 @@ const fetchGroupEvents = async () => {
   }
 };
 
-// Add function to create group event
-const createGroupEvent = async () => {
+const handleEventCreated = async () => {
+  setShowCreateEventModal(false);
+  await fetchGroupEvents();
+  if (members.length > 0) {
+    await fetchGroupActivities();
+  }
   try {
-    if (!eventTitle.trim() || !eventDate || !eventTime) {
-      Alert.alert('Error', 'Please fill in all required fields');
-      return;
-    }
-
-    setCreatingEvent(true);
-
-    const { data, error } = await supabase
-      .from('group_events')
-      .insert({
-        group_id: id,
-        title: eventTitle.trim(),
-        description: eventDescription.trim() || null,
-        event_date: eventDate,
-        event_time: eventTime,
-        created_by: userProfile.id,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    // Add creator as attendee
-    await supabase
-      .from('group_event_attendees')
-      .insert({
-        event_id: data.id,
-        user_id: userProfile.id,
-      });
-
-    // Refresh events
-    await fetchGroupEvents();
-
-    // Reset form and close modal
-    setEventTitle('');
-    setEventDescription('');
-    setEventDate('');
-    setEventTime('');
-    setShowCreateEventModal(false);
-
-    Alert.alert('Success', 'Event created successfully!');
-    try {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (e) {
-      console.log('Haptics not available');
-    }
-  } catch (error) {
-    console.error('Error creating event:', error);
-    Alert.alert('Error', 'Failed to create event. Please try again.');
-  } finally {
-    setCreatingEvent(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  } catch (e) {
+    console.log('Haptics not available');
   }
 };
 
@@ -1333,9 +1330,44 @@ const toggleEventAttendance = async (eventId, isAttending) => {
      
      console.log('Fetching activities for member IDs:', memberIds);
      
+     let groupEventsFeed = [];
+     try {
+       if (groupId) {
+         groupEventsFeed = await fetchGroupEventsForFeed(supabase, groupId, { limit: 15 });
+       }
+     } catch (groupEvErr) {
+       console.error('Error fetching group events for activity:', groupEvErr);
+     }
+
      if (memberIds.length === 0) {
-       console.log('No members found, setting empty activities');
-       setGroupActivities([]);
+       if (groupEventsFeed.length === 0) {
+         setGroupActivities([]);
+         return;
+       }
+       const creatorIds = [...new Set(groupEventsFeed.map((e) => e.created_by).filter(Boolean))];
+       const { data: evProfiles } = await supabase
+         .from('profiles')
+         .select('id, username, full_name, avatar_url')
+         .in('id', creatorIds);
+       const findUser = (userId) =>
+         evProfiles?.find((p) => p.id === userId) || {
+           id: userId,
+           username: 'Unknown User',
+           full_name: 'Unknown User',
+           avatar_url: null,
+         };
+       setGroupActivities(
+         groupEventsFeed
+           .map((ev) => ({
+             ...ev,
+             type: 'group_event',
+             displayName: ev.title,
+             subtitle: `${ev.event_date} at ${ev.event_time}`,
+             user: findUser(ev.created_by),
+             created_at: ev.created_at,
+           }))
+           .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+       );
        return;
      }
 
@@ -1368,26 +1400,31 @@ const toggleEventAttendance = async (eventId, isAttending) => {
         .in('profile_id', memberIds)
         .order('completed_at', { ascending: false })
         .limit(5),
-       supabase
-         .from('runs')
-         .select(`
-           id,
-           user_id,
-           distance,
-           duration,
-           pace,
-           created_at
-         `)
-         .in('user_id', memberIds)
-         .order('created_at', { ascending: false })
-         .limit(5)
+       memberIds.length > 0
+         ? supabase
+             .from('runs')
+             .select(
+               'id, user_id, distance_meters, duration_seconds, average_pace_minutes_per_km, created_at, start_time'
+             )
+             .in('user_id', memberIds)
+             .order('start_time', { ascending: false })
+             .limit(5)
+         : Promise.resolve({ data: [], error: null }),
      ]);
 
      // Fetch user profiles separately
-     const { data: profiles } = await supabase
-       .from('profiles')
-       .select('id, username, full_name, avatar_url')
-       .in('id', memberIds);
+     const profileIds = [
+       ...memberIds,
+       ...groupEventsFeed.map((e) => e.created_by).filter(Boolean),
+     ];
+     const uniqueProfileIds = [...new Set(profileIds)].filter(Boolean);
+     const { data: profiles } =
+       uniqueProfileIds.length > 0
+         ? await supabase
+             .from('profiles')
+             .select('id, username, full_name, avatar_url')
+             .in('id', uniqueProfileIds)
+         : { data: [] };
 
     // Debug: Log the raw data
     console.log('Workouts data:', workouts.data);
@@ -1437,9 +1474,24 @@ const toggleEventAttendance = async (eventId, isAttending) => {
        ...(runs.data || []).map(run => ({
          ...run,
          type: 'run',
-         displayName: `${(run.distance / 1000).toFixed(1)}km Run`,
-         subtitle: `${run.duration} min • ${run.pace} pace`,
-         user: findUserProfile(run.user_id)
+         displayName: `${((run.distance_meters || 0) / 1000).toFixed(1)}km Run`,
+         subtitle: `${Math.round((run.duration_seconds || 0) / 60)} min${
+           run.average_pace_minutes_per_km
+             ? ` • ${run.average_pace_minutes_per_km} min/km`
+             : ''
+         }`,
+         user: findUserProfile(run.user_id),
+         created_at: run.start_time || run.created_at,
+       })),
+       ...groupEventsFeed.map((ev) => ({
+         ...ev,
+         type: 'group_event',
+         displayName: ev.title,
+         subtitle: `${ev.event_date} at ${ev.event_time}${
+           ev.description ? ` · ${ev.description.slice(0, 48)}` : ''
+         }`,
+         user: findUserProfile(ev.created_by),
+         created_at: ev.created_at,
        }))
     ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 20); // Show top 20 most recent activities
@@ -1466,7 +1518,7 @@ const fetchChallenges = async () => {
           avatar_url
         )
       `)
-      .eq('group_id', id)
+      .eq('group_id', groupId)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -1609,8 +1661,16 @@ const createChallenge = async () => {
    if (id && isMember) {
      fetchChallenges();
    }
- }, [id, isMember]);
+ }, [groupId, isMember]);
 
+ useFocusEffect(
+   useCallback(() => {
+     if (groupId && isMember) {
+       fetchGroupEvents();
+       fetchGroupActivities();
+     }
+   }, [groupId, isMember, members.length])
+ );
 
  if (loading) {
    return (
@@ -2058,7 +2118,7 @@ const createChallenge = async () => {
            {isMember && (
              <View style={styles.actionViewItem}>
                <TouchableOpacity
-                 style={styles.actionButton}
+                 style={[styles.actionButton, styles.actionButtonEvent]}
                  onPress={() => {
                    try {
                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2068,9 +2128,14 @@ const createChallenge = async () => {
                    setShowCreateEventModal(true);
                  }}
                >
-                 <Ionicons name="calendar" size={28} color="#00ffff" />
+                 <LinearGradient
+                   colors={['rgba(0, 255, 255, 0.22)', 'rgba(0, 255, 255, 0.06)']}
+                   style={styles.actionButtonEventGradient}
+                 >
+                   <Ionicons name="calendar" size={26} color={T.communityAccent} />
+                 </LinearGradient>
                </TouchableOpacity>
-               <Text style={styles.actionButtonText}>Event</Text>
+               <Text style={[styles.actionButtonText, styles.actionButtonTextEvent]}>Event</Text>
              </View>
            )}
            
@@ -2165,9 +2230,13 @@ const createChallenge = async () => {
        {isMember && (
          <View style={styles.section}>
            <View style={styles.eventsHeader}>
-             <Text style={styles.sectionTitle}>Upcoming Events</Text>
+             <View style={styles.eventsHeaderTextCol}>
+               <Text style={styles.sectionTitle}>Upcoming Events</Text>
+               <Text style={styles.eventsSectionSubtitle}>Plan meetups for your group</Text>
+             </View>
              <TouchableOpacity
                style={styles.createEventButton}
+               activeOpacity={0.88}
                onPress={() => {
                  try {
                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2176,20 +2245,45 @@ const createChallenge = async () => {
                  }
                  setShowCreateEventModal(true);
                }}
+               accessibilityRole="button"
+               accessibilityLabel="Create event"
              >
-               <LinearGradient
-                 colors={['#00ffff', '#00cccc']}
-                 style={styles.createEventButtonGradient}
-               >
-                 <Ionicons name="add-circle" size={20} color="#fff" style={{ marginRight: 8 }} />
-                 <Text style={styles.createEventButtonText}>Create Event</Text>
-               </LinearGradient>
+               <View style={styles.createEventButtonGlow} />
+               <View style={styles.createEventButtonInner}>
+                 <View style={styles.createEventIconCircle}>
+                   <Ionicons name="add" size={20} color="#000" />
+                 </View>
+                 <Text style={styles.createEventButtonText}>New event</Text>
+               </View>
              </TouchableOpacity>
            </View>
            {loadingEvents ? (
-             <ActivityIndicator size="small" color="#00ffff" style={{ marginTop: 16 }} />
+             <ActivityIndicator size="small" color={T.communityAccent} style={{ marginTop: 16 }} />
            ) : groupEvents.length === 0 ? (
-             <Text style={styles.emptyText}>No upcoming events</Text>
+             <View style={styles.eventsEmptyCard}>
+               <View style={styles.eventsEmptyIconWrap}>
+                 <Ionicons name="calendar-outline" size={28} color={T.communityAccent} />
+               </View>
+               <Text style={styles.eventsEmptyTitle}>No upcoming events</Text>
+               <Text style={styles.eventsEmptySubtitle}>
+                 Host a workout, hangout, or challenge — members will see it here.
+               </Text>
+               <TouchableOpacity
+                 style={styles.eventsEmptyCta}
+                 activeOpacity={0.88}
+                 onPress={() => {
+                   try {
+                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                   } catch (e) {
+                     console.log('Haptics not available:', e);
+                   }
+                   setShowCreateEventModal(true);
+                 }}
+               >
+                 <Ionicons name="megaphone-outline" size={18} color="#000" />
+                 <Text style={styles.eventsEmptyCtaText}>Create event</Text>
+               </TouchableOpacity>
+             </View>
            ) : (
              <FlatList
                horizontal
@@ -2542,6 +2636,7 @@ const createChallenge = async () => {
                            colors={[
                              activity.type === 'workout' ? ['#00ffff', '#00cccc'] :
                              activity.type === 'mental' ? ['#00ff99', '#00cc7a'] :
+                             activity.type === 'group_event' ? ['#ff9f43', '#ff6b35'] :
                              ['#00ffff', '#00cccc']
                            ]}
                            style={styles.activityAvatarGlow}
@@ -2565,12 +2660,14 @@ const createChallenge = async () => {
                        styles.activityTypeIcon,
                        activity.type === 'workout' && styles.workoutTypeIcon,
                        activity.type === 'mental' && styles.mentalTypeIcon,
-                       activity.type === 'run' && styles.runTypeIcon
+                       activity.type === 'run' && styles.runTypeIcon,
+                       activity.type === 'group_event' && styles.eventTypeIcon
                      ]}>
                        <LinearGradient
                          colors={[
                            activity.type === 'workout' ? ['rgba(0, 255, 255, 0.2)', 'rgba(0, 255, 255, 0.1)'] :
                            activity.type === 'mental' ? ['rgba(0, 255, 153, 0.2)', 'rgba(0, 255, 153, 0.1)'] :
+                           activity.type === 'group_event' ? ['rgba(255, 159, 67, 0.25)', 'rgba(255, 107, 53, 0.12)'] :
                            ['rgba(0, 255, 255, 0.2)', 'rgba(0, 255, 255, 0.1)']
                          ]}
                          style={styles.activityTypeGradient}
@@ -2579,12 +2676,14 @@ const createChallenge = async () => {
                            name={
                              activity.type === 'workout' ? 'barbell' :
                              activity.type === 'mental' ? 'leaf' :
+                             activity.type === 'group_event' ? 'calendar' :
                              'fitness'
                            } 
                            size={20} 
                            color={
                              activity.type === 'workout' ? '#00ffff' :
                              activity.type === 'mental' ? '#00ff99' :
+                             activity.type === 'group_event' ? '#ff9f43' :
                              '#00ffff'
                            } 
                          />
@@ -2969,130 +3068,13 @@ const createChallenge = async () => {
          </View>
        </Modal>
 
-       {/* Create Event Modal */}
-       <Modal
+       <AddEventModal
          visible={showCreateEventModal}
-         transparent={true}
-         animationType="slide"
-         onRequestClose={() => setShowCreateEventModal(false)}
-       >
-         <View style={styles.modalOverlay}>
-           <Animated.View 
-             style={[
-               styles.modalContent,
-               {
-                 opacity: fadeAnim,
-                 transform: [{ scale: scaleAnim }]
-               }
-             ]}
-           >
-             <LinearGradient
-               colors={['rgba(0, 255, 255, 0.08)', 'rgba(0, 255, 255, 0.02)']}
-               style={styles.modalGradient}
-             >
-               <View style={styles.modalHeader}>
-                 <View style={styles.modalTitleContainer}>
-                   <LinearGradient
-                     colors={['#00ffff', '#00cccc']}
-                     style={styles.modalTitleIcon}
-                   >
-                     <Ionicons name="calendar" size={24} color="#fff" />
-                   </LinearGradient>
-                   <Text style={styles.modalTitle}>Create Event</Text>
-                 </View>
-                 <TouchableOpacity
-                   onPress={() => {
-                     try {
-                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                     } catch (error) {
-                       console.log('Haptics not available:', error);
-                     }
-                     setShowCreateEventModal(false);
-                   }}
-                   style={styles.closeButton}
-                 >
-                   <LinearGradient
-                    colors={['rgba(255, 68, 68, 0.2)', 'rgba(255, 68, 68, 0.1)']}
-                    style={styles.closeButtonGradient}
-                  >
-                    <Ionicons name="close" size={24} color="#ff4444" />
-                   </LinearGradient>
-                 </TouchableOpacity>
-               </View>
-
-               <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={false}>
-                 <View style={styles.formGroup}>
-                   <Text style={styles.label}>Event Title *</Text>
-                   <TextInput
-                     style={styles.input}
-                     placeholder="e.g., Group Workout Session"
-                     placeholderTextColor="#666"
-                     value={eventTitle}
-                     onChangeText={setEventTitle}
-                     maxLength={100}
-                   />
-                 </View>
-
-                 <View style={styles.formGroup}>
-                   <Text style={styles.label}>Description</Text>
-                   <TextInput
-                     style={[styles.input, styles.textArea]}
-                     placeholder="Add event details..."
-                     placeholderTextColor="#666"
-                     value={eventDescription}
-                     onChangeText={setEventDescription}
-                     multiline
-                     numberOfLines={4}
-                     maxLength={500}
-                   />
-                 </View>
-
-                 <View style={styles.formGroup}>
-                   <Text style={styles.label}>Date *</Text>
-                   <TextInput
-                     style={styles.input}
-                     placeholder="YYYY-MM-DD"
-                     placeholderTextColor="#666"
-                     value={eventDate}
-                     onChangeText={setEventDate}
-                   />
-                 </View>
-
-                 <View style={styles.formGroup}>
-                   <Text style={styles.label}>Time *</Text>
-                   <TextInput
-                     style={styles.input}
-                     placeholder="HH:MM (e.g., 18:00)"
-                     placeholderTextColor="#666"
-                     value={eventTime}
-                     onChangeText={setEventTime}
-                   />
-                 </View>
-               </ScrollView>
-
-               <TouchableOpacity
-                 style={[styles.submitButton, creatingEvent && styles.submitButtonDisabled]}
-                 onPress={createGroupEvent}
-                 disabled={creatingEvent}
-               >
-                 <LinearGradient
-                   colors={['#00ffff', '#00cccc']}
-                   style={styles.submitButtonGradient}
-                 >
-                   {creatingEvent ? (
-                     <ActivityIndicator size="small" color="#fff" />
-                   ) : (
-                     <>
-                       <Ionicons name="calendar" size={20} color="#fff" style={{ marginRight: 8 }} />
-                       <Text style={styles.submitButtonText}>Create Event</Text>
-                     </>
-                   )}
-                 </LinearGradient>
-               </TouchableOpacity>
-             </LinearGradient>
-           </Animated.View>
-         </View>
-       </Modal>
+         onClose={() => setShowCreateEventModal(false)}
+         onSuccess={handleEventCreated}
+         contextGroupId={groupId}
+         contextGroupName={group?.name || 'this group'}
+       />
          </ScrollView>
        </SafeAreaView>
    </View>
@@ -3953,6 +3935,9 @@ const styles = StyleSheet.create({
   runTypeIcon: {
     // Additional styling for run type
   },
+  eventTypeIcon: {
+    // Group event cards in activity list
+  },
   activityContent: {
     padding: 18,
   },
@@ -4181,27 +4166,140 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  // Event styles
+  // Event styles (aligned with Community / AddEventModal)
   eventsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 16,
+    gap: 12,
+  },
+  eventsHeaderTextCol: {
+    flex: 1,
+    paddingRight: 4,
+  },
+  eventsSectionSubtitle: {
+    color: T.communityTextMuted,
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 18,
   },
   createEventButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
+    position: 'relative',
+    borderRadius: T.communityRadius,
+    overflow: 'visible',
   },
-  createEventButtonGradient: {
+  createEventButtonGlow: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: 4,
+    bottom: -2,
+    borderRadius: T.communityRadius,
+    backgroundColor: T.communityAccent,
+    opacity: 0.35,
+  },
+  createEventButtonInner: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    gap: 8,
+    backgroundColor: T.communityAccent,
+    borderRadius: T.communityRadius,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    shadowColor: T.communityAccent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  createEventIconCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 0, 0, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   createEventButtonText: {
-    color: '#fff',
+    color: '#000',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  eventsEmptyCard: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    borderRadius: T.communityRadius,
+    backgroundColor: T.communityCardBg,
+    borderWidth: 1,
+    borderColor: T.communityBorder,
+  },
+  eventsEmptyIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: T.communityBorderActive,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  eventsEmptyTitle: {
+    color: T.communityTextPrimary,
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  eventsEmptySubtitle: {
+    color: T.communityTextSecondary,
     fontSize: 14,
-    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 18,
+    maxWidth: 280,
+  },
+  eventsEmptyCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: T.communityAccent,
+    borderRadius: T.communityRadius,
+    paddingVertical: 14,
+    paddingHorizontal: 22,
+    width: '100%',
+    maxWidth: 260,
+    shadowColor: T.communityAccent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  eventsEmptyCtaText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  actionButtonEvent: {
+    borderWidth: 1,
+    borderColor: T.communityBorderActive,
+    overflow: 'hidden',
+  },
+  actionButtonEventGradient: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+  },
+  actionButtonTextEvent: {
+    color: T.communityAccent,
+    fontWeight: '700',
   },
   eventsList: {
     paddingRight: 20,

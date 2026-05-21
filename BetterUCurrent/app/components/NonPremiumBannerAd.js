@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { useUser } from '../../context/UserContext';
+import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 import {
   getBannerAdUnitId,
   isNativeMobileAdsSupported,
@@ -21,10 +22,13 @@ function loadBannerAdModule() {
  */
 export default function NonPremiumBannerAd({ style }) {
   const { isPremium, isLoading } = useUser();
+  const { setBannerHeight, clearBannerHeight } = useBottomChromeInsets();
   const [adLoaded, setAdLoaded] = useState(false);
   const [adFailed, setAdFailed] = useState(false);
 
-  if (isLoading || isPremium || Platform.OS === 'web') return null;
+  if (isLoading || isPremium || Platform.OS === 'web') {
+    return null;
+  }
   if (!isNativeMobileAdsSupported()) return null;
   if (adFailed) return null;
 
@@ -36,8 +40,16 @@ export default function NonPremiumBannerAd({ style }) {
   const configuredUnitId = getBannerAdUnitId();
   const adUnitId = __DEV__ ? TestIds.BANNER : (configuredUnitId || TestIds.BANNER);
 
+  const handleLayout = (e) => {
+    const h = e.nativeEvent.layout.height;
+    if (adLoaded && h > 0) setBannerHeight(h);
+  };
+
   return (
-    <View style={[styles.container, !adLoaded && styles.collapsed, style]}>
+    <View
+      style={[styles.container, !adLoaded && styles.collapsed, style]}
+      onLayout={handleLayout}
+    >
       <BannerAd
         unitId={adUnitId}
         size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
@@ -47,6 +59,7 @@ export default function NonPremiumBannerAd({ style }) {
         onAdLoaded={() => setAdLoaded(true)}
         onAdFailedToLoad={(error) => {
           setAdFailed(true);
+          clearBannerHeight();
           if (__DEV__) console.warn('[AdMob] Banner failed to load:', error?.message || error);
         }}
         onAdOpened={() => {}}
@@ -63,6 +76,8 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingVertical: 4,
     backgroundColor: '#000',
+    zIndex: 8,
+    elevation: 8,
   },
   collapsed: {
     height: 0,

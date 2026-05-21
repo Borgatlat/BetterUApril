@@ -6,9 +6,11 @@ import FeedCard from '../../components/FeedCard';
 import { Ionicons } from '@expo/vector-icons';
 import { PremiumAvatar } from '../../components/PremiumAvatar';
 import { useAuth } from '../../../context/AuthContext';
+import { fetchGroupEventsForFeed, resolveRouteId } from '../../../utils/groupEventHelpers';
 
 export default function GroupFeedScreen() {
   const { id, name } = useLocalSearchParams();
+  const groupId = resolveRouteId(id);
   const [loading, setLoading] = useState(true);
   const [feed, setFeed] = useState([]);
   const router = useRouter();
@@ -16,7 +18,7 @@ export default function GroupFeedScreen() {
 
   useEffect(() => {
     fetchGroupFeed();
-  }, [id]);
+  }, [groupId]);
 
   const fetchGroupFeed = async () => {
     try {
@@ -24,7 +26,7 @@ export default function GroupFeedScreen() {
       const { data: members, error: membersError } = await supabase
         .from('group_members')
         .select('user_id')
-        .eq('group_id', id);
+        .eq('group_id', groupId);
 
       if (membersError) throw membersError;
 
@@ -74,6 +76,13 @@ export default function GroupFeedScreen() {
         nonBannedMembers: nonBannedMemberIds.length,
         bannedMembers: memberIds.length - nonBannedMemberIds.length
       });
+
+      let groupEventsFeed = [];
+      try {
+        groupEventsFeed = await fetchGroupEventsForFeed(supabase, groupId, { limit: 30 });
+      } catch (groupEvErr) {
+        console.error('Error fetching group events for feed:', groupEvErr);
+      }
 
       // Get all activities from non-banned group members
       const [workouts, mentalSessions, runs, prs] = await Promise.all([
@@ -149,7 +158,8 @@ export default function GroupFeedScreen() {
         ...filteredWorkouts.map(w => w.user_id),
         ...filteredMentalSessions.map(m => m.profile_id),
         ...filteredRuns.map(r => r.user_id),
-        ...filteredPRs.map(p => p.user_id)
+        ...filteredPRs.map(p => p.user_id),
+        ...groupEventsFeed.map((e) => e.created_by).filter(Boolean),
       ]);
 
       // Fetch profiles for all users
@@ -219,6 +229,27 @@ export default function GroupFeedScreen() {
             { label: 'Target', value: `${p.weight_target} kg` }
           ],
           comments: []
+        })),
+        ...groupEventsFeed.map((ev) => ({
+          ...ev,
+          type: 'event',
+          targetId: ev.id,
+          user_id: ev.created_by,
+          profiles: profileMap[ev.created_by],
+          created_at: ev.created_at,
+          description: ev.description || '',
+          stats: [
+            { label: 'Date', value: ev.event_date },
+            { label: 'Time', value: ev.event_time },
+          ],
+          comments: [],
+          eventData: {
+            id: ev.id,
+            title: ev.title,
+            description: ev.description,
+            event_date: ev.event_date,
+            event_time: ev.event_time,
+          },
         }))
       ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -274,11 +305,13 @@ export default function GroupFeedScreen() {
         title={item.type === 'workout' ? (item.workout_name || 'Workout') : 
                item.type === 'mental' ? (item.session_name || 'Mental Session') :
                item.type === 'run' ? (item.activity_type === 'run' ? 'Run' : item.activity_type === 'walk' ? 'Walk' : 'Bike') :
-               item.type === 'pr' ? (item.exercise || 'Personal Record') : 'Activity'}
+               item.type === 'pr' ? (item.exercise || 'Personal Record') :
+               item.type === 'event' ? (item.title || 'Group Event') : 'Activity'}
         description={item.description || ''}
         stats={item.stats || []}
         type={item.type}
         targetId={item.targetId}
+        eventData={item.eventData}
         isOwner={isOwnActivity}
         onEdit={getEditHandler()}
         userId={item.user_id || item.profile_id}

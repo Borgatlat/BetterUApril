@@ -3,14 +3,16 @@ import { TouchableOpacity, StyleSheet, Animated, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import TrainerModal from '../app/(modals)/trainer-modal';
+import { useBottomChromeInsets } from '../context/BottomChromeContext';
 
 export const FloatingAITrainer = () => {
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const { floatingAIBottom } = useBottomChromeInsets();
 
   return (
     <>
       <TouchableOpacity 
-        style={styles.container}
+        style={[styles.container, { bottom: floatingAIBottom }]}
         onPress={() => setIsModalVisible(true)}
       >
       <LinearGradient
@@ -44,9 +46,8 @@ export const FloatingAITrainer = () => {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 100,
     right: 20,
-    zIndex: 1000,
+    zIndex: 1001,
     shadowColor: '#00ffff',
     shadowOffset: {
       width: 0,

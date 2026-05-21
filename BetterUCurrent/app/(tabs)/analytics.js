@@ -7,7 +7,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
@@ -16,8 +15,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUser } from '../../context/UserContext';
 import { useTracking } from '../../context/TrackingContext';
 import { supabase } from '../../lib/supabase';
-import { LineChart, BarChart } from 'react-native-chart-kit';
 import ActivityHeatMap from '../../components/ActivityHeatMap';
+import AnalyticsMetricChart from '../../components/AnalyticsMetricChart';
+import AnalyticsSparkline from '../../components/AnalyticsSparkline';
 import RecoveryMap from '../../components/RecoveryMap';
 import ProgressRings from '../../components/ProgressRings';
 import AnalyticsAdvice from '../../components/AnalyticsAdvice';
@@ -28,13 +28,13 @@ import {
   getTrackingCalories,
   getTrackingWaterLiters,
   getAnalyticsChartTheme,
-  buildLineChartConfig,
+  sanitizeChartDataset,
+  sumChartValues,
 } from '../../utils/analyticsDataHelpers';
 import { useFocusEffect } from 'expo-router';
 import { useHomePageCustomization } from '../../hooks/useHomePageCustomization';
 import { hexToRgba } from '../../utils/homePageCustomization';
-
-const { width: screenWidth } = Dimensions.get('window');
+import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 
 function parseExercisesField(raw) {
   if (raw == null) return null;
@@ -69,11 +69,13 @@ const AnalyticsScreen = () => {
   useFocusEffect(
     useCallback(() => {
       reloadHomePrefs();
+      setRecoveryMapRefreshKey((k) => k + 1);
     }, [reloadHomePrefs])
   );
   const homeBg = homePrefs.homeBackgroundColor || '#000000';
   const accent = homePrefs.homeAccentColor || '#00ffff';
-  
+  const { scrollPaddingBottom } = useBottomChromeInsets();
+
   // State for time period selection (week, month, or year)
   const [timePeriod, setTimePeriod] = useState('week'); // 'week', 'month', or 'year'
   const [loading, setLoading] = useState(true);
@@ -91,6 +93,7 @@ const AnalyticsScreen = () => {
   // Weight progression data (also used by RecoveryMap to avoid extra fetch)
   const [topExercises, setTopExercises] = useState([]);
   const [workoutLogsWithExercises, setWorkoutLogsWithExercises] = useState([]);
+  const [recoveryMapRefreshKey, setRecoveryMapRefreshKey] = useState(0);
   
   // Chart data states
   const [workoutChartData, setWorkoutChartData] = useState(null);
@@ -266,8 +269,6 @@ const AnalyticsScreen = () => {
     [homeBg, accent]
   );
 
-  const chartConfig = useMemo(() => buildLineChartConfig(chartTheme), [chartTheme]);
-
   const processChartData = (workouts, mental, tracking, period, themeAccent = accent) => {
     const now = new Date();
     let labels = [];
@@ -380,40 +381,49 @@ const AnalyticsScreen = () => {
     }
 
     // Set chart data
+    const safeWorkouts = sanitizeChartDataset(workoutValues);
+    const safeMental = sanitizeChartDataset(mentalValues);
+    const safeCalories = sanitizeChartDataset(calorieValues);
+    const safeWater = sanitizeChartDataset(waterValues);
+
     setWorkoutChartData({
       labels,
       datasets: [{
-        data: workoutValues,
+        data: safeWorkouts,
         color: (opacity = 1) => hexToRgba(themeAccent, opacity),
-        strokeWidth: 3
-      }]
+        strokeWidth: 2,
+      }],
+      totals: { sum: sumChartValues(safeWorkouts) },
     });
 
     setMentalChartData({
       labels,
       datasets: [{
-        data: mentalValues,
-        color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`, // Purple
-        strokeWidth: 3
-      }]
+        data: safeMental,
+        color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`,
+        strokeWidth: 2,
+      }],
+      totals: { sum: sumChartValues(safeMental) },
     });
 
     setCalorieChartData({
       labels,
       datasets: [{
-        data: calorieValues,
-        color: (opacity = 1) => `rgba(255, 68, 68, ${opacity})`, // Red
-        strokeWidth: 3
-      }]
+        data: safeCalories,
+        color: (opacity = 1) => `rgba(255, 68, 68, ${opacity})`,
+        strokeWidth: 2,
+      }],
+      totals: { sum: sumChartValues(safeCalories) },
     });
 
     setWaterChartData({
       labels,
       datasets: [{
-        data: waterValues,
-        color: (opacity = 1) => `rgba(0, 170, 255, ${opacity})`, // Blue
-        strokeWidth: 3
-      }]
+        data: safeWater,
+        color: (opacity = 1) => `rgba(0, 170, 255, ${opacity})`,
+        strokeWidth: 2,
+      }],
+      totals: { sum: sumChartValues(safeWater) },
     });
   };
 
@@ -719,6 +729,7 @@ const AnalyticsScreen = () => {
    */
   const onRefresh = () => {
     setRefreshing(true);
+    setRecoveryMapRefreshKey((k) => k + 1);
     fetchAnalyticsData();
   };
 
@@ -788,7 +799,7 @@ const AnalyticsScreen = () => {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -980,36 +991,14 @@ const AnalyticsScreen = () => {
                         },
                       ]}
                     >
-                      <LineChart
-                        data={{
-                          // Labels: show "Start" on first point, "Now" on last point, empty for middle points
-                          // This keeps the chart clean while showing progression direction
-                          labels: exercise.allWeights.map((_, i) => {
-                            if (i === 0) return 'Start';
-                            if (i === exercise.allWeights.length - 1) return 'Now';
-                            return '';
-                          }),
-                          datasets: [{
-                            // Map all weights to array for chart
-                            data: exercise.allWeights.map(w => w.weight),
-                            // Cyan color matching app theme
-                            color: (opacity = 1) => hexToRgba(accent, opacity),
-                            strokeWidth: 3
-                          }]
-                        }}
-                        width={screenWidth - 80}
-                        height={80}
-                        chartConfig={{
-                          ...chartConfig,
-                          decimalPlaces: 0,
-                        }}
-                        bezier
-                        withDots={true}
-                        withShadow={false}
-                        withInnerLines={false} // No inner grid lines for simplicity
-                        withOuterLines={false} // No outer border
-                        withVerticalLabels={true} // Show weight values on Y-axis
-                        withHorizontalLabels={false} // Hide X-axis labels (we show Start/Now in labels array)
+                      <AnalyticsSparkline
+                        values={exercise.allWeights.map((w) => w.weight)}
+                        labels={exercise.allWeights.map((_, i) => {
+                          if (i === 0) return 'Start';
+                          if (i === exercise.allWeights.length - 1) return 'Now';
+                          return '';
+                        })}
+                        color={accent}
                       />
                     </View>
                   )}
@@ -1029,16 +1018,15 @@ const AnalyticsScreen = () => {
           </View>
         )}
 
-        {/* Recovery Map - muscle group recovery % from last trained */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Recovery map</Text>
-          <RecoveryMap
-            userId={userProfile?.id}
-            workouts={workoutLogsWithExercises}
-            accentColor={accent}
-            showSectionTitle={false}
-          />
-        </View>
+        {userProfile?.id ? (
+          <View style={styles.recoveryMapWrap}>
+            <RecoveryMap
+              userId={userProfile.id}
+              refreshKey={recoveryMapRefreshKey}
+              accentColor={accent}
+            />
+          </View>
+        ) : null}
 
         {/* Activity Heat Map */}
         <View style={styles.section}>
@@ -1064,25 +1052,17 @@ const AnalyticsScreen = () => {
                 },
               ]}
             >
-              <LineChart
-                data={workoutChartData}
-                width={screenWidth - 40}
-                height={220}
-                chartConfig={chartConfig}
-                bezier
-                style={[styles.chart, { backgroundColor: chartTheme.backgroundColor }]}
-                withInnerLines={true}
-                withOuterLines={false}
-                withVerticalLabels={true}
-                withHorizontalLabels={true}
-                withDots={true}
-                withShadow={false}
+              <AnalyticsMetricChart
+                labels={workoutChartData.labels}
+                values={workoutChartData.datasets[0]?.data}
+                barColor={accent}
+                summaryLabel="Total in period"
+                summaryValue={String(workoutChartData.totals?.sum ?? 0)}
               />
             </View>
           </View>
         )}
 
-        {/* Mental Sessions Chart */}
         {mentalChartData && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Mental Sessions</Text>
@@ -1095,25 +1075,17 @@ const AnalyticsScreen = () => {
                 },
               ]}
             >
-              <LineChart
-                data={mentalChartData}
-                width={screenWidth - 40}
-                height={220}
-                chartConfig={chartConfig}
-                bezier
-                style={[styles.chart, { backgroundColor: chartTheme.backgroundColor }]}
-                withInnerLines={true}
-                withOuterLines={false}
-                withVerticalLabels={true}
-                withHorizontalLabels={true}
-                withDots={true}
-                withShadow={false}
+              <AnalyticsMetricChart
+                labels={mentalChartData.labels}
+                values={mentalChartData.datasets[0]?.data}
+                barColor="#8b5cf6"
+                summaryLabel="Total in period"
+                summaryValue={String(mentalChartData.totals?.sum ?? 0)}
               />
             </View>
           </View>
         )}
 
-        {/* Calories Chart */}
         {calorieChartData && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Calories</Text>
@@ -1126,25 +1098,17 @@ const AnalyticsScreen = () => {
                 },
               ]}
             >
-              <LineChart
-                data={calorieChartData}
-                width={screenWidth - 40}
-                height={220}
-                chartConfig={chartConfig}
-                bezier
-                style={[styles.chart, { backgroundColor: chartTheme.backgroundColor }]}
-                withInnerLines={true}
-                withOuterLines={false}
-                withVerticalLabels={true}
-                withHorizontalLabels={true}
-                withDots={true}
-                withShadow={false}
+              <AnalyticsMetricChart
+                labels={calorieChartData.labels}
+                values={calorieChartData.datasets[0]?.data}
+                barColor="#ff6464"
+                summaryLabel="Total kcal"
+                summaryValue={(calorieChartData.totals?.sum ?? 0).toLocaleString()}
               />
             </View>
           </View>
         )}
 
-        {/* Water Chart */}
         {waterChartData && (
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>Water Intake</Text>
@@ -1157,19 +1121,16 @@ const AnalyticsScreen = () => {
                 },
               ]}
             >
-              <LineChart
-                data={waterChartData}
-                width={screenWidth - 40}
-                height={220}
-                chartConfig={chartConfig}
-                bezier
-                style={[styles.chart, { backgroundColor: chartTheme.backgroundColor }]}
-                withInnerLines={true}
-                withOuterLines={false}
-                withVerticalLabels={true}
-                withHorizontalLabels={true}
-                withDots={true}
-                withShadow={false}
+              <AnalyticsMetricChart
+                labels={waterChartData.labels}
+                values={waterChartData.datasets[0]?.data}
+                barColor="#00aaff"
+                summaryLabel="Total liters"
+                summaryValue={`${(waterChartData.totals?.sum ?? 0).toFixed(1)} L`}
+                formatValue={(v) => {
+                  const n = Number(v) || 0;
+                  return n >= 10 || n === 0 ? String(Math.round(n * 10) / 10) : n.toFixed(1);
+                }}
               />
             </View>
           </View>
@@ -1290,7 +1251,11 @@ const styles = StyleSheet.create({
   /** Matches home.js scrollContent — room above the tab bar. */
   scrollContent: {
     paddingTop: 8,
-    paddingBottom: 80,
+  },
+  recoveryMapWrap: {
+    paddingTop: 8,
+    marginBottom: 10,
+    paddingHorizontal: 20,
   },
   /** Same rhythm as home sections: full width, horizontal padding, space below. */
   section: {
@@ -1308,12 +1273,10 @@ const styles = StyleSheet.create({
   },
   chartContainer: {
     borderRadius: 16,
-    padding: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
     borderWidth: 1,
     overflow: 'hidden',
-  },
-  chart: {
-    borderRadius: 16,
   },
   comparisonCard: {
     backgroundColor: 'rgba(255,255,255,0.04)',

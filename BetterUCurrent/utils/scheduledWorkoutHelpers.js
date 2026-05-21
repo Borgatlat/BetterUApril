@@ -268,6 +268,11 @@ export const deleteScheduledWorkout = async (scheduledWorkoutId) => {
  * @param {Date} date - Reference date (defaults to today)
  * @returns {Object} Object with startDate and endDate
  */
+/** Monday 00:00:00 local for the week containing `date`. */
+export const getMondayWeekStart = (date = new Date()) => {
+  return getCurrentWeekDates(date).startDate;
+};
+
 export const getCurrentWeekDates = (date = new Date()) => {
   const current = new Date(date);
   const dayOfWeek = current.getDay(); // 0 = Sunday, 1 = Monday, etc.

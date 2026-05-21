@@ -24,6 +24,7 @@ import GroupList from '../../components/GroupList';
 import AddEventModal from '../(modals)/AddEventModal';
 import { COMMUNITY_THEME } from '../../config/communityTheme';
 import { useAuthSession } from '../../hooks/useAuthSession';
+import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 
 /** Design tokens for Community styles — same object everywhere so the screen matches Feed/League. */
 const T = COMMUNITY_THEME;
@@ -74,6 +75,7 @@ const PostType = {
 
 const CommunityScreen = () => {
   const { userProfile, isPremium } = useUser();
+  const { scrollPaddingBottom } = useBottomChromeInsets();
   const { workspace, orgId } = useAuthSession();
   /** School students keep global league discovery out of unified search — friend lookups stay same-org below. */
   const schoolClassmatesOnly = workspace === 'student' && !!orgId;
@@ -1146,7 +1148,8 @@ const CommunityScreen = () => {
         allActivities.push({
           ...item,
           type: 'event',
-          date: item.date ? new Date(item.date).toISOString() : item.created_at,
+          // Feed order = when posted (same as workouts/runs), not scheduled event date
+          date: item.created_at,
           user_id: item.creator_id,
         });
       });
@@ -2189,7 +2192,7 @@ const CommunityScreen = () => {
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollViewContent}
+        contentContainerStyle={[styles.scrollViewContent, { paddingBottom: scrollPaddingBottom }]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -2546,13 +2549,20 @@ const CommunityScreen = () => {
                      );
                   } else if (item.type === 'event') {
                     const eventProfile = profileMap[item.creator_id] || {};
-                    const eventDateDisplay = item.date ? new Date(item.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) : (item.created_at ? new Date(item.created_at).toLocaleDateString() : '—');
+                    const eventPostedDisplay = item.created_at
+                      ? new Date(item.created_at).toLocaleDateString(undefined, {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })
+                      : '—';
                     return (
                       <FeedCard
                         key={`${item.type}_${item.id}`}
                         avatarUrl={eventProfile.avatar_url}
                         name={eventProfile.full_name || eventProfile.username || 'User'}
-                        date={eventDateDisplay}
+                        date={eventPostedDisplay}
                         title={item.title || 'Event'}
                         description={item.description || undefined}
                         type="event"
@@ -4174,7 +4184,6 @@ const styles = StyleSheet.create({
   },
   scrollViewContent: {
     paddingHorizontal: 4,
-    paddingBottom: 120, // Increased from 75 to 120 to clear the tab bar
   },
   feedList: {
     marginTop: 16,

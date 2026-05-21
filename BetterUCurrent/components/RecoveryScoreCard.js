@@ -12,8 +12,9 @@ const RING_SIZE = 64;
 const STROKE = 5;
 
 function getScoreTheme(score) {
-  if (score >= 70) return { color: '#00e676', status: 'Ready' };
-  if (score >= 40) return { color: '#ffca28', status: 'Take it easy' };
+  if (score >= 90) return { color: '#00e676', status: 'Ready' };
+  if (score >= 70) return { color: '#ffca28', status: 'Take it easy' };
+  if (score >= 50) return { color: '#ff7043', status: 'Recover' };
   return { color: '#ff7043', status: 'Recover' };
 }
 
