@@ -1,2 +1,9 @@
 # Local IDE / agent metadata (do not share)
 .cursor/
+
+# Secrets — never commit env files (canonical ignore is BetterUCurrent/.gitignore)
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local

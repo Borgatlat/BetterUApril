@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, Alert, ScrollView, AppState, Animated, ActivityIndicator, Platform, Image } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import { supabase } from '../../lib/supabase';
@@ -93,9 +93,9 @@ const workoutData = {
           'Keep knees in line with toes throughout movement'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -108,9 +108,9 @@ const workoutData = {
           'Press bar up to starting position'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -123,9 +123,9 @@ const workoutData = {
           'Lower bar with control, maintaining form'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -138,9 +138,9 @@ const workoutData = {
           'Lower with control to starting position'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -153,9 +153,9 @@ const workoutData = {
           'Keep core tight throughout movement'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
     ],
@@ -173,9 +173,9 @@ const workoutData = {
           'Press bar up to starting position'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -188,9 +188,9 @@ const workoutData = {
           'Keep core tight throughout movement'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -203,9 +203,9 @@ const workoutData = {
           'Lower with control to starting position'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -218,9 +218,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
       {
@@ -233,9 +233,9 @@ const workoutData = {
           'Return to starting position with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
     ],
@@ -253,9 +253,9 @@ const workoutData = {
           'Lower bar with control, maintaining form'
         ],
         sets: [
-          { weight: '', reps: '6-8', completed: false },
-          { weight: '', reps: '6-8', completed: false },
-          { weight: '', reps: '6-8', completed: false },
+          { weight: '', reps: '6', completed: false },
+          { weight: '', reps: '6', completed: false },
+          { weight: '', reps: '6', completed: false },
         ],
       },
       {
@@ -268,9 +268,9 @@ const workoutData = {
           'Lower with control to starting position'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -284,9 +284,9 @@ const workoutData = {
           'Repeat for reps'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -299,9 +299,9 @@ const workoutData = {
           'Return with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
       {
@@ -314,9 +314,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
     ],
@@ -334,9 +334,9 @@ const workoutData = {
           'Keep knees in line with toes throughout movement'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -349,9 +349,9 @@ const workoutData = {
           'Return to standing by extending hips'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -364,9 +364,9 @@ const workoutData = {
           'Keep back flat against pad'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
         ],
       },
       {
@@ -379,9 +379,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
       {
@@ -394,9 +394,9 @@ const workoutData = {
           'Repeat with control'
         ],
         sets: [
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
         ],
       },
     ],
@@ -414,9 +414,9 @@ const workoutData = {
           'Press bar up to starting position'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -429,9 +429,9 @@ const workoutData = {
           'Lower with control to starting position'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -444,9 +444,9 @@ const workoutData = {
           'Lower with control to starting position'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -459,9 +459,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
       {
@@ -474,9 +474,9 @@ const workoutData = {
           'Return to starting position with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
     ],
@@ -494,9 +494,9 @@ const workoutData = {
           'Drive through heels to stand'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -509,9 +509,9 @@ const workoutData = {
           'Keep back flat against pad'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
         ],
       },
       {
@@ -524,9 +524,9 @@ const workoutData = {
           'Push through front heel to stand'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
         ],
       },
       {
@@ -539,9 +539,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
       {
@@ -554,9 +554,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
         ],
       },
     ],
@@ -574,9 +574,9 @@ const workoutData = {
           'Lower bar with control'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -589,9 +589,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -605,9 +605,9 @@ const workoutData = {
           'Repeat for reps'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -620,9 +620,9 @@ const workoutData = {
           'Return with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
       {
@@ -635,9 +635,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
     ],
@@ -655,9 +655,9 @@ const workoutData = {
           'Feel stretch in hamstrings'
         ],
         sets: [
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
-          { weight: '', reps: '8-12', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
+          { weight: '', reps: '8', completed: false },
         ],
       },
       {
@@ -670,9 +670,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
         ],
       },
       {
@@ -685,9 +685,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
         ],
       },
       {
@@ -700,9 +700,9 @@ const workoutData = {
           'Squeeze glutes at top'
         ],
         sets: [
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
         ],
       },
       {
@@ -715,9 +715,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
         ],
       },
     ],
@@ -947,10 +947,10 @@ const workoutData = {
           'Press with explosive power'
         ],
         sets: [
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
         ],
       },
       {
@@ -963,9 +963,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
         ],
       },
       {
@@ -978,9 +978,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
         ],
       },
       {
@@ -994,9 +994,9 @@ const workoutData = {
           'Repeat for reps'
         ],
         sets: [
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
         ],
       },
     ],
@@ -1014,10 +1014,10 @@ const workoutData = {
           'Drive through heels explosively'
         ],
         sets: [
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
         ],
       },
       {
@@ -1030,9 +1030,9 @@ const workoutData = {
           'Drive hips forward explosively'
         ],
         sets: [
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
         ],
       },
       {
@@ -1045,9 +1045,9 @@ const workoutData = {
           'Stand explosively'
         ],
         sets: [
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
         ],
       },
       {
@@ -1060,9 +1060,9 @@ const workoutData = {
           'Stop just before lockout'
         ],
         sets: [
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
-          { weight: '', reps: '4-6', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
+          { weight: '', reps: '4', completed: false },
         ],
       },
     ],
@@ -1167,9 +1167,9 @@ const workoutData = {
           'Touch ground on each side'
         ],
         sets: [
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
         ],
       },
       {
@@ -1182,9 +1182,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
         ],
       },
       {
@@ -1197,9 +1197,9 @@ const workoutData = {
           'Squeeze abs at bottom'
         ],
         sets: [
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
         ],
       },
     ],
@@ -1373,10 +1373,10 @@ const workoutData = {
           'Press bar up to starting position'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false }
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false }
         ]
       },
       {
@@ -1389,10 +1389,10 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false }
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false }
         ]
       },
       {
@@ -1405,9 +1405,9 @@ const workoutData = {
           'Bring hands together in arc'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1420,9 +1420,9 @@ const workoutData = {
           'Control the negative'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1435,9 +1435,9 @@ const workoutData = {
           'Extend arms fully'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       }
     ]
@@ -1455,9 +1455,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false }
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false }
         ]
       },
       {
@@ -1471,10 +1471,10 @@ const workoutData = {
           'Repeat for reps'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false }
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false }
         ]
       },
       {
@@ -1487,9 +1487,9 @@ const workoutData = {
           'Control the return'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1502,9 +1502,9 @@ const workoutData = {
           'Full range of motion'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1517,9 +1517,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       }
     ]
@@ -1537,10 +1537,10 @@ const workoutData = {
           'Drive through heels'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false }
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false }
         ]
       },
       {
@@ -1553,9 +1553,9 @@ const workoutData = {
           'Feel hamstring stretch'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false }
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false }
         ]
       },
       {
@@ -1568,9 +1568,9 @@ const workoutData = {
           'Push through heels'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1583,9 +1583,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1598,9 +1598,9 @@ const workoutData = {
           'Slow negative'
         ],
         sets: [
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false },
-          { weight: '', reps: '15-20', completed: false }
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false },
+          { weight: '', reps: '15', completed: false }
         ]
       }
     ]
@@ -1618,10 +1618,10 @@ const workoutData = {
           'Control the descent'
         ],
         sets: [
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false },
-          { weight: '', reps: '10-12', completed: false }
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false },
+          { weight: '', reps: '10', completed: false }
         ]
       },
       {
@@ -1634,9 +1634,9 @@ const workoutData = {
           'Lower with control'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1649,9 +1649,9 @@ const workoutData = {
           'Squeeze at back'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1664,9 +1664,9 @@ const workoutData = {
           'Squeeze at top'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       },
       {
@@ -1679,9 +1679,9 @@ const workoutData = {
           'Extend arms fully'
         ],
         sets: [
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false },
-          { weight: '', reps: '12-15', completed: false }
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false },
+          { weight: '', reps: '12', completed: false }
         ]
       }
     ]
@@ -2083,11 +2083,62 @@ const ActiveWorkoutScreen = () => {
   const [isPredefinedWorkout, setIsPredefinedWorkout] = useState(false); // Track if it's a starter/predefined workout
   const [loadingInstructions, setLoadingInstructions] = useState(false);
   const [showEditRestTimeModal, setShowEditRestTimeModal] = useState(false);
-  const { userProfile, personalRecords, isPremium } = useUser();
+  const { userProfile, personalRecords, fetchPersonalRecords, isPremium } = useUser();
   
   // Progressive overload tracking - shows previous workout data to encourage progression
   const [previousWorkoutData, setPreviousWorkoutData] = useState(null);
   const [progressiveOverloadSuggestions, setProgressiveOverloadSuggestions] = useState({});
+
+  // ----------------------------------------------------------------
+  //  Personal Record (PR) detection
+  // ----------------------------------------------------------------
+  //
+  //  `prMap`:
+  //    Object mapping `exerciseName.toLowerCase()` -> { currentLbs, prId }.
+  //    We pre-build it from `personalRecords` (which is in KG) so the
+  //    set-row UI can do an O(1) lookup at render time instead of
+  //    walking the array of PRs for every set on every render.
+  //
+  //  `newPrFlags`:
+  //    Object mapping `${exerciseIndex}-${setIndex}` -> { delta, oldLbs }
+  //    for the FIRST set per exercise that beat the user's PR.
+  //    Computed every time the workout state updates so badges show
+  //    only after the user taps the blue check button.
+  //
+  //  Why kg here? The personal_records table stores weight in kg
+  //  regardless of the user's display unit. The active-workout UI
+  //  shows lbs everywhere — so we convert at the boundary.
+
+  /** kg → lbs. Multiplier matches `pr.js` for round-trip consistency. */
+  const kgToLbs = (kg) => (kg == null ? 0 : Number(kg) * 2.20462);
+  /** lbs → kg. Used when writing PRs back to the database. */
+  const lbsToKg = (lbs) => (lbs == null ? 0 : Number(lbs) / 2.20462);
+
+  /**
+   * Build the exerciseName → currentPRLbs lookup map.
+   *
+   * useMemo recomputes only when `personalRecords` changes, not on
+   * every render. If we naively re-built this map every render, every
+   * keystroke in the weight field would trigger an O(N) rebuild.
+   */
+  const prMap = useMemo(() => {
+    const map = {};
+    if (!Array.isArray(personalRecords)) return map;
+    for (const pr of personalRecords) {
+      // Only weight-type PRs apply to lifting. Running/biking PRs
+      // live in the same table but mean different things.
+      if (pr?.exercise_type !== 'weight') continue;
+      const name = String(pr.exercise_name || '').trim().toLowerCase();
+      if (!name) continue;
+      const lbs = kgToLbs(pr.current_weight_kg);
+      // Keep the higher PR if duplicates exist for the same name
+      // (shouldn't happen normally, but defensive).
+      if (!map[name] || lbs > map[name].currentLbs) {
+        map[name] = { currentLbs: lbs, prId: pr.id, currentKg: Number(pr.current_weight_kg) };
+      }
+    }
+    return map;
+  }, [personalRecords]);
   
   // Circular progress bar animation
   const progressAnimation = useRef(new Animated.Value(0)).current;
@@ -2289,7 +2340,45 @@ const ActiveWorkoutScreen = () => {
         if (params.custom === 'true' && params.workout) {
           await AsyncStorage.removeItem('currentWorkout');
         }
-        
+
+        // ---------------------------------------------------------------
+        // FREEFORM WORKOUT MODE
+        // ---------------------------------------------------------------
+        // The "Freeform Workout" button on the workout tab pushes us here
+        // with params = { freeform: 'true' }. A freeform workout is just a
+        // normal active-workout session that begins with NO exercises —
+        // the user taps the existing "Add Exercise" button (line ~4109)
+        // whenever they want to add one mid-session.
+        //
+        // Why this branch comes FIRST: if both `freeform` and stale params
+        // from a previous navigation existed, freeform should win because
+        // the user explicitly tapped that button.
+        //
+        // We also clear any previously-stored workout from AsyncStorage so
+        // the freeform session starts truly empty instead of resurrecting
+        // a half-finished workout from last time.
+        if (params.freeform === 'true') {
+          await AsyncStorage.removeItem('currentWorkout');
+
+          const freeformWorkout = {
+            name: 'Freeform Workout',
+            // Empty array on purpose — the user will populate this through
+            // the Add Exercise modal. The render code (workout.exercises.map)
+            // handles an empty array gracefully (it just renders nothing
+            // above the Add Exercise button).
+            exercises: [],
+          };
+
+          // Freeform workouts are user-authored, never predefined templates,
+          // so modifications must be saveable.
+          setIsPredefinedWorkout(false);
+          setWorkout(freeformWorkout);
+          await AsyncStorage.setItem('currentWorkout', JSON.stringify(freeformWorkout));
+
+          workoutLoadedRef.current = true;
+          return; // Skip the other branches below.
+        }
+
         // First try to get workout from params
         if (params.custom === 'true' && params.workout) {
           const parsed = JSON.parse(params.workout);
@@ -2337,7 +2426,7 @@ const ActiveWorkoutScreen = () => {
                   instructions: ['No specific instructions available.'],
                   sets: Array.from({ length: 3 }, () => ({
                     weight: '',
-                    reps: '8-12',
+                    reps: '8',
                     completed: false
                   }))
                 };
@@ -2352,7 +2441,7 @@ const ActiveWorkoutScreen = () => {
                 instructions: ex.instructions || ['No specific instructions available.'],
                 sets: Array.from({ length: parseInt(ex.sets) || 3 }, () => ({
                   weight: '',
-                  reps: ex.reps || '8-12',
+                  reps: ex.reps || '8',
                   completed: false
                 }))
               };
@@ -2375,7 +2464,7 @@ const ActiveWorkoutScreen = () => {
               instructions: exercise.instructions,
               sets: exercise.sets.map(set => ({
                 weight: set.weight || '',
-                reps: set.reps || '8-12',
+                reps: set.reps || '8',
                 completed: set.completed || false
               }))
             }))
@@ -2446,89 +2535,210 @@ const ActiveWorkoutScreen = () => {
   }, []);
 
   /**
-   * Fetches previous workout data to provide progressive overload suggestions
-   * Compares current workout with previous workouts to encourage progression (weight/reps/volume)
-   * This helps users know what they did last time and suggests increases
+   * Fetches previous workout data to provide progressive overload suggestions.
+   *
+   * KEY CHANGE (vs. the old version): we no longer filter by workout_name.
+   * The old query was `.eq('workout_name', workoutName)` which meant the
+   * "Last time: X lbs × Y reps" hint only worked when the user repeated
+   * the EXACT same workout (e.g. premium "Push Day Strength" → "Push Day
+   * Strength" again). For any custom or freeform workout the lookup
+   * silently returned nothing, so users felt the feature only worked on
+   * premium templates.
+   *
+   * Now we pull the user's most recent 50 logs across ALL workouts, then
+   * for each exercise in the current workout we walk the logs (already
+   * sorted newest-first) and pick the FIRST log that contains that
+   * exercise with at least one completed set that had real weight (>0).
+   *
+   * VALIDATION: we explicitly reject sets where the weight is 0/empty or
+   * the set isn't marked completed. That fixes the bug the user
+   * described where the hint showed inaccurate "0 lbs × N reps"
+   * placeholders for bodyweight or unfinished exercises.
+   *
+   * AUTO-FILL: at the end we update the workout state to pre-fill every
+   * empty (and not-yet-completed) set's weight input with the suggested
+   * weight. This makes progressive overload effortless — open a workout
+   * you've done before, the weights are already there, just hit complete.
    */
-  const fetchPreviousWorkoutData = async (workoutName) => {
+  const fetchPreviousWorkoutData = async () => {
     try {
-      if (!user?.id || !workoutName) {
+      if (!user?.id) {
         return;
       }
 
-      // Fetch the last 3 times this workout was completed
-      // We use 3 to show progression trends
+      // Pull the last 50 logs across ALL workouts. 50 is plenty to cover
+      // a couple months of training without slamming the database.
+      // Ordered newest-first so the first match we find for an exercise
+      // is automatically the most recent occurrence.
       const { data, error } = await supabase
         .from('user_workout_logs')
         .select('exercises, completed_at, workout_name')
         .eq('user_id', user.id)
-        .eq('workout_name', workoutName)
         .order('completed_at', { ascending: false })
-        .limit(3);
+        .limit(50);
 
       if (error) {
         console.error('Error fetching previous workout:', error);
         return;
       }
 
-      if (data && data.length > 0) {
-        const lastWorkout = data[0];
-        setPreviousWorkoutData(lastWorkout);
-
-        // Generate progressive overload suggestions for each exercise
-        // Creates a map where key is exercise index and value contains previous performance data
-        const suggestions = {};
-        
-        workout?.exercises.forEach((currentExercise, exIndex) => {
-          // Find matching exercise from last workout by name (case-insensitive)
-          const previousExercise = lastWorkout.exercises.find(
-            ex => ex.name?.toLowerCase() === currentExercise.name?.toLowerCase()
-          );
-          
-          if (previousExercise && previousExercise.sets && previousExercise.sets.length > 0) {
-            // Get completed sets from previous workout
-            const completedSets = previousExercise.sets.filter(s => s.completed);
-            
-            if (completedSets.length > 0) {
-              // Use the last completed set to get most recent performance
-              const lastSet = completedSets[completedSets.length - 1];
-              const lastSetWeight = parseFloat(lastSet.weight) || 0;
-              const lastSetReps = parseInt(lastSet.reps) || 0;
-              
-              // Calculate average weight and reps across all completed sets for better suggestion
-              const totalWeight = completedSets.reduce((sum, s) => sum + (parseFloat(s.weight) || 0), 0);
-              const totalReps = completedSets.reduce((sum, s) => sum + (parseInt(s.reps) || 0), 0);
-              const avgWeight = totalWeight / completedSets.length;
-              const avgReps = totalReps / completedSets.length;
-
-              suggestions[exIndex] = {
-                lastWeight: lastSetWeight,
-                lastReps: lastSetReps,
-                avgWeight: avgWeight,
-                avgReps: avgReps,
-                suggestedWeight: lastSetWeight > 0 ? Math.max(lastSetWeight + 5, avgWeight + 5) : 0, // Suggest 5 lb increase
-                suggestedReps: lastSetReps > 0 ? lastSetReps + 1 : 0, // Or add 1 rep
-                lastVolume: completedSets.length, // Number of sets completed
-                daysAgo: Math.floor((new Date() - new Date(lastWorkout.completed_at)) / (1000 * 60 * 60 * 24))
-              };
-            }
-          }
-        });
-        
-        console.log('Progressive overload suggestions:', suggestions);
-        setProgressiveOverloadSuggestions(suggestions);
+      if (!data || data.length === 0) {
+        // First-time user — nothing to suggest. Clear any stale
+        // suggestions so old hints from a previous workout don't
+        // accidentally render.
+        setProgressiveOverloadSuggestions({});
+        return;
       }
+
+      // Keep `previousWorkoutData` set to the most recent log of the
+      // SAME-named workout (legacy behavior). Some places might still
+      // reference it. Optional chaining (?.) means we don't crash if
+      // there's no match.
+      const currentName = workout?.workout_name || workout?.name;
+      const sameWorkoutLog = currentName
+        ? data.find((log) => log.workout_name === currentName)
+        : null;
+      if (sameWorkoutLog) {
+        setPreviousWorkoutData(sameWorkoutLog);
+      }
+
+      const suggestions = {};
+      const currentExercises = workout?.exercises || [];
+
+      currentExercises.forEach((currentExercise, exIndex) => {
+        const exNameLower = currentExercise.name?.toLowerCase();
+        if (!exNameLower) return;
+
+        // Walk the logs newest → oldest. The FIRST log that contains
+        // this exercise with completed weighted sets is the answer.
+        // We `break` (via early return inside .some) so we stop the
+        // moment we have a match.
+        for (const log of data) {
+          if (!Array.isArray(log.exercises)) continue;
+
+          // Find this exercise in the log by name (case-insensitive
+          // because users might log "Bench Press" vs "bench press").
+          const matchingExercise = log.exercises.find(
+            (ex) => ex.name?.toLowerCase() === exNameLower
+          );
+          if (!matchingExercise || !Array.isArray(matchingExercise.sets)) {
+            continue;
+          }
+
+          // Only count sets the user actually finished AND had real
+          // weight on. parseFloat('') is NaN; NaN > 0 is false; so
+          // empty strings and bodyweight 0s are correctly rejected.
+          const completedWeightedSets = matchingExercise.sets.filter(
+            (s) => s.completed && parseFloat(s.weight) > 0
+          );
+          if (completedWeightedSets.length === 0) continue;
+
+          // Use the last weighted set as "what they hit last time."
+          const lastSet = completedWeightedSets[completedWeightedSets.length - 1];
+          const lastSetWeight = parseFloat(lastSet.weight);
+          const lastSetReps = parseInt(lastSet.reps) || 0;
+
+          // Average across all completed weighted sets so a single fluke
+          // set doesn't skew the suggestion. .reduce() is a fold:
+          // start at 0, then add each element's value. Division gives
+          // the mean.
+          const totalWeight = completedWeightedSets.reduce(
+            (sum, s) => sum + (parseFloat(s.weight) || 0),
+            0
+          );
+          const totalReps = completedWeightedSets.reduce(
+            (sum, s) => sum + (parseInt(s.reps) || 0),
+            0
+          );
+          const avgWeight = totalWeight / completedWeightedSets.length;
+          const avgReps = totalReps / completedWeightedSets.length;
+
+          // Conservative +5 lb progression. Math.max picks the higher of
+          // (last set + 5) and (average + 5), so users who grind out a
+          // few heavy sets aren't downgraded by their lighter warm-up sets.
+          // Math.round prevents fractional weight suggestions on weird data.
+          const suggestedWeight = Math.round(
+            Math.max(lastSetWeight + 5, avgWeight + 5)
+          );
+
+          suggestions[exIndex] = {
+            lastWeight: lastSetWeight,
+            lastReps: lastSetReps,
+            avgWeight,
+            avgReps,
+            suggestedWeight,
+            suggestedReps: lastSetReps + 1,
+            lastVolume: completedWeightedSets.length,
+            daysAgo: Math.floor(
+              (new Date() - new Date(log.completed_at)) / (1000 * 60 * 60 * 24)
+            ),
+            // Surface which workout this came from — useful if we ever
+            // want to render it in the UI ("from Push Day, 3d ago").
+            fromWorkoutName: log.workout_name,
+          };
+          break;
+        }
+      });
+
+      console.log('Progressive overload suggestions:', suggestions);
+      setProgressiveOverloadSuggestions(suggestions);
+
+      // -------------------------------------------------------------
+      // Auto-fill suggested weight into ONLY the first set
+      // -------------------------------------------------------------
+      // Why first set only: we want the user to test the suggested
+      // weight on set #1, see how it feels, and decide before
+      // committing it to all of their working sets. After they nail
+      // set 1, they can tap the "Autofill weight" button to copy
+      // their actual set-1 weight into the rest of the sets.
+      //
+      // We use the functional form `setWorkout(prev => ...)` so React
+      // gives us the LATEST workout state (not whatever was captured
+      // in this function's closure). Important if the user edited
+      // a set's weight in between fetch and update.
+      setWorkout((prev) => {
+        if (!prev || !Array.isArray(prev.exercises)) return prev;
+
+        let didChange = false;
+        const newExercises = prev.exercises.map((ex, exIndex) => {
+          const suggestion = suggestions[exIndex];
+          if (!suggestion) return ex;
+          if (!Array.isArray(ex.sets) || ex.sets.length === 0) return ex;
+
+          // Only touch set 0 (the first set). Skip if it's already
+          // completed (locked) or if the user has typed a weight.
+          const firstSet = ex.sets[0];
+          if (firstSet.completed) return ex;
+          const existing = (firstSet.weight ?? '').toString().trim();
+          if (existing !== '') return ex;
+
+          didChange = true;
+          const newSets = ex.sets.map((set, idx) => {
+            if (idx !== 0) return set; // leave sets 2..N empty
+            return { ...set, weight: String(suggestion.suggestedWeight) };
+          });
+          return { ...ex, sets: newSets };
+        });
+
+        // Only return a new object if we actually changed something —
+        // returning the same reference avoids an unnecessary re-render.
+        return didChange ? { ...prev, exercises: newExercises } : prev;
+      });
     } catch (error) {
       console.error('Error in fetchPreviousWorkoutData:', error);
     }
   };
 
-  // Fetch previous workout data whenever workout loads
+  // Fetch previous workout data whenever workout loads OR when the user
+  // adds/removes exercises mid-workout. The exercises.length dep ensures
+  // a freshly-added exercise immediately gets its "Last time" hint and
+  // auto-filled weight, instead of staying blank until reload.
   useEffect(() => {
     if (workout?.workout_name || workout?.name) {
-      fetchPreviousWorkoutData(workout.workout_name || workout.name);
+      fetchPreviousWorkoutData();
     }
-  }, [workout?.workout_name, workout?.name, user?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workout?.workout_name, workout?.name, workout?.exercises?.length, user?.id]);
 
   // Whenever a workout loads, open a session row so we can attach Spotify tracks to it
   useEffect(() => {
@@ -3016,13 +3226,13 @@ const ActiveWorkoutScreen = () => {
               if (setIdx === setIndex) {
                 return { 
                   weight: set.weight || '',
-                  reps: set.reps || '8-12',
+                  reps: set.reps || '8',
                   completed: true 
                 };
               }
               return {
                 weight: set.weight || '',
-                reps: set.reps || '8-12',
+                reps: set.reps || '8',
                 completed: set.completed || false
               };
             })
@@ -3034,7 +3244,7 @@ const ActiveWorkoutScreen = () => {
           instructions: exercise.instructions,
           sets: exercise.sets.map(set => ({
             weight: set.weight || '',
-            reps: set.reps || '8-12',
+            reps: set.reps || '8',
             completed: set.completed || false
           }))
         };
@@ -3181,6 +3391,117 @@ const ActiveWorkoutScreen = () => {
         return;
       }
 
+      // ----------------------------------------------------------------
+      //  Personal Record (PR) detection + persistence
+      // ----------------------------------------------------------------
+      //  Walk every exercise and find its highest weight × completed
+      //  set. If that exceeds the user's stored PR for that exercise
+      //  (or no PR exists yet), upsert into `personal_records`.
+      //
+      //  We collect the new PRs in `newPRs` so we can show them on the
+      //  workout-summary screen.
+      //
+      //  Storage gotcha: `personal_records.current_weight_kg` is in
+      //  KILOGRAMS, but the workout UI uses POUNDS. We convert at the
+      //  boundary using `lbsToKg`.
+      //
+      //  Schema notes (see create_new_pr_system.sql):
+      //   - `valid_weight_pr` constraint REQUIRES target_weight_kg on
+      //     weight-type rows. We default it to current + 10% so the
+      //     INSERT doesn't violate the check constraint.
+      //   - There's an UPDATE trigger that auto-inserts into
+      //     `personal_record_history` when current_weight_kg changes,
+      //     so we don't need to write history rows ourselves.
+      const newPRs = [];
+      try {
+        for (const exercise of workout.exercises) {
+          if (!Array.isArray(exercise.sets) || !exercise.name) continue;
+
+          // Find the heaviest completed set with valid weight + reps.
+          let bestLbs = 0;
+          let bestReps = 0;
+          for (const set of exercise.sets) {
+            const w = getWeight(set);
+            const r = getReps(set);
+            const isCounted = set.completed || (w > 0 && r > 0);
+            if (!isCounted || w <= 0 || r <= 0) continue;
+            if (w > bestLbs) {
+              bestLbs = w;
+              bestReps = r;
+            }
+          }
+          if (bestLbs <= 0) continue;
+
+          const exNameKey = String(exercise.name).trim().toLowerCase();
+          const existingPr = prMap[exNameKey];
+          const existingLbs = existingPr ? existingPr.currentLbs : 0;
+
+          // Only count as a new PR if it strictly beats the previous
+          // record. Tying your old PR is great training but doesn't
+          // get a celebratory record-update.
+          if (bestLbs <= existingLbs) continue;
+
+          const bestKg = lbsToKg(bestLbs);
+
+          if (existingPr) {
+            // Update existing PR row. The DB trigger will auto-add a
+            // history entry. We don't touch target_weight_kg so the
+            // user's chosen target stays untouched.
+            const { error: updateErr } = await supabase
+              .from('personal_records')
+              .update({ current_weight_kg: bestKg })
+              .eq('id', existingPr.prId);
+            if (updateErr) {
+              console.error('Error updating PR for', exercise.name, updateErr);
+            } else {
+              newPRs.push({
+                exerciseName: exercise.name,
+                weightLbs: bestLbs,
+                previousLbs: existingLbs,
+                reps: bestReps,
+                isFirstTime: false,
+              });
+            }
+          } else {
+            // First-time PR for this exercise. The valid_weight_pr
+            // CHECK constraint requires target_weight_kg, so we set
+            // a default 10% above current as a starting goal — the
+            // user can edit it later from the PRs screen.
+            const { error: insertErr } = await supabase
+              .from('personal_records')
+              .insert([{
+                user_id: user.id,
+                exercise_name: exercise.name,
+                exercise_type: 'weight',
+                current_weight_kg: bestKg,
+                target_weight_kg: bestKg * 1.1,
+                notes: 'Auto-tracked from workout',
+              }]);
+            if (insertErr) {
+              console.error('Error inserting new PR for', exercise.name, insertErr);
+            } else {
+              newPRs.push({
+                exerciseName: exercise.name,
+                weightLbs: bestLbs,
+                previousLbs: 0,
+                reps: bestReps,
+                isFirstTime: true,
+              });
+            }
+          }
+        }
+
+        // Refresh the in-memory PR list so subsequent workouts see
+        // the new values without a full app reload.
+        if (newPRs.length > 0 && typeof fetchPersonalRecords === 'function') {
+          await fetchPersonalRecords();
+        }
+      } catch (prErr) {
+        // PR persistence is a "nice to have" — never block the user
+        // from finishing their workout if Supabase rejects a row.
+        console.error('Error persisting PRs:', prErr);
+      }
+
       // If this is a custom or AI-generated workout with an ID, update it in the workouts table
       // This saves the modified version (with added/removed exercises and sets) back to the template
       // We call saveWorkoutTemplate which handles all the checks and saving logic
@@ -3223,7 +3544,12 @@ const ActiveWorkoutScreen = () => {
         completedSets: String(completedSets),
         totalWeight: String(Math.round(totalWeight)),
         workoutName: workout.workout_name || workout.name,
-        justCompleted: 'true'
+        justCompleted: 'true',
+        // JSON.stringify because Expo Router serializes params as URL
+        // strings — objects/arrays would otherwise be coerced to "[object Object]".
+        // Always send a string (even "[]") so the summary screen has a
+        // consistent param to JSON.parse.
+        newPRs: JSON.stringify(newPRs || []),
       };
       if (insertedRow?.id) {
         summaryParams.workoutLogId = String(insertedRow.id);
@@ -3352,41 +3678,92 @@ const ActiveWorkoutScreen = () => {
   };
 
   /**
-   * Gets progressive overload message based on current vs previous performance
-   * This encourages users to increase weight, reps, or volume over time
-   * @param {number} exerciseIndex - Index of the exercise in the workout
-   * @param {number} setIndex - Index of the set within the exercise
-   * @param {string} currentWeight - Current weight being used
-   * @param {string} currentReps - Current reps being performed
-   * @returns {Object|null} - Message object with type and text, or null if no suggestion
+   * Computes which sets in the current workout state qualify for a
+   * "New PR" badge, and which qualify for a "More reps" / "Same as
+   * last time" hint.
+   *
+   * Behavior (per the user's spec):
+   *   1. A PR badge ONLY appears once a set is `completed === true`.
+   *      We don't want to flash "PR!" while the user is still typing.
+   *   2. A PR badge ONLY appears on the FIRST completed set within an
+   *      exercise that beats the user's stored PR. If the user does
+   *      3 sets at 275 lbs and their PR was 270 lbs, we show one
+   *      "New PR" badge on set 1, NOT three on every set.
+   *   3. The "+X lbs" delta is calculated against the PR weight stored
+   *      in `personal_records` (converted from kg to lbs).
+   *
+   * Implementation notes:
+   *   - We return a flat object keyed by `${exIdx}-${setIdx}` so the
+   *     render path stays a single O(1) lookup.
+   *   - We re-compute on every workout/prMap change. useMemo's deps
+   *     are conservative: we depend on `workout` (so set completions
+   *     trigger a recompute) and `prMap` (so the badge updates if the
+   *     user's PRs change mid-session).
    */
-  const getProgressiveOverloadMessage = (exerciseIndex, setIndex, currentWeight, currentReps) => {
-    const suggestion = progressiveOverloadSuggestions[exerciseIndex];
-    if (!suggestion || !currentWeight || !currentReps) return null;
+  const setBadges = useMemo(() => {
+    const badges = {};
+    if (!workout || !Array.isArray(workout.exercises)) return badges;
 
-    const weight = parseFloat(currentWeight) || 0;
-    const reps = parseInt(currentReps) || 0;
+    workout.exercises.forEach((exercise, exIdx) => {
+      if (!Array.isArray(exercise.sets)) return;
+      const nameKey = String(exercise.name || '').trim().toLowerCase();
+      const prRecord = prMap[nameKey];
+      const prLbs = prRecord ? prRecord.currentLbs : 0;
 
-    // Check if user matched or exceeded previous performance
-    if (weight > suggestion.lastWeight) {
-      return {
-        type: 'success',
-        message: `🔥 New weight PR! (+${(weight - suggestion.lastWeight).toFixed(1)} lbs)`
-      };
-    } else if (weight === suggestion.lastWeight && reps > suggestion.lastReps) {
-      return {
-        type: 'success',
-        message: `💪 More reps! (+${reps - suggestion.lastReps} reps)`
-      };
-    } else if (weight === suggestion.lastWeight && reps === suggestion.lastReps) {
-      return {
-        type: 'suggestion',
-        message: `💡 Same as last time. Try ${suggestion.suggestedWeight} lbs or ${suggestion.suggestedReps} reps!`
-      };
-    }
-    
-    return null;
-  };
+      // Track whether we've already awarded a PR badge inside this
+      // exercise. The moment we mark one set as PR, every later set
+      // is just a "matched my PR" set even if it weighs the same.
+      let prAlreadyAwarded = false;
+
+      // Suggestions feed the secondary "More reps" / "Same as last
+      // time" hints. These keep working off the previous workout's
+      // last-time data, NOT the PR table — they're meant for
+      // session-to-session momentum, not lifetime records.
+      const suggestion = progressiveOverloadSuggestions[exIdx];
+
+      exercise.sets.forEach((set, setIdx) => {
+        // Hard rule: badges only appear after the set is checked off.
+        if (!set.completed) return;
+
+        const weight = parseFloat(set.weight) || 0;
+        const reps = parseInt(set.reps, 10) || 0;
+        if (weight <= 0 || reps <= 0) return;
+
+        // ---- 1. PR badge (only first qualifying set) ----
+        // We require the user to have AT LEAST one previous PR
+        // record. Without that we don't know if the weight is
+        // truly a "PR" or just their first attempt — that becomes
+        // a fresh PR row when they finish the workout, but we
+        // don't badge it mid-session to avoid false positives on
+        // brand-new exercises.
+        if (!prAlreadyAwarded && prRecord && weight > prLbs) {
+          badges[`${exIdx}-${setIdx}`] = {
+            type: 'pr',
+            message: `🔥 New weight PR! (+${(weight - prLbs).toFixed(1)} lbs)`,
+          };
+          prAlreadyAwarded = true;
+          return;
+        }
+
+        // ---- 2. Secondary hints based on last-workout suggestion ----
+        if (suggestion) {
+          if (weight === suggestion.lastWeight && reps > suggestion.lastReps) {
+            badges[`${exIdx}-${setIdx}`] = {
+              type: 'success',
+              message: `💪 More reps! (+${reps - suggestion.lastReps} reps)`,
+            };
+          } else if (weight === suggestion.lastWeight && reps === suggestion.lastReps) {
+            badges[`${exIdx}-${setIdx}`] = {
+              type: 'suggestion',
+              message: `💡 Same as last time. Try ${suggestion.suggestedWeight} lbs next set!`,
+            };
+          }
+        }
+      });
+    });
+
+    return badges;
+  }, [workout, prMap, progressiveOverloadSuggestions]);
 
   // Save workout template to database (for custom/AI workouts only)
   // This function saves the current workout state to the workouts table
@@ -3409,7 +3786,7 @@ const ActiveWorkoutScreen = () => {
       const exercisesForTemplate = workout.exercises.map(exercise => ({
         name: exercise.name,
         sets: exercise.sets.length.toString(), // Number of sets as string
-        reps: exercise.sets[0]?.reps || '8-12' // Default reps from first set
+        reps: exercise.sets[0]?.reps || '8' // Default reps from first set
       }));
 
       const { error: updateError } = await supabase
@@ -3476,10 +3853,13 @@ const ActiveWorkoutScreen = () => {
 
     const exercise = workout.exercises[exerciseIndex];
     const sets = exercise.sets || [];
-    
-    // Get the reps value from the last set, or use default '8-12' if no sets exist
-    // This helps maintain consistency when adding new sets
-    const lastSetReps = sets.length > 0 ? sets[sets.length - 1].reps : '8-12';
+
+    // Get the reps value from the last set, or fall back to the default of '8'
+    // when the exercise has no sets yet. We default to a single number rather
+    // than a range like '8-12' so the user starts with a concrete target and
+    // can adjust up or down as they go. The ternary `cond ? a : b` is shorthand
+    // for "if cond, use a, otherwise use b".
+    const lastSetReps = sets.length > 0 ? sets[sets.length - 1].reps : '8';
     
     // Create a new workout object with a new set added
     // The spread operator (...) creates a new array with the existing sets plus the new one
@@ -3512,16 +3892,19 @@ const ActiveWorkoutScreen = () => {
     // Get exercise info from library if available
     const exerciseInfo = getExerciseInfo(exerciseName);
     
-    // Create a new exercise object with default structure
-    // Sets array with 3 default sets, each with empty weight and '8-12' reps
+    // Create a new exercise object with default structure.
+    // Sets array with 3 default sets, each with empty weight and '8' reps.
+    // We use a single number ('8') instead of a range like '8-12' so users
+    // hit a concrete target each set and can edit the number inline if they
+    // want a different goal. Three sets is the standard hypertrophy default.
     const newExercise = {
       name: exerciseName,
       targetMuscles: exerciseInfo?.targetMuscles || 'Various',
       instructions: exerciseInfo?.instructions || [],
       sets: [
-        { weight: '', reps: '8-12', completed: false },
-        { weight: '', reps: '8-12', completed: false },
-        { weight: '', reps: '8-12', completed: false },
+        { weight: '', reps: '8', completed: false },
+        { weight: '', reps: '8', completed: false },
+        { weight: '', reps: '8', completed: false },
       ],
     };
 
@@ -3594,23 +3977,75 @@ const ActiveWorkoutScreen = () => {
   };
 
   // Auto-fill weight suggestions for an exercise
+  /**
+   * Per-exercise "Autofill Weight" button handler.
+   *
+   * What this does now (changed behavior):
+   *   Copies the FIRST set's weight into every later non-completed
+   *   empty set of the same exercise. The user types or accepts a
+   *   suggested weight on set 1, lifts that weight, and (if it felt
+   *   good) presses this button to populate sets 2..N.
+   *
+   * Why this changed:
+   *   Previously this function predicted a weight via `suggestWeightForExercise`
+   *   and pre-filled every set. The user prefers a deliberate "test
+   *   set 1, then carry it forward" flow so they can adjust based on
+   *   how the first set actually felt.
+   *
+   * Async-on-the-outside, sync-on-the-inside:
+   *   We keep the function `async` so existing call sites (which
+   *   `await` it) keep working without changes. The body itself is
+   *   synchronous because there's no DB round-trip anymore.
+   *
+   * Empty-first-set fallback:
+   *   If set 0 has NO weight, we fall back to the original ML
+   *   prediction so the button still does something useful when the
+   *   user hasn't typed anything yet (e.g. brand-new exercises).
+   */
   const handleAutoFillWeight = async (exerciseIndex) => {
     if (!workout || !workout.exercises || !workout.exercises[exerciseIndex]) return;
-    
+
     const exercise = workout.exercises[exerciseIndex];
-    
-    // Skip if exercise already has weights filled
-    if (exercise.sets && exercise.sets.some(set => set.weight && set.weight.trim() !== '')) {
+    if (!Array.isArray(exercise.sets) || exercise.sets.length === 0) return;
+
+    // -- Path A: set 0 already has a weight → copy it to other sets --
+    // String() handles numeric weights from older data; .trim() strips
+    // whitespace that sneaks in from the keyboard.
+    const firstWeight = String(exercise.sets[0]?.weight ?? '').trim();
+    if (firstWeight !== '') {
+      // Functional setState (`prev =>`) gives us the LATEST workout
+      // state — important if the user typed something between this
+      // tap and the state read above.
+      setWorkout((prev) => {
+        if (!prev || !Array.isArray(prev.exercises)) return prev;
+        const ex = prev.exercises[exerciseIndex];
+        if (!ex || !Array.isArray(ex.sets) || ex.sets.length < 2) return prev;
+
+        let didChange = false;
+        const newSets = ex.sets.map((set, idx) => {
+          if (idx === 0) return set;          // never overwrite set 0
+          if (set.completed) return set;       // never overwrite locked sets
+          const existing = String(set.weight ?? '').trim();
+          if (existing !== '') return set;     // never overwrite user-typed values
+          didChange = true;
+          return { ...set, weight: firstWeight };
+        });
+        if (!didChange) return prev;
+
+        const newExercises = prev.exercises.map((other, idx) =>
+          idx === exerciseIndex ? { ...other, sets: newSets } : other
+        );
+        return { ...prev, exercises: newExercises };
+      });
       return;
     }
-    
+
+    // -- Path B: set 0 is empty → ML suggestion fallback (legacy flow) --
     try {
-      // Get target reps from first set (parse range like "8-12" to average)
       const targetRepsStr = exercise.sets?.[0]?.reps || '10';
       const repsMatch = targetRepsStr.match(/(\d+)/);
       const targetReps = repsMatch ? parseInt(repsMatch[1]) : 10;
-      
-      // Get weight suggestion (pass userId for workout history learning)
+
       const suggestion = await suggestWeightForExercise(
         exercise.name,
         personalRecords || [],
@@ -3618,9 +4053,8 @@ const ActiveWorkoutScreen = () => {
         targetReps,
         user?.id || null
       );
-      
+
       if (suggestion && suggestion.weight) {
-        // Fill all sets with the suggested weight (0 for bodyweight exercises)
         const newWorkout = {
           ...workout,
           exercises: workout.exercises.map((ex, exIdx) => {
@@ -3629,19 +4063,14 @@ const ActiveWorkoutScreen = () => {
                 ...ex,
                 sets: ex.sets.map(set => ({
                   ...set,
-                  weight: set.weight || suggestion.weight
-                }))
+                  weight: set.weight || suggestion.weight,
+                })),
               };
             }
             return ex;
-          })
+          }),
         };
         setWorkout(newWorkout);
-        if (suggestion.isBodyweight) {
-          console.log(`[Auto-fill] Filled ${exercise.name} with 0 (bodyweight exercise)`);
-        } else {
-          console.log(`[Auto-fill] Suggested ${suggestion.weight}lbs for ${exercise.name} (${suggestion.source})`);
-        }
       }
     } catch (error) {
       console.error('[Auto-fill] Error suggesting weight:', error);
@@ -3949,8 +4378,20 @@ const ActiveWorkoutScreen = () => {
                 
                 {/* Bottom Bar: Autofill Weight, How To, Trash (evenly spaced) */}
                 <View style={styles.exerciseTopBar}>
-                  {/* Autofill Weight Button - Left side */}
-                  {exercise.sets && exercise.sets.every(set => !set.weight || set.weight.trim() === '') ? (
+                  {/*
+                    Autofill Weight Button - Left side
+                    --------------------------------
+                    Shown whenever there's at least one non-completed
+                    set with no weight typed yet. Two scenarios:
+                      • Set 0 already has a weight → button copies it
+                        forward into the other empty sets.
+                      • Set 0 is empty → button falls back to the ML
+                        weight suggestion (legacy behavior) and fills
+                        every set.
+                    `.some()` short-circuits on the first match, so
+                    this is O(sets) but stops early in practice.
+                  */}
+                  {exercise.sets && exercise.sets.some(set => !set.completed && (!set.weight || String(set.weight).trim() === '')) ? (
                   <TouchableOpacity
                           style={styles.autoFillButton}
                           onPress={() => handleAutoFillWeight(exerciseIndex)}
@@ -4001,10 +4442,10 @@ const ActiveWorkoutScreen = () => {
               )}
 
               {exercise.sets.map((set, setIndex) => {
-                // Get progressive overload message for this set
+                // Pull the precomputed badge (PR / more reps / same as last time)
+                // directly from the memo. Lookup is O(1) by composite key.
                 const suggestion = progressiveOverloadSuggestions[exerciseIndex];
-                const overloadMessage = set.weight && set.reps ? 
-                  getProgressiveOverloadMessage(exerciseIndex, setIndex, set.weight, set.reps) : null;
+                const overloadMessage = setBadges[`${exerciseIndex}-${setIndex}`] || null;
                 
                 return (
                   <View key={setIndex}>
@@ -4060,11 +4501,15 @@ const ActiveWorkoutScreen = () => {
                       </TouchableOpacity>
                     </View>
                     
-                    {/* Show progressive overload feedback */}
+                    {/* Show progressive overload feedback (PR / more reps / same as last) */}
                     {overloadMessage && (
                       <View style={[
                         styles.progressFeedback,
-                        overloadMessage.type === 'success' ? styles.progressSuccess : styles.progressSuggestion
+                        overloadMessage.type === 'pr'
+                          ? styles.progressPR
+                          : overloadMessage.type === 'success'
+                            ? styles.progressSuccess
+                            : styles.progressSuggestion,
                       ]}>
                         <Text style={styles.progressFeedbackText}>
                           {overloadMessage.message}
@@ -5282,6 +5727,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 165, 0, 0.15)',
     borderLeftWidth: 3,
     borderLeftColor: '#ffa500',
+  },
+  progressPR: {
+    backgroundColor: 'rgba(255, 215, 0, 0.18)',
+    borderLeftWidth: 3,
+    borderLeftColor: '#ffd700',
   },
   progressFeedbackText: {
     fontSize: 12,

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -37,15 +37,25 @@ export default function SchoolWellnessHome() {
     }
   }, [refetchProfile]);
 
+  // SAFETY NET: if a non-student lands here (e.g. via stale router
+  // history or a bad deep link), silently redirect to /home instead
+  // of showing the "verified school students only" stub screen.
+  // useEffect runs AFTER render — using router.replace inside it is
+  // the correct pattern for "redirect on mount" because calling
+  // navigation methods during render itself would warn / loop.
+  useEffect(() => {
+    if (workspace && workspace !== "student") {
+      router.replace("/(tabs)/home");
+    }
+  }, [workspace, router]);
+
+  // While the redirect is in flight (or workspace is still loading),
+  // render NOTHING. We used to render a "this screen is for verified
+  // school students" message here, but that was the screen the user
+  // was occasionally seeing on back-navigation. Returning null gives
+  // the user a clean black flash that's gone in one frame.
   if (workspace !== "student") {
-    return (
-      <View style={[styles.centered, { paddingTop: insets.top + 24 }]}>
-        <Text style={styles.muted}>This screen is for verified school students.</Text>
-        <TouchableOpacity onPress={() => router.replace("/(tabs)/home")}>
-          <Text style={styles.link}>Go to home</Text>
-        </TouchableOpacity>
-      </View>
-    );
+    return <View style={styles.container} />;
   }
 
   return (

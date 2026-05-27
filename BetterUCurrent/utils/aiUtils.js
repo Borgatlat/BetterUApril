@@ -708,8 +708,8 @@ export const generateWorkout = async (userData = {}) => {
     const engagementContext = userData.engagementContext || {};
     const isLowEngagement = engagementContext.level === 'low';
 
-    let systemPrompt = `You are an expert fitness trainer creating personalized workouts. 
-    Create a workout based on the user's profile data and their specific request. 
+    let systemPrompt = `You are an expert fitness trainer creating personalized workouts.
+    Create a workout based on the user's profile data and their specific request.
     The workout should include:
     - A name
     - A list of 5-6 exercises
@@ -723,7 +723,7 @@ export const generateWorkout = async (userData = {}) => {
           "target_muscles": "Primary Muscles (e.g., Chest, Shoulders, Triceps)",
           "instructions": ["Step 1 instruction", "Step 2 instruction", "Step 3 instruction"],
           "sets": 3,
-          "reps": "8-12"
+          "reps": "8"
         }
       ]
     }
@@ -731,7 +731,8 @@ export const generateWorkout = async (userData = {}) => {
     - Each instruction should be a complete sentence describing one specific action
     - Include proper form cues and safety tips
     - Keep exercises appropriate for the user's training level
-    - Use rep ranges that match the user's fitness_goal: strength → 3-6 reps per set, heavy weight, compound-focused; muscle_growth → 8-12 reps (hypertrophy), moderate weight; athleticism → mixed rep ranges (e.g. 6-10), power and conditioning; wellness → 10-15+ reps, lower intensity, mobility-friendly. If no fitness_goal is given, default to 8-12 reps (hypertrophy).
+    - CRITICAL: The "reps" field MUST be a SINGLE NUMBER as a string (e.g. "8", "10", "12"). DO NOT return rep ranges like "8-12" or "6-10". Pick the lower bound of whatever range you would normally suggest, since the user can always do extra reps if they have energy left.
+    - Pick the rep target based on the user's fitness_goal: strength → "5" reps (heavy weight, compound-focused); muscle_growth → "8" reps (hypertrophy, moderate weight); athleticism → "8" reps (power and conditioning); wellness → "12" reps (lower intensity, mobility-friendly). If no fitness_goal is given, default to "8" reps.
     - Return ONLY the JSON object, no other text`;
 
     if (isLowEngagement) {
@@ -741,7 +742,10 @@ export const generateWorkout = async (userData = {}) => {
     }
 
     const customPrompt = userData.custom_prompt || 'a personalized workout';
-    const userMessage = `fitness_goal: ${userData.fitness_goal || 'general fitness'}. Generate a workout with rep ranges and intensity appropriate for this goal. User profile: ${JSON.stringify(userData)}. The user specifically wants: ${customPrompt}`;
+    // We explicitly tell the model "single rep targets (NOT ranges)" again here
+    // because LLMs sometimes ignore the system prompt when the user message
+    // contradicts it. Saying it twice greatly improves compliance.
+    const userMessage = `fitness_goal: ${userData.fitness_goal || 'general fitness'}. Generate a workout with single rep targets (NOT ranges — return a single number like "8" or "10" for the reps field) and intensity appropriate for this goal. User profile: ${JSON.stringify(userData)}. The user specifically wants: ${customPrompt}`;
 
     // Prepare the request payload
     const payload = {
@@ -787,17 +791,38 @@ export const generateWorkout = async (userData = {}) => {
       
       // Normalize exercise data - ensure instructions is an array and targetMuscles is set
       if (workoutData.exercises && Array.isArray(workoutData.exercises)) {
-        workoutData.exercises = workoutData.exercises.map(exercise => ({
-          ...exercise,
-          // Handle both target_muscles and targetMuscles
-          targetMuscles: exercise.targetMuscles || exercise.target_muscles || 'Various',
-          // Ensure instructions is always an array
-          instructions: Array.isArray(exercise.instructions) 
-            ? exercise.instructions 
-            : exercise.instructions 
-            ? [exercise.instructions]
-            : ['Start position', 'Perform movement with proper form', 'Return to start']
-        }));
+        workoutData.exercises = workoutData.exercises.map(exercise => {
+          // ----- Defensive rep normalization -----
+          // Even though we told the AI to return a single number, LLMs occasionally
+          // ignore that instruction and return a range like "8-12". We strip any
+          // range here so the rest of the app NEVER has to handle ranges.
+          // String(exercise.reps) coerces numbers (e.g. 8) into strings ("8").
+          // .split('-')[0] takes everything before the first dash — for "8-12" it
+          // returns "8"; for "8" it returns "8" (no dash, so the whole string is
+          // the first chunk). .trim() removes any accidental whitespace.
+          let normalizedReps = exercise.reps;
+          if (normalizedReps != null) {
+            const repsStr = String(normalizedReps).trim();
+            normalizedReps = repsStr.includes('-')
+              ? repsStr.split('-')[0].trim()
+              : repsStr;
+          } else {
+            normalizedReps = '8'; // sensible fallback
+          }
+
+          return {
+            ...exercise,
+            // Handle both target_muscles and targetMuscles
+            targetMuscles: exercise.targetMuscles || exercise.target_muscles || 'Various',
+            // Ensure instructions is always an array
+            instructions: Array.isArray(exercise.instructions)
+              ? exercise.instructions
+              : exercise.instructions
+              ? [exercise.instructions]
+              : ['Start position', 'Perform movement with proper form', 'Return to start'],
+            reps: normalizedReps,
+          };
+        });
       }
       
       return {

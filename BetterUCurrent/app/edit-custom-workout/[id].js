@@ -102,9 +102,14 @@ const EditCustomWorkoutScreen = () => {
   const toggleExercise = (exercise) => {
     try {
       if (selectedExercises.some(e => e.name === exercise)) {
+        // Already selected → remove it. .filter() builds a fresh array
+        // omitting the matching exercise; the original is untouched.
         setSelectedExercises(selectedExercises.filter(e => e.name !== exercise));
       } else {
-        setSelectedExercises([...selectedExercises, { name: exercise, sets: '3', reps: '10' }]);
+        // Not yet selected → add with default sets/reps.
+        // Default reps is '8' (concrete number, not a range like '8-12').
+        // The user can still edit this on the edit screen.
+        setSelectedExercises([...selectedExercises, { name: exercise, sets: '3', reps: '8' }]);
       }
     } catch (err) {
       console.error('toggleExercise error:', err);

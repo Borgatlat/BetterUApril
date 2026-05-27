@@ -510,6 +510,414 @@ export const exerciseLibrary = {
       'Control the movement throughout'
     ]
   },
+
+  // -------- Newly-added entries to round out coverage --------
+  // These match exercise names commonly used inside STARTER_WORKOUTS /
+  // PREMIUM_WORKOUTS so the "How to" modal and muscle map both have a
+  // direct authoritative source rather than relying on keyword inference.
+  'overhead-press': {
+    name: 'Overhead Press',
+    targetMuscles: 'Shoulders, Triceps, Upper Chest',
+    instructions: [
+      'Stand with feet shoulder-width apart, bar resting on front shoulders',
+      'Grip the bar slightly wider than shoulder-width',
+      'Press the bar overhead until arms are fully extended',
+      'Lower the bar back to the front rack position with control',
+      'Keep your core braced and avoid leaning back',
+    ],
+  },
+  'military-press': {
+    name: 'Military Press',
+    targetMuscles: 'Shoulders, Triceps',
+    instructions: [
+      'Stand with feet together and bar at shoulder height',
+      'Press the bar overhead in a strict line',
+      'Lock out arms with biceps near ears',
+      'Lower with control to starting position',
+      'No leg drive — keep legs straight throughout',
+    ],
+  },
+  'barbell-row': {
+    name: 'Barbell Row',
+    targetMuscles: 'Back, Lats, Rhomboids, Biceps',
+    instructions: [
+      'Stand with feet hip-width apart, knees slightly bent',
+      'Hinge forward at the hips, keep back flat',
+      'Pull the bar to your lower chest / upper stomach',
+      'Squeeze shoulder blades at the top, then lower with control',
+    ],
+  },
+  'back-squat': {
+    name: 'Back Squat',
+    targetMuscles: 'Quads, Glutes, Hamstrings',
+    instructions: [
+      'Place the bar across upper back (high-bar) or rear delts (low-bar)',
+      'Stand with feet shoulder-width apart, toes slightly out',
+      'Brace core, then descend by sitting hips back and bending knees',
+      'Drop until thighs are at least parallel, then drive up through heels',
+    ],
+  },
+  'front-squat': {
+    name: 'Front Squat',
+    targetMuscles: 'Quads, Glutes, Core',
+    instructions: [
+      'Rest the bar on your front shoulders with elbows high',
+      'Stand with feet shoulder-width apart',
+      'Sit straight down, keeping torso upright and elbows up',
+      'Drive through heels back to standing',
+    ],
+  },
+  'jump-squat': {
+    name: 'Jump Squat',
+    targetMuscles: 'Quads, Glutes, Hamstrings, Calves',
+    instructions: [
+      'Stand with feet shoulder-width apart',
+      'Lower into a quarter-to-half squat',
+      'Explode upward, jumping as high as possible',
+      'Land softly with knees bent and immediately drop into the next rep',
+    ],
+  },
+  'leg-raise': {
+    name: 'Leg Raise',
+    targetMuscles: 'Abdominals, Hip Flexors',
+    instructions: [
+      'Lie flat on your back with legs straight',
+      'Place hands at your sides or under your hips for support',
+      'Lift legs together to a 90-degree angle, keeping them straight',
+      'Lower with control without letting feet touch the floor',
+    ],
+  },
+  'cable-crunch': {
+    name: 'Cable Crunch',
+    targetMuscles: 'Abdominals',
+    instructions: [
+      'Kneel below a high pulley with a rope attachment',
+      'Hold the rope at the sides of your head',
+      'Crunch down by curling your torso toward your knees',
+      'Squeeze the abs at the bottom, then return slowly',
+    ],
+  },
+  'walking-lunge': {
+    name: 'Walking Lunge',
+    targetMuscles: 'Quads, Glutes, Hamstrings',
+    instructions: [
+      'Stand tall with feet hip-width apart',
+      'Step forward into a lunge, both knees bending to ~90°',
+      'Drive through the front heel and step the back foot forward',
+      'Continue alternating legs as you walk forward',
+    ],
+  },
+  'calf-raise': {
+    name: 'Calf Raise',
+    targetMuscles: 'Calves',
+    instructions: [
+      'Stand with the balls of your feet on a step or flat ground',
+      'Lower heels below the step (if elevated) for a stretch',
+      'Press up onto the balls of your feet, squeezing the calves',
+      'Lower with control and repeat',
+    ],
+  },
+  'face-pull': {
+    name: 'Face Pull',
+    targetMuscles: 'Rear Shoulders, Upper Back, Traps',
+    instructions: [
+      'Set a cable pulley at face height with a rope attachment',
+      'Pull the rope toward your face, separating your hands at the end',
+      'Squeeze rear delts and upper back at the peak',
+      'Return slowly to the start position',
+    ],
+  },
+  'tricep-pushdown': {
+    name: 'Tricep Pushdown',
+    targetMuscles: 'Triceps',
+    instructions: [
+      'Stand at a high cable with a rope or bar attachment',
+      'Keep elbows pinned to your sides',
+      'Press the attachment down until arms are fully extended',
+      'Squeeze triceps at the bottom, then return slowly',
+    ],
+  },
+  'skull-crusher': {
+    name: 'Skull Crusher',
+    targetMuscles: 'Triceps',
+    instructions: [
+      'Lie on a bench holding an EZ-bar with a narrow grip',
+      'Press the bar straight up over your chest',
+      'Bend ONLY at the elbows to lower the bar toward your forehead',
+      'Extend back to lockout, keeping upper arms vertical',
+    ],
+  },
+  'box-jumps': {
+    name: 'Box Jumps',
+    targetMuscles: 'Quads, Glutes, Hamstrings, Calves',
+    instructions: [
+      'Stand a comfortable distance in front of a sturdy box',
+      'Drop into a quarter-squat and swing your arms back',
+      'Explode up, swinging arms forward, and land softly on the box',
+      'Step down (don\'t jump down) to protect your knees',
+    ],
+  },
+  'hip-thrusts': {
+    name: 'Hip Thrusts',
+    targetMuscles: 'Glutes, Hamstrings',
+    instructions: [
+      'Sit with upper back against a bench, barbell across hips',
+      'Plant feet flat, knees bent ~90°',
+      'Drive through heels to lift hips until torso is parallel to floor',
+      'Squeeze glutes at the top, then lower with control',
+    ],
+  },
+  'cable-kickbacks': {
+    name: 'Cable Kickbacks',
+    targetMuscles: 'Glutes, Hamstrings',
+    instructions: [
+      'Attach an ankle strap to a low cable',
+      'Stand facing the machine, keeping a slight bend in the standing leg',
+      'Drive the working leg straight back, squeezing the glute',
+      'Return slowly without letting weight slam down',
+    ],
+  },
+  'dumbbell-flyes': {
+    name: 'Dumbbell Flyes',
+    targetMuscles: 'Chest, Shoulders',
+    instructions: [
+      'Lie on a bench holding dumbbells above your chest, palms facing in',
+      'Lower the weights in a wide arc with a slight elbow bend',
+      'Stop when chest feels a deep stretch',
+      'Squeeze chest as you bring the weights back together',
+    ],
+  },
+  'cable-flyes': {
+    name: 'Cable Flyes',
+    targetMuscles: 'Chest, Shoulders',
+    instructions: [
+      'Set both pulleys at chest height with single-handle attachments',
+      'Step forward with one foot, slight forward lean of torso',
+      'Bring hands together in front of chest in a wide arc',
+      'Squeeze chest at the peak, then return slowly',
+    ],
+  },
+  'cable-lateral-raise': {
+    name: 'Cable Lateral Raise',
+    targetMuscles: 'Shoulders',
+    instructions: [
+      'Stand sideways to a low cable pulley, attach a single-handle',
+      'Lift the handle out to the side until parallel with the floor',
+      'Lower under control without letting the weight pull you in',
+      'Switch sides after completing reps',
+    ],
+  },
+  'incline-barbell-press': {
+    name: 'Incline Barbell Press',
+    targetMuscles: 'Upper Chest, Shoulders, Triceps',
+    instructions: [
+      'Set a bench to 30–45° incline; lie back with feet flat',
+      'Grip the bar slightly wider than shoulder-width',
+      'Lower the bar to upper chest with control',
+      'Press up explosively to lockout',
+    ],
+  },
+  'incline-dumbbell-press': {
+    name: 'Incline Dumbbell Press',
+    targetMuscles: 'Upper Chest, Shoulders, Triceps',
+    instructions: [
+      'Set a bench to 30–45° incline',
+      'Hold dumbbells at upper-chest level, palms facing forward',
+      'Press the dumbbells up until arms are extended',
+      'Lower with control until you feel a chest stretch',
+    ],
+  },
+  'arnold-press': {
+    name: 'Arnold Press',
+    targetMuscles: 'Shoulders, Triceps, Upper Chest',
+    instructions: [
+      'Sit with dumbbells held at shoulder height, palms facing you',
+      'As you press up, rotate the dumbbells so palms face forward at lockout',
+      'Reverse the rotation as you lower the dumbbells back to the start',
+    ],
+  },
+  'push-press': {
+    name: 'Push Press',
+    targetMuscles: 'Shoulders, Triceps, Quads',
+    instructions: [
+      'Hold the bar at your shoulders with elbows slightly in front',
+      'Dip slightly at the knees, then explosively drive up',
+      'Use the leg drive to launch the bar overhead to lockout',
+      'Lower with control back to the front rack',
+    ],
+  },
+  'power-clean': {
+    name: 'Power Clean',
+    targetMuscles: 'Back, Quads, Glutes, Hamstrings, Shoulders, Traps',
+    instructions: [
+      'Set up over the bar with hands slightly outside knees',
+      'Extend hips and knees explosively, shrug at the top',
+      'Pull yourself under the bar into a quarter squat',
+      'Stand up to complete the rep, then return the bar with control',
+    ],
+  },
+  'barbell-curl': {
+    name: 'Barbell Curl',
+    targetMuscles: 'Biceps, Forearms',
+    instructions: [
+      'Stand with feet shoulder-width apart, holding a barbell with underhand grip',
+      'Keep elbows pinned to sides',
+      'Curl the bar up to shoulder height, squeezing biceps at the top',
+      'Lower under control to full arm extension',
+    ],
+  },
+  'preacher-curl': {
+    name: 'Preacher Curl',
+    targetMuscles: 'Biceps',
+    instructions: [
+      'Sit at a preacher bench with arms over the pad',
+      'Hold a barbell or EZ-bar with an underhand grip',
+      'Curl the bar up while keeping upper arms on the pad',
+      'Lower under control until arms are nearly straight',
+    ],
+  },
+  't-bar-row': {
+    name: 'T-Bar Row',
+    targetMuscles: 'Back, Lats, Rhomboids, Biceps',
+    instructions: [
+      'Stand over the loaded T-bar with chest up, back flat',
+      'Pull the handles to your lower chest',
+      'Squeeze your back at the top, then lower with control',
+    ],
+  },
+  'seated-cable-row': {
+    name: 'Seated Cable Row',
+    targetMuscles: 'Back, Lats, Rhomboids, Biceps',
+    instructions: [
+      'Sit at a row machine with feet braced',
+      'Pull the handle to your lower stomach, keeping torso upright',
+      'Squeeze shoulder blades at the back, then return slowly',
+    ],
+  },
+  'plank-jack': {
+    name: 'Plank Jack',
+    targetMuscles: 'Core, Shoulders, Glutes',
+    instructions: [
+      'Start in a plank position on hands or forearms',
+      'Jump feet wide, then back together — like a horizontal jumping jack',
+      'Keep hips level and core tight throughout',
+    ],
+  },
+  'bicycle-crunch': {
+    name: 'Bicycle Crunch',
+    targetMuscles: 'Abdominals, Obliques',
+    instructions: [
+      'Lie on your back with hands behind your head',
+      'Bring opposite elbow to opposite knee while extending the other leg',
+      'Alternate sides in a smooth, pedaling motion',
+      'Keep shoulders off the floor and lower back pressed down',
+    ],
+  },
+  'hanging-leg-raise': {
+    name: 'Hanging Leg Raise',
+    targetMuscles: 'Abdominals, Hip Flexors',
+    instructions: [
+      'Hang from a pull-up bar with arms straight',
+      'Lift legs (straight or bent-knee) up to hip height or higher',
+      'Lower under control without swinging',
+    ],
+  },
+  'medicine-ball-slam': {
+    name: 'Medicine Ball Slam',
+    targetMuscles: 'Core, Shoulders, Lats, Triceps',
+    instructions: [
+      'Stand with a medicine ball overhead, feet shoulder-width apart',
+      'Slam the ball into the ground in front of you with full force',
+      'Squat down to pick up the ball and repeat',
+    ],
+  },
+  'sled-push': {
+    name: 'Sled Push',
+    targetMuscles: 'Quads, Glutes, Calves, Hamstrings, Core',
+    instructions: [
+      'Get into a low athletic stance behind the sled',
+      'Drive forward by extending hips and pushing through the legs',
+      'Maintain a forward lean and steady leg turnover',
+    ],
+  },
+  'battle-ropes': {
+    name: 'Battle Ropes',
+    targetMuscles: 'Shoulders, Core, Forearms',
+    instructions: [
+      'Stand with feet shoulder-width apart, holding the rope ends',
+      'Drop into a slight athletic stance and brace your core',
+      'Whip the ropes up and down (or in alternating waves) at high speed',
+    ],
+  },
+  'rowing-sprints': {
+    name: 'Rowing Sprints',
+    targetMuscles: 'Back, Biceps, Quads, Hamstrings, Core',
+    instructions: [
+      'Sit on a rowing machine, feet strapped in, holding the handle',
+      'Drive with the legs first, then lean back, then pull with the arms',
+      'Sprint at maximum effort for the prescribed time, then rest',
+    ],
+  },
+  'farmers-walk': {
+    name: "Farmer's Walk",
+    targetMuscles: 'Forearms, Back, Quads, Core',
+    instructions: [
+      'Pick up two heavy dumbbells or kettlebells, one in each hand',
+      'Walk in a straight line with quick, controlled steps',
+      'Keep shoulders pulled back and core braced',
+    ],
+  },
+  // -------- Recovery / mobility entries --------
+  // targetMuscles is intentionally empty — these aren't strength
+  // movements, so we don't want them lighting up the muscle map like
+  // a real workout would. The keyword resolver in workoutMuscleMap.js
+  // also catches these names and returns [] (no muscles), giving
+  // recovery workouts a clean "no specific targets" rendering.
+  'dynamic-stretching': {
+    name: 'Dynamic Stretching',
+    targetMuscles: '',
+    instructions: [
+      'Move through a series of controlled, dynamic motions',
+      'Examples: leg swings, walking lunges with a twist, arm circles',
+      'Focus on gradually increasing range of motion',
+    ],
+  },
+  'static-stretching': {
+    name: 'Static Stretching',
+    targetMuscles: '',
+    instructions: [
+      'Hold each stretch position for 30–60 seconds',
+      'Breathe deeply and relax into each stretch',
+      'Avoid bouncing — go to mild discomfort, not pain',
+    ],
+  },
+  'foam-rolling': {
+    name: 'Foam Rolling',
+    targetMuscles: '',
+    instructions: [
+      'Place the foam roller under the muscle to be released',
+      'Roll slowly back and forth, pausing on tender spots for 20–30 seconds',
+      'Breathe through tight areas and avoid rolling directly on bone',
+    ],
+  },
+  'yoga-poses': {
+    name: 'Yoga Poses',
+    targetMuscles: '',
+    instructions: [
+      'Move slowly through poses like Downward Dog, Warrior, and Child\'s Pose',
+      'Hold each pose for 5–10 deep breaths',
+      'Focus on alignment and steady breathing',
+    ],
+  },
+  'joint-mobility': {
+    name: 'Joint Mobility',
+    targetMuscles: '',
+    instructions: [
+      'Perform gentle circles for each major joint (ankles, hips, shoulders, etc.)',
+      'Move through full pain-free range of motion',
+      '5–10 reps per joint, in both directions',
+    ],
+  },
 };
 
 /**
@@ -620,20 +1028,73 @@ export const exerciseGifSearchFallbacks = {
 };
 
 /**
- * Get exercise info from library by name
- * Handles various name formats (spaces, dashes, lowercase, etc.)
+ * Get exercise info from library by name.
+ *
+ * Handles a bunch of input shapes the rest of the app might throw at us:
+ *   - "Bench Press"      → 'bench-press' (the canonical key in the library)
+ *   - "bench press"      → same (case-insensitive)
+ *   - "Squats"           → 'squat' (plural→singular fallback)
+ *   - "Pull-Ups"         → 'pull-up'
+ *   - "Pull Ups"         → 'pull-up'
+ *   - "Romanian Deadlifts" → 'romanian-deadlift'
+ *   - "Push-Ups" / "Push Ups" / "Pushups" → 'push-up'
+ *
+ * We try multiple "candidate keys" in order, returning the first one
+ * that exists in the library. This makes the lookup robust without
+ * requiring every plural / hyphenation variant to be added as its own
+ * entry. The canonical entries above stay clean.
+ *
+ * @param {string} exerciseName
+ * @returns {object|null} the library entry, or null if not found
  */
 export const getExerciseInfo = (exerciseName) => {
   if (!exerciseName) return null;
-  
-  // Normalize the exercise name for lookup
-  const normalized = exerciseName
+
+  // Step 1: lowercase + trim + strip any chars that aren't a letter,
+  // digit, dash, or whitespace. This kills punctuation like
+  // apostrophes ("Farmer's Walk") which would otherwise survive into
+  // the key and never match.
+  const cleaned = String(exerciseName)
     .toLowerCase()
     .trim()
-    .replace(/\s+/g, '-') // Replace spaces with dashes
-    .replace(/[^a-z0-9-]/g, ''); // Remove special characters
-  
-  return exerciseLibrary[normalized] || null;
+    .replace(/[^a-z0-9\s-]/g, '');
+
+  // Step 2: build a list of candidate keys to try. We try the most
+  // specific transformation first and fall back to broader variants.
+  const candidates = new Set();
+
+  // Variant A: spaces → dashes (matches keys like "bench-press")
+  const dashed = cleaned.replace(/\s+/g, '-');
+  candidates.add(dashed);
+
+  // Variant B: pluralized inputs — drop trailing "s" or "es" so
+  // "squats" → "squat", "deadlifts" → "deadlift", "pushes" → "push".
+  // We only try these if the dashed form doesn't already exist.
+  if (dashed.endsWith('es')) candidates.add(dashed.slice(0, -2));
+  if (dashed.endsWith('s')) candidates.add(dashed.slice(0, -1));
+
+  // Variant C: dashed-plural like "pull-ups" → "pull-up". The trailing
+  // -s could be on the last segment of a hyphenated word.
+  // e.g. "pull-ups" → split → ["pull", "ups"] → drop trailing "s" on
+  // the last segment → ["pull", "up"] → re-join.
+  const segments = dashed.split('-');
+  if (segments.length > 1) {
+    const last = segments[segments.length - 1];
+    if (last.endsWith('s') && last.length > 1) {
+      const trimmed = [...segments.slice(0, -1), last.slice(0, -1)].join('-');
+      candidates.add(trimmed);
+    }
+  }
+
+  // Variant D: spaceless ("pushup", "situp", "pullup")
+  candidates.add(cleaned.replace(/\s+/g, ''));
+
+  // Try each candidate; first hit wins.
+  for (const key of candidates) {
+    if (exerciseLibrary[key]) return exerciseLibrary[key];
+  }
+
+  return null;
 };
 
 /**

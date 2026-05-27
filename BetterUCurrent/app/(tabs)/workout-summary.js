@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Image, ScrollView } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTracking } from '../../context/TrackingContext';
@@ -11,6 +11,29 @@ export default function WorkoutSummaryScreen() {
   const { stats } = useTracking();
   const [spotifyTracks, setSpotifyTracks] = useState([]);
   const [loadingTracks, setLoadingTracks] = useState(false);
+
+  /**
+   * Decode the `newPRs` route param. We send it as a JSON string from
+   * active-workout because Expo Router serializes everything to URL
+   * strings — objects/arrays would otherwise get stringified poorly.
+   *
+   * useMemo:
+   *   Caches the parsed array across re-renders so we don't JSON.parse
+   *   on every keystroke / state change.
+   * try/catch:
+   *   Defensive — a malformed param won't crash the summary screen,
+   *   it'll just show "no PRs" which is the safe fallback.
+   */
+  const newPRs = useMemo(() => {
+    const raw = Array.isArray(params.newPRs) ? params.newPRs[0] : params.newPRs;
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [params.newPRs]);
 
   // Once we know which session finished, load any Spotify tracks tied to it
   useEffect(() => {
@@ -104,6 +127,53 @@ export default function WorkoutSummaryScreen() {
         <View style={styles.messageContainer}>
           <Text style={styles.message}>Great work!</Text>
         </View>
+
+        {/*
+          New Personal Records section
+          ----------------------------
+          Renders one row per exercise where the user beat (or set
+          for the first time) a PR during this workout. Hidden when
+          newPRs is empty — keeps the summary uncluttered when a
+          session was just maintenance work.
+
+          .toFixed(1):
+            Forces one decimal place. We could keep the raw lbs but
+            "275.0 → 280.5 lbs" reads cleaner than "275 → 280.5 lbs".
+        */}
+        {newPRs.length > 0 && (
+          <View style={styles.prSection}>
+            <View style={styles.prHeader}>
+              <Ionicons name="trophy" size={20} color="#ffd700" />
+              <Text style={styles.prHeaderText}>
+                New Personal Records ({newPRs.length})
+              </Text>
+            </View>
+            {newPRs.map((pr, idx) => (
+              <View key={`${pr.exerciseName}-${idx}`} style={styles.prRow}>
+                <View style={styles.prRowLeft}>
+                  <Text style={styles.prExerciseName} numberOfLines={1}>
+                    {pr.exerciseName}
+                  </Text>
+                  <Text style={styles.prSubText}>
+                    {pr.isFirstTime
+                      ? 'First time tracked'
+                      : `Was ${(pr.previousLbs || 0).toFixed(1)} lbs`}
+                  </Text>
+                </View>
+                <View style={styles.prRowRight}>
+                  <Text style={styles.prWeight}>
+                    {(pr.weightLbs || 0).toFixed(1)} lbs
+                  </Text>
+                  {!pr.isFirstTime && (
+                    <Text style={styles.prDelta}>
+                      +{((pr.weightLbs || 0) - (pr.previousLbs || 0)).toFixed(1)}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Only show music section if loading tracks or if tracks were detected */}
         {(loadingTracks || spotifyTracks.length > 0) && (
@@ -226,6 +296,63 @@ const styles = StyleSheet.create({
   submessage: {
     color: '#666',
     fontSize: 14,
+  },
+  prSection: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 215, 0, 0.25)',
+  },
+  prHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  prHeaderText: {
+    color: '#ffd700',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  prRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 215, 0, 0.08)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.2)',
+  },
+  prRowLeft: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  prExerciseName: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  prSubText: {
+    color: '#bbb',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  prRowRight: {
+    alignItems: 'flex-end',
+  },
+  prWeight: {
+    color: '#ffd700',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  prDelta: {
+    color: '#00ff88',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
   },
   button: {
     backgroundColor: '#00ffff',

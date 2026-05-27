@@ -96,9 +96,16 @@ const CreateWorkoutScreen = () => {
   const toggleExercise = (exercise) => {
     try {
       if (selectedExercises.some(e => e.name === exercise)) {
+        // Exercise is already selected → toggle it off by filtering it out.
+        // .filter() returns a NEW array containing only items that pass the test;
+        // it never mutates the original array.
         setSelectedExercises(selectedExercises.filter(e => e.name !== exercise));
       } else {
-        setSelectedExercises([...selectedExercises, { name: exercise, sets: '3', reps: '10' }]);
+        // Exercise not yet selected → add it with default sets/reps.
+        // Default reps = '8' (a single number, not a range). The user can still
+        // edit this in the input field on the create-workout screen if they
+        // want a different target.
+        setSelectedExercises([...selectedExercises, { name: exercise, sets: '3', reps: '8' }]);
       }
     } catch (err) {
       console.error('toggleExercise error:', err);

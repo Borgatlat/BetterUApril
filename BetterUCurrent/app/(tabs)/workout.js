@@ -1,12 +1,13 @@
 "use client";
 
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, FlatList, Alert, Platform, SafeAreaView, Dimensions, Switch, Animated, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, FlatList, Alert, Platform, SafeAreaView, Dimensions, Switch, Animated, TextInput, AppState, PanResponder } from 'react-native';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { useUser } from '../../context/UserContext';
 import { useSettings } from '../../context/SettingsContext';
+import { useUnits } from '../../context/UnitsContext';
 import { generateWorkout } from '../../utils/aiUtils';
 import { useAIConsent } from '../../context/AIConsentContext';
 import {
@@ -70,6 +71,7 @@ import {
 import ScheduledWorkoutModal from '../../components/ScheduledWorkoutModal';
 import TrainingSplitModal from '../../components/TrainingSplitModal';
 import RecoveryMap from '../../components/RecoveryMap';
+import { PREMIUM_WORKOUTS } from '../../utils/workoutCatalog';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 import WorkoutLogs from './workout-logs';
 // Live Activities - shows real-time stats on lock screen during cardio
@@ -79,6 +81,22 @@ import {
   endCardioLiveActivity, 
   dismissLiveActivity 
 } from '../../utils/liveActivities';
+
+// Background GPS — keeps tracking running when the screen is locked
+// or the app is backgrounded. Without this, foreground-only
+// `Location.watchPositionAsync` would silently pause updates the
+// moment the user pockets their phone, which made distance + path
+// data wildly inaccurate. The task is registered at module load
+// inside `lib/runBackgroundLocation.js` (see TaskManager.defineTask
+// at the top-level of that file).
+import {
+  startBackgroundRunTracking,
+  stopBackgroundRunTracking,
+  addLocationListener,
+  removeLocationListener,
+  getStoredLocationsAsync,
+  clearStoredLocationsAsync,
+} from '../../lib/runBackgroundLocation';
 
 const { width, height } = Dimensions.get('window');
 const mapProvider = getMapProvider();
@@ -152,8 +170,12 @@ const WorkoutScreen = () => {
   const [activeTab, setActiveTab] = useState('workout'); // 'workout' or 'run'
   const [showLogs, setShowLogs] = useState(false);
   const [userWorkouts, setUserWorkouts] = useState([]);
+
   const [showWorkoutGeneratorModal, setShowWorkoutGeneratorModal] = useState(false);
-  const [showActivityModal, setShowActivityModal] = useState(false);
+  // showActivityModal was removed when we replaced the activity
+  // selection modal with the inline segmented switcher in the
+  // run-tab header. Keeping the line as a tombstone so future
+  // git-blame readers see it didn't simply disappear.
   const [showShareModal, setShowShareModal] = useState(false);
   const [selectedWorkoutForShare, setSelectedWorkoutForShare] = useState(null);
   const [sharedWorkouts, setSharedWorkouts] = useState([]);
@@ -161,12 +183,16 @@ const WorkoutScreen = () => {
   const { isPremium, userProfile } = useUser();
   const { requestAIConsent } = useAIConsent();
   const { settings } = useSettings();
+  const { useImperial } = useUnits();
   const [todayScheduledWorkout, setTodayScheduledWorkout] = useState(null);
   const [showScheduledWorkoutModal, setShowScheduledWorkoutModal] = useState(false);
   const [selectedScheduledDate, setSelectedScheduledDate] = useState(null);
   const [selectedScheduledWorkout, setSelectedScheduledWorkout] = useState(null);
   const { refreshKey: scheduleRefreshKey, notifyScheduleUpdated } = useScheduleRefresh();
-  const { scrollPaddingBottom } = useBottomChromeInsets();
+  const { scrollPaddingBottom, tabBarHeight, bannerHeight } = useBottomChromeInsets();
+  // Run-tab stats sheet sits above tab bar + optional banner ad (non-premium).
+  // Without bannerHeight the sheet's Start/Pause buttons sit under the ad.
+  const runOverlayBottom = tabBarHeight + bannerHeight;
   const [sprintCompleted, setSprintCompleted] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [countdown, setCountdown] = useState(null);
@@ -215,8 +241,6 @@ const WorkoutScreen = () => {
   const [recording, setRecording] = useState(false);
   const [paused, setPaused] = useState(false);
   const [activityStarted, setActivityStarted] = useState(false);
-  const [autoZoom, setAutoZoom] = useState(false);
-  const [useMiles, setUseMiles] = useState(false);
   const [startTime, setStartTime] = useState(null);
   const [pauseTime, setPauseTime] = useState(0);
   const [totalPauseTime, setTotalPauseTime] = useState(0);
@@ -239,6 +263,11 @@ const WorkoutScreen = () => {
   const indoorStartStepsRef = useRef(null); // step count when sprint started (Android: baseline for delta)
   const mapRef = useRef(null);
   const timerRef = useRef(null);
+  // Wall-clock refs for the run timer — the interval callback reads
+  // these instead of state so we never restart the interval when
+  // distance/GPS updates (which was causing skipped or frozen seconds).
+  const startTimeRef = useRef(null);
+  const totalPauseTimeRef = useRef(0);
   const locationsRef = useRef([]);
   const lastValidLocation = useRef(null);
   const bestAccuracyRef = useRef(1000); // Track best GPS accuracy achieved
@@ -251,6 +280,42 @@ const WorkoutScreen = () => {
   
   // Animated progress bar for sprint tracking
   const sprintProgressAnim = useRef(new Animated.Value(0)).current;
+
+  // ============================================================
+  // Draggable bottom-sheet overlay state
+  // ============================================================
+  // The stats panel at the bottom of the run tab can be
+  // dragged up/down to give the user more or less map real
+  // estate. We use an `Animated.Value` (not a regular number)
+  // so the height can animate smoothly with `Animated.timing`
+  // and update in lockstep with `panResponder` drag gestures.
+  const [overlayExpanded, setOverlayExpanded] = useState(true);
+  const OVERLAY_COLLAPSED_HEIGHT = 180;
+  const OVERLAY_EXPANDED_HEIGHT = 300;
+  const overlayHeight = useRef(new Animated.Value(OVERLAY_EXPANDED_HEIGHT)).current;
+
+  // Stable ref to the GPS batch handler. We need a stable
+  // reference (not just `processLocationBatch` directly) so
+  // that `removeLocationListener` later removes the SAME
+  // function that `addLocationListener` registered. JS Sets
+  // do identity-comparison, so passing a freshly-created
+  // function each render would leak listeners.
+  const locationListenerRef = useRef(null);
+
+  // ============================================================
+  // "Live value" refs for the GPS callback
+  // ============================================================
+  // The background-location callback is registered once at the
+  // start of a run. Mirror values that can change into refs so
+  // the long-lived listener always reads the latest setting.
+  const activityTypeRef = useRef(activityType);
+  const useImperialRef = useRef(useImperial);
+  const startLocationRef = useRef(null);
+  useEffect(() => { activityTypeRef.current = activityType; }, [activityType]);
+  useEffect(() => { useImperialRef.current = useImperial; }, [useImperial]);
+  useEffect(() => { startLocationRef.current = startLocation; }, [startLocation]);
+  useEffect(() => { startTimeRef.current = startTime; }, [startTime]);
+  useEffect(() => { totalPauseTimeRef.current = totalPauseTime; }, [totalPauseTime]);
 
   /**
    * Fetches previous workout data to provide progressive overload suggestions
@@ -1008,60 +1073,11 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
   };
 
 
-  const premiumWorkouts = [
-    // Push day workouts (chest, shoulders, triceps)
-    { splitDay: 'push', goalType: 'strength', name: 'Push Day Strength', description: 'Heavy compound push for chest, shoulders and triceps', repRange: '6-10 reps', duration: '55 min', intensity: 'High', exercises: ['Bench Press', 'Overhead Press', 'Incline Dumbbell Press', 'Dips', 'Tricep Pushdown', 'Lateral Raise'], howTo: 'Lead with compound moves, then finish with isolation. Rest 2–3 min on heavy sets.' },
-    { splitDay: 'push', goalType: 'muscle_growth', name: 'Chest & Triceps Focus', description: 'Chest and tricep emphasis with pump finishers', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Bench Press', 'Incline Dumbbell Press', 'Dumbbell Flyes', 'Close-Grip Bench Press', 'Tricep Pushdown', 'Skull Crushers'], howTo: 'Control the eccentric and squeeze at the top of each rep for maximum pump.' },
-    { splitDay: 'push', goalType: 'muscle_growth', name: 'Push-Pull-Legs Pro', description: 'Advanced PPL push day for muscle growth', repRange: '8-12 reps', duration: '60 min', intensity: 'Pro', exercises: ['Incline Barbell Press', 'Arnold Press', 'Lateral Raise', 'Tricep Pushdown', 'Dips'], howTo: 'Focus on compound movements to maximize muscle engagement and growth.' },
-    // Push – bodyweight & dumbbell (minimal equipment)
-    { splitDay: 'push', goalType: 'muscle_growth', name: 'Push Day Bodyweight & Dumbbell', description: 'No barbell needed. Chest, shoulders and triceps with push-ups and dumbbells.', repRange: '8-12 reps', duration: '40 min', intensity: 'Medium', exercises: ['Push-Up', 'Pike Push-Up', 'Dumbbell Press', 'Lateral Raise', 'Tricep Extension', 'Diamond Push-Up'], howTo: 'Use a bench or floor for push-ups and pike push-ups; one set of dumbbells covers the rest.' },
-    { splitDay: 'push', goalType: 'strength', name: 'At-Home Push', description: 'Push day with only bodyweight and dumbbells', repRange: '10-15 reps', duration: '35 min', intensity: 'Medium', exercises: ['Push-Up', 'Dumbbell Shoulder Press', 'Dumbbell Flyes', 'Tricep Extension', 'Lateral Raise'], howTo: 'Focus on control and full range of motion; add weight as you get stronger.' },
-    // Pull day workouts (back, biceps, rear delts)
-    { splitDay: 'pull', goalType: 'strength', name: 'Pull Day Power', description: 'Heavy back and biceps for strength and size', repRange: '6-10 reps', duration: '55 min', intensity: 'High', exercises: ['Deadlift', 'Barbell Row', 'Pull-Ups', 'Lat Pulldown', 'Face Pull', 'Bicep Curl'], howTo: 'Prioritize deadlift and rows; keep core braced and avoid using momentum.' },
-    { splitDay: 'pull', goalType: 'muscle_growth', name: 'Back & Biceps Builder', description: 'Hypertrophy-focused pull with multiple angles', repRange: '8-12 reps', duration: '50 min', intensity: 'Medium', exercises: ['Barbell Row', 'Lat Pulldown', 'Seated Cable Row', 'Face Pull', 'Bicep Curl', 'Hammer Curl'], howTo: 'Squeeze the back and biceps at the top of each pull; control the negative.' },
-    { splitDay: 'pull', goalType: 'muscle_growth', name: 'Pull Day Classic', description: 'Classic pull routine with rows and curls', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Pull-Ups', 'T-Bar Row', 'Lat Pulldown', 'Face Pull', 'Bicep Curl', 'Preacher Curl'], howTo: 'Focus on full range of motion and mind–muscle connection on every set.' },
-    // Pull – bodyweight & dumbbell
-    { splitDay: 'pull', goalType: 'muscle_growth', name: 'Pull Day No Barbell', description: 'Back and biceps using dumbbells and bodyweight only', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Bent Over Row', 'Dumbbell Row', 'Pull-Up', 'Bicep Curl', 'Hammer Curl', 'Rear Delt Fly'], howTo: 'Use a single dumbbell or two for rows and curls; pull-ups can be done with a bar or bands.' },
-    { splitDay: 'pull', goalType: 'strength', name: 'Back & Biceps Dumbbell Only', description: 'Full pull day with just dumbbells', repRange: '8-12 reps', duration: '40 min', intensity: 'Medium', exercises: ['Bent Over Row', 'Single-Arm Row', 'Rear Delt Fly', 'Bicep Curl', 'Hammer Curl'], howTo: 'Brace your core on rows; squeeze shoulder blades at the top of each row.' },
-    // Legs – bodyweight & dumbbell
-    { splitDay: 'legs', goalType: 'muscle_growth', name: 'Leg Day Bodyweight & Dumbbell', description: 'Legs and glutes with minimal equipment', repRange: '10-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Goblet Squat', 'Lunges', 'Romanian Deadlift', 'Calf Raise', 'Bulgarian Split Squat', 'Glute Bridge'], howTo: 'Hold one dumbbell for goblet squats and RDL; bodyweight for lunges and bridges.' },
-    { splitDay: 'legs', goalType: 'wellness', name: 'At-Home Legs', description: 'Lower body with squats, lunges and one dumbbell', repRange: '12-15 reps', duration: '35 min', intensity: 'Medium', exercises: ['Squat', 'Lunges', 'Glute Bridge', 'Romanian Deadlift', 'Calf Raise'], howTo: 'No rack needed; use dumbbells for RDL and goblet-style squats if you have them.' },
-    { splitDay: 'legs', goalType: 'strength', name: 'Leg Day Strength', description: 'Heavy squats and compounds for quad, hamstring and glute strength', repRange: '5-8 reps', duration: '60 min', intensity: 'High', exercises: ['Squat', 'Romanian Deadlift', 'Leg Press', 'Leg Curl', 'Calf Raise', 'Hip Thrust'], howTo: 'Warm up thoroughly; rest 2–3 minutes on squat and deadlift sets.' },
-    { splitDay: 'legs', goalType: 'muscle_growth', name: 'Leg Day Hypertrophy', description: 'Volume leg day for size — quads, hamstrings and glutes', repRange: '8-12 reps', duration: '55 min', intensity: 'Medium', exercises: ['Squat', 'Leg Press', 'Romanian Deadlift', 'Leg Curl', 'Walking Lunge', 'Calf Raise'], howTo: 'Control the negative on RDL and leg curl; squeeze glutes at the top of hip thrusts.' },
-    { splitDay: 'Lower', goalType: 'strength', name: 'Leg Day Home', description: 'Full leg day with bodyweight and dumbbells only', repRange: '8-12 reps', duration: '50 min', intensity: 'High', exercises: ['Goblet Squat', 'Lunges', 'Bulgarian Split Squat', 'Romanian Deadlift', 'Calf Raise', 'Glute Bridge'], howTo: 'Progressive overload by adding dumbbell weight or slowing the tempo.' },
-    // Upper – bodyweight & dumbbell
-    { splitDay: 'Upper', goalType: 'strength', name: 'Upper Body Power', description: 'Build upper body strength and power', repRange: '6-10 reps', duration: '55 min', intensity: 'High', exercises: ['Pull-Ups', 'Dips', 'Push-Ups', 'Dumbbell Press', 'Tricep Extensions'], howTo: 'Focus on explosive movements and proper form to build upper body power.' },
-    { splitDay: 'Upper', goalType: 'muscle_growth', name: 'Upper Body Minimal Equipment', description: 'Chest, back, shoulders and arms with push-ups and dumbbells', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Push-Up', 'Bent Over Row', 'Pike Push-Up', 'Bicep Curl', 'Tricep Extension'], howTo: 'Alternate push and pull; use a table or bar for rows if needed.' },
-    { splitDay: 'Upper', goalType: 'muscle_growth', name: 'Upper Body Dumbbell Only', description: 'Complete upper body with only dumbbells', repRange: '8-12 reps', duration: '50 min', intensity: 'Medium', exercises: ['Dumbbell Press', 'Bent Over Row', 'Shoulder Press', 'Lateral Raise', 'Bicep Curl', 'Tricep Extension'], howTo: 'One pair of dumbbells can cover every exercise; adjust weight per movement.' },
-    { splitDay: 'Upper', goalType: 'strength', name: 'Upper Body Strength (Gym)', description: 'Barbell and compound upper day for strength', repRange: '5-8 reps', duration: '60 min', intensity: 'High', exercises: ['Bench Press', 'Barbell Row', 'Overhead Press', 'Pull-Ups', 'Barbell Curl', 'Tricep Pushdown'], howTo: 'Alternate pressing and pulling; rest 2–3 min on heavy compounds.' },
-    { splitDay: 'Upper', goalType: 'muscle_growth', name: 'Upper Body Hypertrophy', description: 'Chest, back, shoulders and arms for muscle growth', repRange: '8-12 reps', duration: '55 min', intensity: 'Medium', exercises: ['Incline Dumbbell Press', 'Lat Pulldown', 'Cable Row', 'Lateral Raise', 'Bicep Curl', 'Tricep Pushdown'], howTo: 'Hit each muscle group with 2–3 exercises; keep rest around 60–90 seconds.' },
-    // Full body – bodyweight & dumbbell
-    { splitDay: 'Full Body', goalType: 'wellness', name: 'Full Body Bodyweight', description: 'No equipment. Push, pull, legs and core with bodyweight only.', repRange: '12-15 reps', duration: '35 min', intensity: 'Medium', exercises: ['Push-Up', 'Squat', 'Lunges', 'Plank', 'Mountain Climber', 'Burpee'], howTo: 'Great for travel or home; do circuits or straight sets with short rest.' },
-    { splitDay: 'Full Body', goalType: 'strength', name: 'Full Body Dumbbell', description: 'One set of dumbbells for a full-body workout', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Goblet Squat', 'Dumbbell Press', 'Bent Over Row', 'Romanian Deadlift', 'Shoulder Press', 'Bicep Curl'], howTo: 'Compound moves first; finish with curls and tricep work if time allows.' },
-    { splitDay: 'Full Body', goalType: 'muscle_growth', name: 'Full Body Home', description: 'Mix of bodyweight and dumbbell for home or small gym', repRange: '10-12 reps', duration: '40 min', intensity: 'Medium', exercises: ['Push-Up', 'Bent Over Row', 'Goblet Squat', 'Lunges', 'Plank', 'Jumping Jack'], howTo: 'Minimal space and equipment; focus on form and breathing.' },
-    // Full body, upper, lower (existing + more)
-    { splitDay: 'Full Body', goalType: 'athleticism', name: 'Athlete Power Circuit', description: 'Explosive full-body circuit for athletes', repRange: '8-10 reps', duration: '50 min', intensity: 'Elite', exercises: ['Power Cleans', 'Push Press', 'Box Jumps', 'Chin-Ups', "Farmer's Walk"], howTo: 'Focus on explosive movements and maintain proper form throughout the circuit.' },
-    { splitDay: 'Lower', goalType: 'wellness', name: 'Glute & Core Sculpt', description: 'Targeted glute and core workout for strength and shape', repRange: '12-15 reps', duration: '40 min', intensity: 'High', exercises: ['Hip Thrusts', 'Cable Kickbacks', 'Plank Variations', 'Bulgarian Split Squats', 'Hanging Leg Raises'], howTo: 'Engage your core and glutes with each movement for maximum effectiveness.' },
-    { splitDay: 'Full Body', goalType: 'athleticism', name: 'Ultimate Conditioning', description: 'High-intensity conditioning for max calorie burn', repRange: '30s work', duration: '35 min', intensity: 'Extreme', exercises: ['Battle Ropes', 'Sled Push', 'Burpee Pull-Ups', 'Rowing Sprints', 'Medicine Ball Slams'], howTo: 'Push yourself to the limit with short, intense bursts of activity.' },
-    { splitDay: 'Full Body', goalType: 'strength', name: 'Elite Strength Builder', description: 'Build raw strength with heavy compound lifts', repRange: '5-8 reps', duration: '70 min', intensity: 'Elite', exercises: ['Deadlift', 'Squat', 'Bench Press', 'Overhead Press', 'Barbell Row'], howTo: 'Use heavy weights and focus on form to build maximum strength.' },
-    { splitDay: 'Full Body', goalType: 'wellness', name: 'High-Intensity Interval Training', description: 'Burn fat and improve cardiovascular health', repRange: '20s work, 10s rest', duration: '30 min', intensity: 'High', exercises: ['Mountain Climbers', 'Jump Squats', 'High Knees', 'Burpees', 'Plank Jacks'], howTo: 'Alternate between high-intensity exercises and short rest periods for maximum calorie burn.' },
-    { splitDay: 'Full Body', goalType: 'wellness', name: 'Flexibility and Mobility', description: 'Improve flexibility and joint mobility', repRange: '30-60s holds', duration: '45 min', intensity: 'Low', exercises: ['Dynamic Stretching', 'Foam Rolling', 'Yoga Poses', 'Joint Mobility', 'Static Stretching'], howTo: 'Focus on deep breathing and gradual stretching to improve flexibility.' },
-    { splitDay: 'Full Body', goalType: 'wellness', name: 'Core Crusher', description: 'Strengthen your core with targeted exercises', repRange: '15-20 reps', duration: '40 min', intensity: 'Medium', exercises: ['Plank Variations', 'Russian Twists', 'Leg Raises', 'Cable Crunches', 'Bicycle Crunches'], howTo: 'Engage your core throughout each exercise for maximum effectiveness.' },
-    { splitDay: 'Lower', goalType: 'muscle_growth', name: 'Lower Body Strength', description: 'Strengthen your lower body with heavy lifts', repRange: '8-12 reps', duration: '60 min', intensity: 'High', exercises: ['Squats', 'Lunges', 'Leg Press', 'Calf Raises', 'Romanian Deadlifts'], howTo: 'Use heavy weights and focus on form to build lower body strength.' },
-    { splitDay: 'Lower', goalType: 'wellness', name: 'Lower Body Bodyweight', description: 'Legs and glutes with no equipment', repRange: '15-20 reps', duration: '35 min', intensity: 'Medium', exercises: ['Squat', 'Lunges', 'Glute Bridge', 'Calf Raise', 'Step-Up', 'Wall Sit'], howTo: 'Use bodyweight and tempo (slow negatives) to increase difficulty.' },
-    // Bro split – Chest, Back, Shoulders, Arms, Legs
-    { splitDay: 'Chest', goalType: 'muscle_growth', name: 'Chest Bodyweight & Dumbbell', description: 'Chest and triceps with push-ups and dumbbells only', repRange: '8-12 reps', duration: '40 min', intensity: 'Medium', exercises: ['Push-Up', 'Incline Push-Up', 'Dumbbell Press', 'Dumbbell Flyes', 'Tricep Extension'], howTo: 'Wide push-ups for chest; close grip or diamond for triceps emphasis.' },
-    { splitDay: 'Chest', goalType: 'strength', name: 'Chest Day Strength', description: 'Heavy bench focus with triceps finishers', repRange: '5-8 reps', duration: '50 min', intensity: 'High', exercises: ['Bench Press', 'Incline Barbell Press', 'Dumbbell Flyes', 'Dips', 'Tricep Pushdown'], howTo: 'Work up to a heavy set on bench; keep shoulders packed and feet planted.' },
-    { splitDay: 'Chest', goalType: 'muscle_growth', name: 'Chest Hypertrophy', description: 'Chest volume with incline and fly work', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Incline Dumbbell Press', 'Bench Press', 'Cable Flyes', 'Dumbbell Flyes', 'Close-Grip Bench Press'], howTo: 'Squeeze at the top of flyes; control the stretch on the way down.' },
-    { splitDay: 'Back', goalType: 'strength', name: 'Back Dumbbell Only', description: 'Back and biceps with dumbbells and optional pull-up bar', repRange: '8-12 reps', duration: '45 min', intensity: 'Medium', exercises: ['Bent Over Row', 'Single-Arm Row', 'Rear Delt Fly', 'Bicep Curl', 'Pull-Up'], howTo: 'Keep back flat on rows; squeeze at the top of each rep.' },
-    { splitDay: 'Back', goalType: 'strength', name: 'Back Day Strength', description: 'Heavy rows and deadlifts for a thick back', repRange: '5-8 reps', duration: '55 min', intensity: 'High', exercises: ['Deadlift', 'Barbell Row', 'Lat Pulldown', 'Face Pull', 'Barbell Curl'], howTo: 'Brace your core on deadlifts; pull elbows to your hips on rows.' },
-    { splitDay: 'Back', goalType: 'muscle_growth', name: 'Back Hypertrophy', description: 'Width and thickness — lats, traps and biceps', repRange: '8-12 reps', duration: '50 min', intensity: 'Medium', exercises: ['Lat Pulldown', 'Seated Cable Row', 'T-Bar Row', 'Face Pull', 'Bicep Curl', 'Hammer Curl'], howTo: 'Vary grip width on pulldowns; pause at peak contraction on rows.' },
-    { splitDay: 'Shoulders', goalType: 'muscle_growth', name: 'Shoulders Bodyweight & Dumbbell', description: 'Delt focus with pike push-ups and dumbbells', repRange: '10-12 reps', duration: '35 min', intensity: 'Medium', exercises: ['Pike Push-Up', 'Shoulder Press', 'Lateral Raise', 'Front Raise', 'Rear Delt Fly'], howTo: 'Pike push-ups target shoulders; add dumbbells for isolation.' },
-    { splitDay: 'Shoulders', goalType: 'strength', name: 'Shoulder Day Strength', description: 'Overhead pressing and heavy delt work', repRange: '6-10 reps', duration: '45 min', intensity: 'High', exercises: ['Overhead Press', 'Arnold Press', 'Lateral Raise', 'Face Pull', 'Upright Row'], howTo: 'Keep ribs down on overhead press; avoid swinging on lateral raises.' },
-    { splitDay: 'Shoulders', goalType: 'muscle_growth', name: 'Shoulder Hypertrophy', description: 'All three delt heads for round, full shoulders', repRange: '10-15 reps', duration: '40 min', intensity: 'Medium', exercises: ['Dumbbell Shoulder Press', 'Lateral Raise', 'Front Raise', 'Rear Delt Fly', 'Cable Lateral Raise'], howTo: 'Light weight, strict form on laterals; rear delts balance pressing volume.' },
-    { splitDay: 'Arms', goalType: 'muscle_growth', name: 'Arms Dumbbell Only', description: 'Biceps and triceps with dumbbells only', repRange: '10-12 reps', duration: '30 min', intensity: 'Medium', exercises: ['Bicep Curl', 'Hammer Curl', 'Tricep Extension', 'Overhead Tricep Extension', 'Lateral Raise'], howTo: 'Control the negative and squeeze at the top of each curl and extension.' },
-    { splitDay: 'Arms', goalType: 'strength', name: 'Arms Bodyweight & Dumbbell', description: 'Arms with push-ups, dips and dumbbell curls', repRange: '8-12 reps', duration: '35 min', intensity: 'Medium', exercises: ['Diamond Push-Up', 'Tricep Extension', 'Bicep Curl', 'Hammer Curl', 'Close-Grip Push-Up'], howTo: 'Diamond and close-grip push-ups hit triceps; finish with curls.' },
-  ];
+  // The full premium workouts list now lives in `utils/workoutCatalog.js`
+  // so it can be reused by the dedicated /premium-workouts screen. We
+  // alias it here so all the existing filter/recommendation logic below
+  // continues to work without renaming variables.
+  const premiumWorkouts = PREMIUM_WORKOUTS;
 
   /**
    * Memoized "recommended for today" list and injury-skip flag.
@@ -1347,14 +1363,33 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     return () => { isMounted = false; };
   }, []);
 
-  // Run/Walk functions
+  // Run/Walk permissions + initial map region.
+  // We now ALSO request background-location permission so
+  // `lib/runBackgroundLocation.js` can keep recording while
+  // the app is backgrounded. Background is `requested` second
+  // because iOS only allows asking for "Always" after the user
+  // has already granted "When In Use" — asking out of order
+  // makes the OS silently deny the prompt.
   useEffect(() => {
     (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
+      let { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
+      if (fgStatus !== 'granted') {
         Alert.alert('Location permission required', 'Please enable location services to track your runs.');
         return;
       }
+      // Best-effort background permission. We don't block the
+      // user if they decline — runs will still work in the
+      // foreground, they just won't track when the screen
+      // locks. We log a warning so it's visible in dev tools.
+      try {
+        const { status: bgStatus } = await Location.requestBackgroundPermissionsAsync();
+        if (bgStatus !== 'granted') {
+          console.warn('Background location not granted; runs will pause when the app is backgrounded.');
+        }
+      } catch (e) {
+        console.warn('Background location permission request failed:', e);
+      }
+
       let location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High
       });
@@ -1375,73 +1410,115 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     };
   }, []);
 
+  // ============================================================
+  // AppState foreground re-sync for background runs
+  // ============================================================
+  // While the app is backgrounded, the JS bridge is suspended.
+  // The native background-location task still fires and writes
+  // each batch of GPS points to AsyncStorage (see `lib/run
+  // BackgroundLocation.js`). When the user reopens the app, JS
+  // wakes up and we have a gap: the in-memory `locations` /
+  // `distance` state hasn't seen those points yet.
+  //
+  // This effect listens for the AppState going back to "active"
+  // and, if a run is currently recording, drains the persisted
+  // queue into `processLocationBatch` (the same handler the
+  // foreground listener uses). After draining, it clears
+  // storage so the same points aren't replayed twice.
+  //
+  // The `lastValidLocation.current?.timestamp` filter keeps us
+  // from re-processing points the foreground listener already
+  // got just before the app was backgrounded.
   useEffect(() => {
-    if (recording && !paused) {
-      if (!timerRef.current) {
-        const startTimeStamp = startTime || Date.now();
-        setStartTime(startTimeStamp);
+    const sub = AppState.addEventListener('change', async (next) => {
+      if (next !== 'active') return;
+      if (!recording || paused) return;
+
+      // Re-sync elapsed time first — clock kept ticking while we
+      // were backgrounded but state didn't update.
+      if (startTimeRef.current != null) {
+        setElapsed(
+          Math.max(0, Date.now() - startTimeRef.current - totalPauseTimeRef.current)
+        );
       }
-     
-      timerRef.current = setInterval(() => {
-        const currentElapsed = Math.max(0, Date.now() - startTime - totalPauseTime);
-        setElapsed(currentElapsed);
-        
-        if (distance > 0 && currentElapsed > 0) {
-          if (activityType === 'bike') {
-            // For biking, calculate speed in km/h or mph
-            const elapsedHours = currentElapsed / 1000 / 3600;
-            if (useMiles) {
-              // Convert distance to miles for mph calculation
-              const distanceInMiles = distance * 0.621371;
-              const speed = distanceInMiles / elapsedHours; // mph
-              setAveragePace(speed);
-            } else {
-              // Use distance in km for km/h calculation
-              const speed = distance / elapsedHours; // km/h
-              setAveragePace(speed);
-            }
-            
-            // For current speed, use the latest GPS speed if available
-            if (lastValidLocation.current && lastValidLocation.current.speed) {
-              const currentSpeed = lastValidLocation.current.speed * (useMiles ? 0.621371 : 3.6); // Convert m/s to mph or km/h
-              setCurrentPace(currentSpeed);
-            }
-          } else {
-            // For running/walking, calculate pace in min/km or min/mile
-            const elapsedMinutes = currentElapsed / 1000 / 60;
-            if (useMiles) {
-              // Convert distance to miles for min/mile calculation
-              const distanceInMiles = distance * 0.621371;
-              const avgPace = elapsedMinutes / distanceInMiles;
-              setAveragePace(avgPace);
-            } else {
-              // Use distance in km for min/km calculation
-              const avgPace = elapsedMinutes / distance;
-              setAveragePace(avgPace);
-            }
-            
-            // For current pace, calculate based on recent movement
-            if (distance > 0.01) { // Only calculate if we've moved at least 10m
-              const recentDistance = Math.min(distance, 0.1); // Use last 100m for current pace
-              const recentTime = Math.min(currentElapsed / 1000 / 60, 1); // Use last minute or less
-              const currentPaceValue = recentTime / recentDistance;
-              setCurrentPace(currentPaceValue);
-            }
-          }
+
+      try {
+        const stored = await getStoredLocationsAsync();
+        if (!stored.length) return;
+        const lastTs = lastValidLocation.current?.timestamp;
+        const newOnly = lastTs ? stored.filter((l) => l.timestamp > lastTs) : stored;
+        if (newOnly.length && locationListenerRef.current) {
+          locationListenerRef.current(newOnly);
         }
-      }, 1000);
-    } else {
-      if (timerRef.current) {
+        await clearStoredLocationsAsync();
+      } catch (e) {
+        console.warn('Error merging background locations on foreground:', e);
+      }
+    });
+    return () => sub.remove();
+  }, [recording, paused, startTime, totalPauseTime]);
+
+  // Run timer — one stable 1s interval while recording (not paused).
+  // Pace math lives in a separate effect below so GPS distance
+  // updates don't tear down and recreate this interval.
+  useEffect(() => {
+    const clearRunTimer = () => {
+      if (timerRef.current != null) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-    }
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
     };
-  }, [recording, paused, startTime, totalPauseTime, distance, activityType]);
+
+    if (!recording || paused) {
+      clearRunTimer();
+      return clearRunTimer;
+    }
+
+    const tickElapsed = () => {
+      const st = startTimeRef.current;
+      if (st == null) return;
+      setElapsed(Math.max(0, Date.now() - st - totalPauseTimeRef.current));
+    };
+
+    tickElapsed();
+
+    timerRef.current = setInterval(tickElapsed, 1000);
+
+    return clearRunTimer;
+  }, [recording, paused]);
+
+  // Pace / speed — updates when distance or elapsed changes; does not touch the timer.
+  useEffect(() => {
+    if (!recording || paused || distance <= 0 || elapsed <= 0) return;
+
+    const currentElapsed = elapsed;
+
+    if (activityType === 'bike') {
+      const elapsedHours = currentElapsed / 1000 / 3600;
+      if (useImperial) {
+        setAveragePace((distance * 0.621371) / elapsedHours);
+      } else {
+        setAveragePace(distance / elapsedHours);
+      }
+      if (lastValidLocation.current?.speed != null) {
+        setCurrentPace(
+          lastValidLocation.current.speed * (useImperial ? 2.23694 : 3.6)
+        );
+      }
+    } else {
+      const elapsedMinutes = currentElapsed / 1000 / 60;
+      if (useImperial) {
+        setAveragePace(elapsedMinutes / (distance * 0.621371));
+      } else {
+        setAveragePace(elapsedMinutes / distance);
+      }
+      if (distance > 0.01) {
+        const recentDistance = Math.min(distance, 0.1);
+        const recentTime = Math.min(currentElapsed / 1000 / 60, 1);
+        setCurrentPace(recentTime / recentDistance);
+      }
+    }
+  }, [recording, paused, distance, elapsed, activityType, useImperial]);
 
   // Update Live Activity when cardio stats change
   // This keeps the lock screen updated with real-time distance, pace, and time
@@ -2318,11 +2395,14 @@ const startSprintMaxOut = async () => {
       return;
     }
 
+    const now = Date.now();
+    startTimeRef.current = now;
+    totalPauseTimeRef.current = 0;
     setSprintMode(true);
     setRecording(true);
     setPaused(false);
     setActivityStarted(true);
-    setStartTime(Date.now());
+    setStartTime(now);
     setTotalPauseTime(0);
     setPauseTime(0);
     setElapsed(0);
@@ -2474,10 +2554,13 @@ Average speed: ${speed.toFixed(2)} km/h`;
 
 const startActivity = async () => {
     try {
+      const now = Date.now();
+      startTimeRef.current = now;
+      totalPauseTimeRef.current = 0;
       setRecording(true);
       setPaused(false);
       setActivityStarted(true);
-      setStartTime(Date.now());
+      setStartTime(now);
       setTotalPauseTime(0);
       setPauseTime(0);
       setElapsed(0);
@@ -2509,157 +2592,160 @@ const startActivity = async () => {
     }
   };
 
-  const pauseActivity = () => {
+  const pauseActivity = async () => {
     if (paused) {
-      // Unpausing - calculate pause duration and add to total pause time
+      // Unpausing — restart background updates and resume the
+      // distance/path stream. We re-add the listener defensively
+      // in case anything tore it down (it's safe — Sets dedupe).
       const pauseDuration = Date.now() - pauseTime;
-      setTotalPauseTime(prev => prev + pauseDuration);
+      totalPauseTimeRef.current += pauseDuration;
+      setTotalPauseTime(totalPauseTimeRef.current);
       setPaused(false);
       setPauseTime(0);
-      startLocationTracking(false);
+      await startLocationTracking(false);
     } else {
-      // Pausing - record the pause start time
+      // Pausing — stop the native background task so we don't
+      // burn battery (and don't accumulate phantom distance from
+      // the user moving between pause/resume, e.g. driving home).
       setPaused(true);
       setPauseTime(Date.now());
+      try {
+        await stopBackgroundRunTracking();
+      } catch (e) {
+        console.warn('Error stopping background run tracking on pause:', e);
+      }
       if (locationWatcher.current) {
+        // Sprint mode also uses watchPositionAsync; clean it up
+        // too just in case (no-op for non-sprint runs).
         locationWatcher.current.remove();
+        locationWatcher.current = null;
       }
     }
   };
+
+  // ============================================================
+  // processLocationBatch — the single GPS update handler
+  // ============================================================
+  // Runs for every batch of points the native task delivers
+  // (one or many at a time). Updates distance, path, current
+  // speed, and optionally auto-zooms the map.
+  //
+  // It reads `activityType`, `useImperial`, and `startLocation`
+  // via REFs (`*Ref.current`) instead of closure variables so
+  // the long-lived listener always sees the most recent values.
+  //
+  // Each batched point has shape:
+  //   { latitude, longitude, timestamp, speed?, accuracy? }
+  // (this is what `lib/runBackgroundLocation.js` normalises to.)
+  const processLocationBatch = useCallback((batch) => {
+    if (!batch?.length) return;
+
+    for (const l of batch) {
+      // Wrap into the same `{coords, timestamp}` shape that
+      // `Location.watchPositionAsync` would have given us so we
+      // can re-use the existing `isLocationValid` validator.
+      const locationLike = {
+        coords: {
+          latitude: l.latitude,
+          longitude: l.longitude,
+          accuracy: l.accuracy ?? 50,
+          speed: l.speed,
+        },
+        timestamp: l.timestamp,
+      };
+      if (!isLocationValid(locationLike)) continue;
+
+      // Track best GPS accuracy achieved this run for diagnostics.
+      if (l.accuracy != null && l.accuracy < bestAccuracyRef.current) {
+        bestAccuracyRef.current = l.accuracy;
+      }
+
+      const newLocation = {
+        latitude: l.latitude,
+        longitude: l.longitude,
+        timestamp: l.timestamp,
+        speed: l.speed ?? null,
+      };
+
+      if (lastValidLocation.current) {
+        // Already moving — accumulate distance from prev → new.
+        const distanceIncrement = getDistance(lastValidLocation.current, newLocation);
+        const latDiff = Math.abs(newLocation.latitude - lastValidLocation.current.latitude);
+        const lngDiff = Math.abs(newLocation.longitude - lastValidLocation.current.longitude);
+        const minCoordinateChange = 0.000001; // ~10cm in lat/lng
+
+        if (latDiff > minCoordinateChange || lngDiff > minCoordinateChange) {
+          // We use a ref for the running distance total (not the
+          // `distance` state) because state updates batch and this
+          // callback can fire many times per second. A ref gives
+          // us race-free addition; we then mirror it into state.
+          const newRawDistance = accumulatedDistanceRef.current + distanceIncrement;
+          accumulatedDistanceRef.current = newRawDistance;
+          setRawDistance(newRawDistance);
+          setDistance(newRawDistance / 1000);
+
+          locationsRef.current.push(newLocation);
+          setLocations([...locationsRef.current]);
+        } else {
+          // Coordinate barely moved (GPS jitter) — still record
+          // the point on the path so the polyline stays smooth,
+          // but don't bump the distance counter.
+          locationsRef.current.push(newLocation);
+          setLocations([...locationsRef.current]);
+        }
+
+        lastValidLocation.current = newLocation;
+
+        // Bike mode shows live speed instead of pace (m/s → kph or mph).
+        if (activityTypeRef.current === 'bike' && newLocation.speed != null) {
+          setCurrentPace(newLocation.speed * (useImperialRef.current ? 2.23694 : 3.6));
+        }
+      } else {
+        // Very first valid GPS fix of the run — record the
+        // start location so we can drop a "Start" marker on
+        // the map. We only do this once per run (guarded by
+        // `startLocationRef.current`).
+        lastValidLocation.current = newLocation;
+        if (!startLocationRef.current) {
+          setStartLocation(newLocation);
+          locationsRef.current.push(newLocation);
+          setLocations([...locationsRef.current]);
+        }
+      }
+    }
+  }, []); // Empty deps: all dynamic values are read via refs.
 
   const startLocationTracking = async (isPaused = false) => {
     if (isPaused) return;
 
     try {
-      locationWatcher.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.BestForNavigation,
-          timeInterval: 1000, // Increased to 1000ms for more stable GPS updates
-          distanceInterval: 1, // Increased to 1 meter for more stable tracking
-        },
-        (location) => {
-          if (!isLocationValid(location)) return;
+      // Wipe any stale persisted points from a previous session
+      // so we don't accidentally replay them when we drain on
+      // foreground (see the AppState effect above).
+      await clearStoredLocationsAsync();
 
-          // Track best GPS accuracy achieved
-          if (location.coords.accuracy < bestAccuracyRef.current) {
-            bestAccuracyRef.current = location.coords.accuracy;
-            console.log('New best GPS accuracy achieved:', bestAccuracyRef.current.toFixed(1));
-          }
-          
-          // Log GPS accuracy for debugging
-          console.log('GPS Location Received:', {
-            accuracy: location.coords.accuracy,
-            bestAccuracy: bestAccuracyRef.current.toFixed(1),
-            latitude: location.coords.latitude.toFixed(6),
-            longitude: location.coords.longitude.toFixed(6),
-            timestamp: new Date(location.timestamp).toLocaleTimeString(),
-            speed: location.coords.speed || 'N/A',
-            heading: location.coords.heading || 'N/A'
-          });
+      // Register the SAME function reference we'll later
+      // unregister. JS Sets do identity comparison, so passing
+      // an inline `(b) => processLocationBatch(b)` arrow on
+      // cleanup would silently fail to remove anything and
+      // leak listeners across runs.
+      if (locationListenerRef.current) {
+        removeLocationListener(locationListenerRef.current);
+      }
+      locationListenerRef.current = processLocationBatch;
+      addLocationListener(locationListenerRef.current);
 
-          const newLocation = {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            timestamp: location.timestamp,
-            speed: location.coords.speed || null, // Store speed for current speed calculation
-          };
-
-          if (lastValidLocation.current) {
-            const distanceIncrement = getDistance(lastValidLocation.current, newLocation);
-            
-            // Check if GPS coordinates actually changed significantly
-            const latDiff = Math.abs(newLocation.latitude - lastValidLocation.current.latitude);
-            const lngDiff = Math.abs(newLocation.longitude - lastValidLocation.current.longitude);
-            const minCoordinateChange = 0.000001; // About 10cm in latitude/longitude for more sensitive tracking
-            
-            // Debug logging for distance tracking
-            console.log('GPS Update:', {
-              distanceIncrement: distanceIncrement.toFixed(3),
-              currentRawDistance: rawDistance.toFixed(3),
-              newRawDistance: (rawDistance + distanceIncrement).toFixed(3),
-              currentDistanceKm: distance.toFixed(4),
-              accuracy: location.coords.accuracy,
-              lastLat: lastValidLocation.current.latitude.toFixed(6),
-              newLat: newLocation.latitude.toFixed(6),
-              lastLng: lastValidLocation.current.longitude.toFixed(6),
-              newLng: newLocation.longitude.toFixed(6),
-              latDiff: latDiff.toFixed(8),
-              lngDiff: lngDiff.toFixed(8),
-              significantChange: (latDiff > minCoordinateChange || lngDiff > minCoordinateChange)
-            });
-            
-            // Update distance if there's a significant GPS change (remove overly strict accuracy check)
-            if (latDiff > minCoordinateChange || lngDiff > minCoordinateChange) {
-              // Use ref to avoid race conditions with state updates
-              const newRawDistance = accumulatedDistanceRef.current + distanceIncrement;
-              accumulatedDistanceRef.current = newRawDistance;
-              
-              setRawDistance(newRawDistance);
-              
-              // Simply convert to kilometers and accumulate with previous distance
-              const newDistanceKm = newRawDistance / 1000;
-              setDistance(newDistanceKm);
-              
-              // Always add the location to the path for map visualization
-              locationsRef.current.push(newLocation);
-              setLocations([...locationsRef.current]);
-              
-              // Force UI update by triggering a re-render
-              setLocations(prev => [...prev]);
-              
-              // Additional debug logging
-              console.log('Distance Update:', {
-                increment: distanceIncrement.toFixed(3),
-                oldRaw: rawDistance.toFixed(3),
-                newRaw: newRawDistance.toFixed(3),
-                oldDistance: (distance || 0).toFixed(4),
-                newDistance: newDistanceKm.toFixed(4),
-                totalAccumulated: newDistanceKm.toFixed(4),
-                accuracy: location.coords.accuracy
-              });
-            } else {
-              console.log('GPS coordinates too similar, skipping distance update', {
-                latDiff: latDiff.toFixed(8),
-                lngDiff: lngDiff.toFixed(8),
-                accuracy: location.coords.accuracy,
-                minCoordinateChange
-              });
-              
-              // Still add location to path even if distance isn't updated
-              locationsRef.current.push(newLocation);
-              setLocations([...locationsRef.current]);
-            }
-            
-            lastValidLocation.current = newLocation;
-            
-            // Only auto-zoom if the toggle is ON
-            if (autoZoom && mapRef.current) {
-              console.log('Auto-zoom enabled, animating to region. autoZoom state:', autoZoom);
-              mapRef.current.animateToRegion({
-                latitude: newLocation.latitude,
-                longitude: newLocation.longitude,
-                latitudeDelta: 0.005,
-                longitudeDelta: 0.005,
-              });
-            } else {
-              console.log('Auto-zoom disabled or no map ref. autoZoom state:', autoZoom, 'mapRef exists:', !!mapRef.current);
-            }
-          } else {
-            lastValidLocation.current = newLocation;
-            // Only set start location ONCE at the very beginning
-            if (!startLocation) {
-              setStartLocation(newLocation);
-              // Add initial location to path
-              locationsRef.current.push(newLocation);
-              setLocations([...locationsRef.current]);
-              console.log('Initial start location set:', {
-                lat: newLocation.latitude.toFixed(6),
-                lng: newLocation.longitude.toFixed(6)
-              });
-            }
-          }
-        }
-      );
+      // Kick off the native background-aware task. This
+      // delivers location updates while the app is in
+      // BOTH foreground and background — no separate
+      // `Location.watchPositionAsync` is needed for the
+      // regular run flow. (Sprint mode still uses
+      // `watchPositionAsync` for sub-meter accuracy.)
+      await startBackgroundRunTracking({
+        timeInterval: 1000,
+        distanceInterval: 1,
+        accuracy: Location.Accuracy.BestForNavigation,
+      });
     } catch (error) {
       console.error('Error starting location tracking:', error);
     }
@@ -2856,8 +2942,32 @@ const startSprintStepTracking = async () => {
       celebrationScale.setValue(0);
       finishLineOpacity.setValue(0);
       
+      // Tear down the native background task FIRST so no more
+      // location batches arrive after we've started resetting
+      // run state (avoids races where the listener fires with
+      // stale data and adds bogus distance).
+      try {
+        await stopBackgroundRunTracking();
+      } catch (e) {
+        console.warn('Error stopping background run tracking on stop:', e);
+      }
+      if (locationListenerRef.current) {
+        removeLocationListener(locationListenerRef.current);
+        locationListenerRef.current = null;
+      }
+      // Clear any persisted points that arrived after the user
+      // hit Stop but before we got here, so they don't leak into
+      // the next run.
+      try {
+        await clearStoredLocationsAsync();
+      } catch (e) {
+        console.warn('Error clearing stored locations on stop:', e);
+      }
+
+      // Sprint mode uses watchPositionAsync — clean it up too.
       if (locationWatcher.current) {
         locationWatcher.current.remove();
+        locationWatcher.current = null;
       }
       if (stepPollingRef.current != null) {
         clearInterval(stepPollingRef.current);
@@ -2888,7 +2998,7 @@ const startSprintStepTracking = async () => {
 
       // Navigate to activity summary (handles run, walk, bike, and timed distance)
       // Convert distance to the correct unit for display
-      const displayDistance = useMiles ? distance * 0.621371 : distance;
+      const displayDistance = useImperial ? distance * 0.621371 : distance;
       
       router.push({
         pathname: '/(modals)/activity-summary',
@@ -2897,7 +3007,7 @@ const startSprintStepTracking = async () => {
           distance: displayDistance,
           duration: elapsed / 1000,
           pace: averagePace,
-          unit: useMiles ? 'miles' : 'km',
+          unit: useImperial ? 'miles' : 'km',
           activityType: wasSprintMode ? 'timed_distance' : activityType,
           startTime: startTime,
           endTime: Date.now(),
@@ -2914,7 +3024,9 @@ const startSprintStepTracking = async () => {
       setLocations([]);
       setStartLocation(null);
       setStartTime(null);
+      startTimeRef.current = null;
       setTotalPauseTime(0);
+      totalPauseTimeRef.current = 0;
       setPauseTime(0);
       setDistanceNeededToTravel(0);
       setSelectedSprintDistance(null);
@@ -2931,21 +3043,13 @@ const startSprintStepTracking = async () => {
 
   const formatRunTime = (ms) => {
     const totalSeconds = Math.floor(ms / 1000);
-    const totalDistance = distanceNeededToTravel || 0;
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60; // %60 gives the remaining seconds after removing full hours
-    const hundrethsSeconds = Math.floor(ms % 1000) / 10;
+    const seconds = totalSeconds % 60;
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     }
-   
-    else if (totalDistance <= 400) {
-      return `${minutes}:${seconds.toString().padStart(2, '0')}.${hundrethsSeconds.toString().padStart(2, '0')}`;
-    }
-    else {
-      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
 
@@ -2957,10 +3061,79 @@ const startSprintStepTracking = async () => {
   };
 
   const formatDistance = (meters) => {
-    if (useMiles) {
+    if (useImperial) {
       return (meters * 0.000621371).toFixed(2);
     }
     return (meters / 1000).toFixed(2);
+  };
+
+  // ============================================================
+  // Draggable bottom-sheet PanResponder
+  // ============================================================
+  // PanResponder is React Native's primitive for hooking into
+  // raw touch gestures: a series of callbacks that fire on
+  // grant (finger touched), move (finger dragged), release
+  // (finger lifted). Each callback receives a `gestureState`
+  // object whose `dy` is the cumulative vertical drag from the
+  // touch-down point (negative = drag up, positive = drag down).
+  //
+  // We capture the gesture only when the user moves vertically
+  // by more than 5px — small horizontal jiggles get ignored so
+  // the underlying ScrollView still scrolls if they meant to.
+  //
+  // On move we update `overlayHeight` (an Animated.Value) live
+  // so the sheet follows the finger; on release we snap to
+  // either expanded or collapsed depending on whichever side
+  // of the midpoint the height ended up on.
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 5,
+      onPanResponderMove: (_, gestureState) => {
+        // We use `__getValue()` (the underscored accessor) here
+        // because `Animated.Value` doesn't expose `.value`
+        // synchronously, but we need the current height to add
+        // the new delta to it. Subtract `dy` because dragging UP
+        // (negative dy) should INCREASE the height.
+        const currentHeight = overlayHeight.__getValue();
+        const newHeight = Math.max(
+          OVERLAY_COLLAPSED_HEIGHT,
+          Math.min(OVERLAY_EXPANDED_HEIGHT, currentHeight - gestureState.dy)
+        );
+        overlayHeight.setValue(newHeight);
+      },
+      onPanResponderRelease: () => {
+        const currentHeight = overlayHeight.__getValue();
+        const midpoint = (OVERLAY_COLLAPSED_HEIGHT + OVERLAY_EXPANDED_HEIGHT) / 2;
+        const targetHeight =
+          currentHeight > midpoint ? OVERLAY_EXPANDED_HEIGHT : OVERLAY_COLLAPSED_HEIGHT;
+        const expanded = targetHeight === OVERLAY_EXPANDED_HEIGHT;
+        // `useNativeDriver: false` because `height` is a layout
+        // prop that the native side animates on the JS thread —
+        // not on the dedicated UI thread. Trying to use the
+        // native driver for height would silently fail.
+        Animated.spring(overlayHeight, {
+          toValue: targetHeight,
+          tension: 60,
+          friction: 10,
+          useNativeDriver: false,
+        }).start();
+        setOverlayExpanded(expanded);
+      },
+    })
+  ).current;
+
+  // Tap-to-toggle the drag handle bar at the top of the sheet
+  // — gives a discoverable, accessible alternative to the drag
+  // gesture for users who don't realize they can swipe it.
+  const toggleOverlay = () => {
+    const next = !overlayExpanded;
+    setOverlayExpanded(next);
+    Animated.spring(overlayHeight, {
+      toValue: next ? OVERLAY_EXPANDED_HEIGHT : OVERLAY_COLLAPSED_HEIGHT,
+      tension: 60,
+      friction: 10,
+      useNativeDriver: false,
+    }).start();
   };
 
   return (
@@ -3034,7 +3207,19 @@ const startSprintStepTracking = async () => {
 
         {/* Quick Actions */}
         <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => router.push('/freeform-workout')}>
+          {/*
+            Freeform Workout entry point.
+            We reuse the existing /active-workout screen instead of creating a brand-new
+            screen — a freeform workout IS an active workout that simply starts empty so
+            the user adds exercises on the fly. Expo Router's object form lets us pass
+            query params: `freeform: 'true'` is read inside active-workout.js.
+            Note: params values must be strings (or arrays of strings) — that's why we
+            send the literal 'true' rather than the boolean true.
+          */}
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => router.push({ pathname: '/active-workout', params: { freeform: 'true' } })}
+          >
             <View style={styles.actionButtonContent}>
               <Ionicons name="fitness-outline" size={26} color="#00ffff" />
               <View style={styles.actionButtonTextContainer}>
@@ -3078,120 +3263,29 @@ const startSprintStepTracking = async () => {
           {/* Workout schedule — below quick actions */}
           <View style={styles.scheduleSection}>
             <Text style={styles.scheduleSectionTitle}>Workout schedule</Text>
+            {/*
+              Helper subtitle so first-time users know that the calendar
+              is interactive — tapping a day opens a sheet to assign or
+              confirm what workout (or rest) is scheduled for it.
+            */}
+            <Text style={styles.scheduleSectionHint}>
+              Tap a day to choose or confirm a workout.
+            </Text>
             <WorkoutWeekSchedule
               accentColor="#00ffff"
               getSplitDayForDate={(date) => getSplitDayForDate(date, effectiveSplit)}
               scheduleContextForDate={getScheduleContextForDate}
             />
 
-            {todayScheduledWorkout && (
-              <View style={styles.scheduledWorkoutSection}>
-                {todayScheduledWorkout.is_rest_day ? (
-                  <>
-                    <Text style={styles.scheduledRestDayHeader}>TODAY'S SCHEDULE</Text>
-                    <View style={styles.scheduledRestDayCard}>
-                      <View style={styles.restDayIconContainer}>
-                        <Ionicons name="bed-outline" size={48} color="#ffa500" />
-                      </View>
-                      <Text style={styles.restDayTitle}>Rest Day</Text>
-                      <Text style={styles.restDayMessage}>
-                        Recovery is an essential part of training. Take time to rest and let your
-                        muscles rebuild.
-                      </Text>
-                      {todayScheduledWorkout.notes &&
-                        todayScheduledWorkout.notes !== 'Rest day' && (
-                          <View style={styles.restDayNotesBox}>
-                            <Text style={styles.restDayNotesText}>{todayScheduledWorkout.notes}</Text>
-                          </View>
-                        )}
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.scheduledWorkoutHeader}>SCHEDULED WORKOUT</Text>
-                    <View style={styles.scheduledWorkoutCard}>
-                      <View style={styles.scheduledWorkoutHeader}>
-                        <View style={styles.scheduledWorkoutTitleContainer}>
-                          <Ionicons name="calendar" size={20} color="#00ffff" />
-                          <Text style={styles.scheduledWorkoutTitle}>
-                            {todayScheduledWorkout.workout_name}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.exercises}>
-                        <Text style={styles.exercisesTitle}>Exercises:</Text>
-                        {todayScheduledWorkout.workout_exercises &&
-                          todayScheduledWorkout.workout_exercises
-                            .slice(0, 3)
-                            .map((exercise, index) => (
-                              <Text key={index} style={styles.exercisesList}>
-                                • {typeof exercise === 'string' ? exercise : exercise.name}
-                                {exercise.sets &&
-                                  exercise.reps &&
-                                  ` (${exercise.sets} x ${exercise.reps})`}
-                              </Text>
-                            ))}
-                        {todayScheduledWorkout.workout_exercises &&
-                          todayScheduledWorkout.workout_exercises.length > 3 && (
-                            <Text style={styles.exercisesList}>
-                              ... and {todayScheduledWorkout.workout_exercises.length - 3} more
-                            </Text>
-                          )}
-                      </View>
-                      <TouchableOpacity
-                        style={styles.startScheduledButton}
-                        onPress={() =>
-                          startWorkout({
-                            id: todayScheduledWorkout.id,
-                            name: todayScheduledWorkout.workout_name,
-                            workout_name: todayScheduledWorkout.workout_name,
-                            exercises: todayScheduledWorkout.workout_exercises,
-                            isScheduled: true,
-                          })
-                        }
-                      >
-                        <Ionicons name="play" size={20} color="#000" />
-                        <Text style={styles.startScheduledButtonText}>Start Scheduled Workout</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </>
-                )}
-              </View>
-            )}
-
-            <TouchableOpacity
-              style={[styles.todayStrip, isTodaySplitRest && styles.todayStripRest]}
-              onPress={scrollToRecommended}
-              activeOpacity={0.8}
-            >
-              <View style={styles.todayStripLeft}>
-                <Text style={[styles.todayStripLabel, isTodaySplitRest && styles.todayStripLabelRest]}>
-                  Today
-                </Text>
-                <Text style={[styles.todayStripSplit, isTodaySplitRest && styles.todayStripSplitRest]}>
-                  {formatSplitDayLabel(getSplitDayForDate(new Date(), effectiveSplit))}
-                </Text>
-              </View>
-              <View style={styles.todayStripRight}>
-                {isTodaySplitRest ? (
-                  <>
-                    <Ionicons name="bed-outline" size={18} color="#ffa500" style={{ marginRight: 4 }} />
-                    <Text style={styles.todayStripRestBadge}>Rest day</Text>
-                  </>
-                ) : (
-                  <Text style={styles.todayStripCount}>
-                    {reccomendedWorkouts.length > 0
-                      ? `${reccomendedWorkouts.length} recommended`
-                      : 'No recommended'}
-                  </Text>
-                )}
-                <Ionicons
-                  name="chevron-forward"
-                  size={16}
-                  color={isTodaySplitRest ? 'rgba(255, 165, 0, 0.9)' : 'rgba(0, 255, 255, 0.8)'}
-                />
-              </View>
-            </TouchableOpacity>
+            {/*
+              The "Today's Schedule" block (which used to live here
+              just below the calendar) has been MOVED into the
+              unified "Today's plan" section further down. That way
+              we have a single source of truth for what the user is
+              doing today — scheduled workout, scheduled rest, split
+              rest, or recommendations — instead of two competing
+              labels showing the same info.
+            */}
           </View>
 
         {/* Pending Workout Shares */}
@@ -3359,505 +3453,232 @@ const startSprintStepTracking = async () => {
               </Text>
             </TouchableOpacity>
           </View>
-          {isTodaySplitRest &&
-          !(todayScheduledWorkout && !todayScheduledWorkout.is_rest_day) ? (
-            <>
-              <Text style={styles.splitRestSectionTitle}>Today's plan</Text>
-              <View style={styles.scheduledRestDayCard}>
-                <View style={styles.restDayIconContainer}>
-                  <Ionicons name="bed-outline" size={48} color="#ffa500" />
-                </View>
-                <Text style={styles.restDayTitle}>Rest day</Text>
-                <Text style={styles.restDayMessage}>
-                  Your training split has recovery scheduled for today. Rest, stretch lightly, or
-                  tap the calendar to schedule an optional workout.
+          {/*
+            =====================================================
+            UNIFIED "Today's plan" section
+            =====================================================
+            This is the single source of truth for "what is the user
+            doing today?" It used to be split across two competing
+            sections ("Today's Schedule" right under the calendar +
+            "Today's plan" down here), which was confusing and
+            redundant. Now everything lives here, with a clear
+            priority order:
+
+              1. User has a SCHEDULED workout (non-rest)        →
+                 show the scheduled workout card with Start CTA.
+                 Scheduled wins because the user explicitly
+                 planned something for this date.
+
+              2. User has a scheduled REST day, OR their training
+                 split says today is rest                        →
+                 show the compact rest-day card.
+
+              3. There are recommended workouts for today        →
+                 show "Recommended for today (Push)" + cards.
+
+              4. Recommendations were filtered out by injuries
+                 or equipment settings                           →
+                 explain why with `injuryBlockReason`.
+
+              5. None of the above (no plan, no rec, no filter)  →
+                 hide the section entirely so we don't show an
+                 empty "Today's plan" header with nothing under it.
+          */}
+          {(() => {
+            // Compute these once at the top so the JSX below stays
+            // readable. IIFE pattern: define helpers + return JSX
+            // inline. (See the syntax explainer in chat for why.)
+            const hasScheduledWorkout =
+              todayScheduledWorkout && !todayScheduledWorkout.is_rest_day;
+            const hasScheduledRest =
+              todayScheduledWorkout && todayScheduledWorkout.is_rest_day;
+            const isRestDay = hasScheduledRest || isTodaySplitRest;
+            const hasRecommended = reccomendedWorkouts.length > 0;
+            const hasInjuryMsg = !!injuryBlockReason;
+            const showSection =
+              hasScheduledWorkout || isRestDay || hasRecommended || hasInjuryMsg;
+
+            if (!showSection) return null;
+
+            const todaySplitLabel = formatSplitDayLabel(
+              getSplitDayForDate(new Date(), effectiveSplit)
+            );
+
+            return (
+              <>
+                <Text style={[styles.sectionTitle, { marginBottom: 8, marginTop: 4 }]}>
+                  Today's plan
                 </Text>
-                <TouchableOpacity
-                  style={styles.splitRestScheduleLink}
-                  onPress={() => {
-                    setSelectedScheduledDate(new Date());
-                    setSelectedScheduledWorkout(todayScheduledWorkout || null);
-                    setShowScheduledWorkoutModal(true);
-                  }}
-                >
-                  <Ionicons name="calendar-outline" size={18} color="#ffa500" />
-                  <Text style={styles.splitRestScheduleLinkText}>Schedule something anyway</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          ) : reccomendedWorkouts.length > 0 ? (
-            <>
-              <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>
-                Recommended for today ({formatSplitDayLabel(getSplitDayForDate(new Date(), effectiveSplit))})
-              </Text>
-              <View style={styles.workoutCardsContainer}>
-                {reccomendedWorkouts.map((workout, idx) => (
-                  <RecommendedWorkoutCard
-                    key={workout.id || workout.name || idx}
-                    workout={workout}
-                    isFavorite={favoriteWorkoutsIds.includes(getFavoriteKey(workout))}
-                    onStart={handleStartRecommended}
-                    onFavorite={handleFavoriteWorkout}
-                    styles={styles}
-                  />
-                ))}
-              </View>
-            </>
-          ) : injuryBlockReason ? (
-            <>
-              <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>
-                Recommended for today ({formatSplitDayLabel(getSplitDayForDate(new Date(), effectiveSplit))})
-              </Text>
-              <Text style={styles.workoutDescription}>
-                {injuryBlockReason === 'leg_day' &&
-                  'Lower/leg day is paused because of your injury settings. Rest or do light mobility.'}
-                {injuryBlockReason === 'injury' &&
-                  'No workouts left after applying your injury filters. Tap Injuries to adjust, or pick a different training day.'}
-                {injuryBlockReason === 'equipment' &&
-                  'No workouts match your equipment. Open Equipment, select more gear, or turn off “Filter recommendations.”'}
-              </Text>
-            </>
-          ) : null}
-        </View>
 
-        {/* User's Custom Workouts */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Your Workouts</Text>
-          </View>
-          {userWorkouts.length === 0 ? (
-            <Text style={styles.emptyText}>No custom workouts yet.</Text>
-          ) : (
-            userWorkouts.map((workout) => (
-              <View key={workout.id} style={styles.workoutCard}>
-                <View style={styles.workoutHeader}>
-                  <View style={styles.workoutTitleContainer}>
-                    <Text style={styles.workoutTitle} numberOfLines={2}>{workout.workout_name || workout.name}</Text>
-                  </View>
-                  <View style={styles.workoutHeaderRight}>
-                    <TouchableOpacity onPress={() => handleFavoriteWorkout(workout)} style={styles.favoriteButtonLeftOfRep}>
-                      {favoriteWorkoutsIds.includes(getFavoriteKey(workout)) ? <Ionicons name="star" size={18} color="#00ffff" /> : <Ionicons name="star-outline" size={18} color="#00ffff" />}
-                    </TouchableOpacity>
-                    <Text style={styles.repRangeText}>{Array.isArray(workout.exercises) ? workout.exercises.length : 0} exercises</Text>
-                    <View style={styles.workoutActions}>
-                      <TouchableOpacity 
-                        onPress={() => handleShareWorkout(workout)}
-                        style={styles.shareButton}
-                      >
-                        <Ionicons name="share-outline" size={18} color="#00ffff" />
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => handleDeleteWorkout(workout.id)}>
-                        <Ionicons name="trash-outline" size={20} color="#ff4444" />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
-                <Text style={styles.workoutDescription}>Custom workout</Text>
-                <View style={styles.exercises}>
-                  <Text style={styles.exercisesTitle}>Exercises:</Text>
-                  {Array.isArray(workout.exercises) && workout.exercises.map((ex, idx) => {
-                    if (typeof ex === 'string') {
-                      return <Text key={idx} style={styles.exercisesList}>• {ex}</Text>;
-                    } else if (typeof ex === 'object' && ex !== null) {
-                      return <Text key={idx} style={styles.exercisesList}>• {ex.name} ({ex.sets || 3} x {ex.reps || 10})</Text>;
-                    } else {
-                      return null;
-                    }
-                  })}
-                </View>
-                <TouchableOpacity 
-                  style={styles.startButton}
-                  onPress={() => startWorkout({
-                    ...workout,
-                    name: workout.workout_name || workout.name,
-                  })}
-                >
-                  <Text style={styles.startButtonText}>Start Workout</Text>
-                </TouchableOpacity>
-              </View>
-            ))
-          )}
-        </View>
-
-        {/* Workout Types */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Workout Types</Text>
-            <TouchableOpacity 
-              style={styles.createWorkoutButton}
-              onPress={() => router.push('/training-plans')}
-            >
-              <Text style={styles.createWorkoutButtonText}>Training Plans</Text>
-            </TouchableOpacity>
-          </View>
-          
-          {/* Full Body Workout */}
-          <TouchableOpacity 
-            style={styles.workoutCard}
-            onPress={() => router.push('/active-workout')}
-          >
-            <View>
-              <View style={styles.workoutHeader}>
-                <Text style={styles.workoutTitle}>Full Body Workout</Text>
-                <View style={styles.favoriteAndRepRow}>
-                  <TouchableOpacity style={styles.favoriteButtonLeftOfRep} onPress={(e) => { e?.stopPropagation?.(); handleFavoriteWorkout({ name: 'Full Body Workout' }); }}>
-                    {favoriteWorkoutsIds.includes(getFavoriteKey({ name: 'Full Body Workout' })) ? <Ionicons name="star" size={18} color="#00ffff" /> : <Ionicons name="star-outline" size={18} color="#00ffff" />}
-                  </TouchableOpacity>
-                  <View style={styles.repRange}>
-                    <Text style={styles.repRangeText}>8-12 reps</Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.workoutDescription}>
-                Complete full body workout targeting all major muscle groups
-              </Text>
-              <View style={styles.workoutMeta}>
-                <Ionicons name="time-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>60 min</Text>
-                <Ionicons name="flame-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>High Intensity</Text>
-              </View>
-              <View style={styles.exercises}>
-                <Text style={styles.exercisesTitle}>Exercises:</Text>
-                <Text style={styles.exercisesList}>• Squats</Text>
-                <Text style={styles.exercisesList}>• Bench Press</Text>
-                <Text style={styles.exercisesList}>• Deadlifts</Text>
-                <Text style={styles.exercisesList}>• Pull-ups</Text>
-                <Text style={styles.exercisesList}>• Shoulder Press</Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={styles.startButton}
-              onPress={() => router.push({
-                pathname: '/active-workout',
-                params: { type: 'Full Body Workout' }
-              })}
-            >
-              <Text style={styles.startButtonText}>Start Workout</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-
-          {/* Upper Body Power */}
-          <TouchableOpacity 
-            style={styles.workoutCard}
-            onPress={() => router.push('/active-workout')}
-          >
-            <View>
-              <View style={styles.workoutHeader}>
-                <Text style={styles.workoutTitle}>Upper Body Power</Text>
-                <View style={styles.favoriteAndRepRow}>
-                  <TouchableOpacity style={styles.favoriteButtonLeftOfRep} onPress={(e) => { e?.stopPropagation?.(); handleFavoriteWorkout({ name: 'Upper Body Power' }); }}>
-                    {favoriteWorkoutsIds.includes(getFavoriteKey({ name: 'Upper Body Power' })) ? <Ionicons name="star" size={18} color="#00ffff" /> : <Ionicons name="star-outline" size={18} color="#00ffff" />}
-                  </TouchableOpacity>
-                  <View style={styles.repRange}>
-                    <Text style={styles.repRangeText}>4-6 reps</Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.workoutDescription}>
-                Heavy upper body focused workout for strength gains
-              </Text>
-              <View style={styles.workoutMeta}>
-                <Ionicons name="time-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>45 min</Text>
-                <Ionicons name="flame-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>High Intensity</Text>
-              </View>
-              <View style={styles.exercises}>
-                <Text style={styles.exercisesTitle}>Exercises:</Text>
-                <Text style={styles.exercisesList}>• Bench Press</Text>
-                <Text style={styles.exercisesList}>• Weighted Pull-ups</Text>
-                <Text style={styles.exercisesList}>• Military Press</Text>
-                <Text style={styles.exercisesList}>• Barbell Rows</Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={styles.startButton}
-              onPress={() => router.push({
-                pathname: '/active-workout',
-                params: { type: 'Upper Body Power' }
-              })}
-            >
-              <Text style={styles.startButtonText}>Start Workout</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-
-          {/* Lower Body Power */}
-          <TouchableOpacity 
-            style={styles.workoutCard}
-            onPress={() => router.push('/active-workout')}
-          >
-            <View>
-              <View style={styles.workoutHeader}>
-                <Text style={styles.workoutTitle}>Lower Body Power</Text>
-                <View style={styles.favoriteAndRepRow}>
-                  <TouchableOpacity style={styles.favoriteButtonLeftOfRep} onPress={(e) => { e?.stopPropagation?.(); handleFavoriteWorkout({ name: 'Lower Body Power' }); }}>
-                    {favoriteWorkoutsIds.includes(getFavoriteKey({ name: 'Lower Body Power' })) ? <Ionicons name="star" size={18} color="#00ffff" /> : <Ionicons name="star-outline" size={18} color="#00ffff" />}
-                  </TouchableOpacity>
-                  <View style={styles.repRange}>
-                    <Text style={styles.repRangeText}>4-6 reps</Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.workoutDescription}>
-                Heavy lower body focused workout for strength gains
-              </Text>
-              <View style={styles.workoutMeta}>
-                <Ionicons name="time-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>45 min</Text>
-                <Ionicons name="flame-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>High Intensity</Text>
-              </View>
-              <View style={styles.exercises}>
-                <Text style={styles.exercisesTitle}>Exercises:</Text>
-                <Text style={styles.exercisesList}>• Back Squats</Text>
-                <Text style={styles.exercisesList}>• Romanian Deadlifts</Text>
-                <Text style={styles.exercisesList}>• Front Squats</Text>
-                <Text style={styles.exercisesList}>• Leg Press</Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={styles.startButton}
-              onPress={() => router.push({
-                pathname: '/active-workout',
-                params: { type: 'Lower Body Power' }
-              })}
-            >
-              <Text style={styles.startButtonText}>Start Workout</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-
-          {/* HIIT Cardio */}
-          <TouchableOpacity 
-            style={styles.workoutCard}
-            onPress={() => router.push('/active-workout')}
-          >
-            <View>
-              <View style={styles.workoutHeader}>
-                <Text style={styles.workoutTitle}>HIIT Cardio</Text>
-                <View style={styles.favoriteAndRepRow}>
-                  <TouchableOpacity style={styles.favoriteButtonLeftOfRep} onPress={(e) => { e?.stopPropagation?.(); handleFavoriteWorkout({ name: 'HIIT Cardio' }); }}>
-                    {favoriteWorkoutsIds.includes(getFavoriteKey({ name: 'HIIT Cardio' })) ? <Ionicons name="star" size={18} color="#00ffff" /> : <Ionicons name="star-outline" size={18} color="#00ffff" />}
-                  </TouchableOpacity>
-                  <View style={styles.repRange}>
-                    <Text style={styles.repRangeText}>30s work/30s rest</Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.workoutDescription}>
-                High-intensity interval training for maximum calorie burn
-              </Text>
-              <View style={styles.workoutMeta}>
-                <Ionicons name="time-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>30 min</Text>
-                <Ionicons name="flame-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>Very High Intensity</Text>
-              </View>
-              <View style={styles.exercises}>
-                <Text style={styles.exercisesTitle}>Exercises:</Text>
-                <Text style={styles.exercisesList}>• Burpees</Text>
-                <Text style={styles.exercisesList}>• Mountain Climbers</Text>
-                <Text style={styles.exercisesList}>• Jump Squats</Text>
-                <Text style={styles.exercisesList}>• High Knees</Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={styles.startButton}
-              onPress={() => router.push({
-                pathname: '/active-workout',
-                params: { type: 'HIIT Cardio' }
-              })}
-            >
-              <Text style={styles.startButtonText}>Start Workout</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-
-          {/* Core & Abs */}
-          <TouchableOpacity 
-            style={styles.workoutCard}
-            onPress={() => router.push('/active-workout')}
-          >
-            <View>
-              <View style={styles.workoutHeader}>
-                <Text style={styles.workoutTitle}>Core & Abs</Text>
-                <View style={styles.favoriteAndRepRow}>
-                  <TouchableOpacity style={styles.favoriteButtonLeftOfRep} onPress={(e) => { e?.stopPropagation?.(); handleFavoriteWorkout({ name: 'Core & Abs' }); }}>
-                    {favoriteWorkoutsIds.includes(getFavoriteKey({ name: 'Core & Abs' })) ? <Ionicons name="star" size={18} color="#00ffff" /> : <Ionicons name="star-outline" size={18} color="#00ffff" />}
-                  </TouchableOpacity>
-                  <View style={styles.repRange}>
-                    <Text style={styles.repRangeText}>15-20 reps</Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.workoutDescription}>
-                Focused core workout for strength and definition
-              </Text>
-              <View style={styles.workoutMeta}>
-                <Ionicons name="time-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>30 min</Text>
-                <Ionicons name="flame-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>Medium Intensity</Text>
-              </View>
-              <View style={styles.exercises}>
-                <Text style={styles.exercisesTitle}>Exercises:</Text>
-                <Text style={styles.exercisesList}>• Planks</Text>
-                <Text style={styles.exercisesList}>• Russian Twists</Text>
-                <Text style={styles.exercisesList}>• Leg Raises</Text>
-                <Text style={styles.exercisesList}>• Cable Crunches</Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={styles.startButton}
-              onPress={() => router.push({
-                pathname: '/active-workout',
-                params: { type: 'Core & Abs' }
-              })}
-            >
-              <Text style={styles.startButtonText}>Start Workout</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-
-          {/* Mobility & Recovery */}
-          <TouchableOpacity 
-            style={styles.workoutCard}
-            onPress={() => router.push('/active-workout')}
-          >
-            <View>
-              <View style={styles.workoutHeader}>
-                <Text style={styles.workoutTitle}>Mobility & Recovery</Text>
-                <View style={styles.favoriteAndRepRow}>
-                  <TouchableOpacity style={styles.favoriteButtonLeftOfRep} onPress={(e) => { e?.stopPropagation?.(); handleFavoriteWorkout({ name: 'Mobility & Recovery' }); }}>
-                    {favoriteWorkoutsIds.includes(getFavoriteKey({ name: 'Mobility & Recovery' })) ? <Ionicons name="star" size={18} color="#00ffff" /> : <Ionicons name="star-outline" size={18} color="#00ffff" />}
-                  </TouchableOpacity>
-                  <View style={styles.repRange}>
-                    <Text style={styles.repRangeText}>30-60s holds</Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.workoutDescription}>
-                Stretching and mobility work for better flexibility and recovery
-              </Text>
-              <View style={styles.workoutMeta}>
-                <Ionicons name="time-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>40 min</Text>
-                <Ionicons name="flame-outline" size={20} color="#666" />
-                <Text style={styles.metaText}>Low Intensity</Text>
-              </View>
-              <View style={styles.exercises}>
-                <Text style={styles.exercisesTitle}>Exercises:</Text>
-                <Text style={styles.exercisesList}>• Dynamic Stretching</Text>
-                <Text style={styles.exercisesList}>• Foam Rolling</Text>
-                <Text style={styles.exercisesList}>• Yoga Poses</Text>
-                <Text style={styles.exercisesList}>• Joint Mobility</Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={styles.startButton}
-              onPress={() => router.push({
-                pathname: '/active-workout',
-                params: { type: 'Mobility & Recovery' }
-              })}
-            >
-              <Text style={styles.startButtonText}>Start Workout</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
-        </View>
-
-        {/* Premium Workouts Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Premium Workouts</Text>
-          {isPremium ? (
-            <>
-              <Text style={{ color: '#00ffff', fontWeight: 'bold', marginBottom: 8, fontSize: 16 }}>Premium</Text>
-              {premiumWorkouts.map((workout, idx) => (
-                <TouchableOpacity
-                  key={workout.name}
-                  style={styles.workoutCard}
-                  onPress={() => startWorkout(workout)}
-                >
-                  <View>
-                    <View style={styles.workoutHeader}>
-                      <Text style={styles.workoutTitle}>{workout.name}</Text>
-                      <View style={styles.favoriteAndRepRow}>
-                        <TouchableOpacity style={styles.favoriteButtonLeftOfRep} onPress={(e) => { e?.stopPropagation?.(); handleFavoriteWorkout(workout); }}>
-                          {favoriteWorkoutsIds.includes(getFavoriteKey(workout)) ? <Ionicons name="star" size={18} color="#00ffff" /> : <Ionicons name="star-outline" size={18} color="#00ffff" />}
-                        </TouchableOpacity>
-                        <View style={styles.repRange}>
-                          <Text style={styles.repRangeText}>{workout.repRange}</Text>
-                        </View>
-                      </View>
-                    </View>
-                    {workout.goalType ? (
-                      <View style={styles.goalTypeBadge}>
-                        <Text style={styles.goalTypeBadgeText}>{formatGoalType(workout.goalType)}</Text>
-                      </View>
-                    ) : null}
-                    <Text style={styles.workoutDescription}>{workout.description}</Text>
-                    <View style={styles.workoutMeta}>
-                      <Ionicons name="time-outline" size={20} color="#666" />
-                      <Text style={styles.metaText}>{workout.duration}</Text>
-                      <Ionicons name="flame-outline" size={20} color="#666" />
-                      <Text style={styles.metaText}>{workout.intensity}</Text>
+                {hasScheduledWorkout ? (
+                  // -------- 1. Scheduled (non-rest) workout --------
+                  <View style={styles.scheduledWorkoutCard}>
+                    <View style={styles.scheduledWorkoutTitleContainer}>
+                      <Ionicons name="calendar" size={20} color="#00ffff" />
+                      <Text style={styles.scheduledWorkoutTitle}>
+                        {todayScheduledWorkout.workout_name}
+                      </Text>
                     </View>
                     <View style={styles.exercises}>
                       <Text style={styles.exercisesTitle}>Exercises:</Text>
-                      {workout.exercises.map((ex, i) => (
-                        <Text key={i} style={styles.exercisesList}>• {ex}</Text>
+                      {todayScheduledWorkout.workout_exercises &&
+                        todayScheduledWorkout.workout_exercises
+                          .slice(0, 3)
+                          .map((exercise, index) => (
+                            <Text key={index} style={styles.exercisesList}>
+                              • {typeof exercise === 'string' ? exercise : exercise.name}
+                              {exercise.sets && exercise.reps && ` (${exercise.sets} x ${exercise.reps})`}
+                            </Text>
+                          ))}
+                      {todayScheduledWorkout.workout_exercises &&
+                        todayScheduledWorkout.workout_exercises.length > 3 && (
+                          <Text style={styles.exercisesList}>
+                            ... and {todayScheduledWorkout.workout_exercises.length - 3} more
+                          </Text>
+                        )}
+                    </View>
+                    <TouchableOpacity
+                      style={styles.startScheduledButton}
+                      onPress={() =>
+                        startWorkout({
+                          id: todayScheduledWorkout.id,
+                          name: todayScheduledWorkout.workout_name,
+                          workout_name: todayScheduledWorkout.workout_name,
+                          exercises: todayScheduledWorkout.workout_exercises,
+                          isScheduled: true,
+                        })
+                      }
+                    >
+                      <Ionicons name="play" size={20} color="#000" />
+                      <Text style={styles.startScheduledButtonText}>
+                        Start Scheduled Workout
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : isRestDay ? (
+                  // -------- 2. Rest day (scheduled OR split) --------
+                  <View
+                    style={[
+                      styles.scheduledRestDayCard,
+                      styles.scheduledRestDayCardCompact,
+                    ]}
+                  >
+                    <Ionicons
+                      name="bed-outline"
+                      size={28}
+                      color="#ffa500"
+                      style={styles.restDayCompactIcon}
+                    />
+                    <View style={styles.restDayCompactTextWrap}>
+                      <Text style={styles.restDayTitleCompact}>Rest day</Text>
+                      <Text style={styles.restDayMessageCompact}>
+                        {hasScheduledRest
+                          ? 'Recovery scheduled. Rest, stretch lightly, or pick another day on the calendar.'
+                          : 'Your split has recovery scheduled. Rest, stretch lightly, or tap the calendar to schedule an optional workout.'}
+                      </Text>
+                      {/* Show optional notes only when the user typed
+                          something other than the default "Rest day"
+                          string (which would just repeat the title). */}
+                      {todayScheduledWorkout?.notes &&
+                        todayScheduledWorkout.notes !== 'Rest day' && (
+                          <Text style={styles.restDayCompactNotes}>
+                            Notes: {todayScheduledWorkout.notes}
+                          </Text>
+                        )}
+                      <TouchableOpacity
+                        style={styles.restDayCompactCta}
+                        onPress={() => {
+                          setSelectedScheduledDate(new Date());
+                          setSelectedScheduledWorkout(todayScheduledWorkout || null);
+                          setShowScheduledWorkoutModal(true);
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <Ionicons name="calendar-outline" size={14} color="#ffa500" />
+                        <Text style={styles.restDayCompactCtaText}>
+                          Schedule something
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : hasRecommended ? (
+                  // -------- 3. Recommended workouts for today --------
+                  <>
+                    <Text style={styles.todaysPlanSubtitle}>
+                      Recommended for {todaySplitLabel}
+                    </Text>
+                    <View style={styles.workoutCardsContainer}>
+                      {reccomendedWorkouts.map((workout, idx) => (
+                        <RecommendedWorkoutCard
+                          key={workout.id || workout.name || idx}
+                          workout={workout}
+                          isFavorite={favoriteWorkoutsIds.includes(
+                            getFavoriteKey(workout)
+                          )}
+                          onStart={handleStartRecommended}
+                          onFavorite={handleFavoriteWorkout}
+                          styles={styles}
+                        />
                       ))}
                     </View>
-                    {workout.howTo && (
-                      <View style={styles.howToSection}>
-                        <Text style={styles.howToTitle}>How to:</Text>
-                        <Text style={styles.howToText}>{workout.howTo}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <TouchableOpacity style={styles.startButton} onPress={() => startWorkout(workout)}>
-                    <Text style={styles.startButtonText}>Start Workout</Text>
-                  </TouchableOpacity>
-                </TouchableOpacity>
-              ))}
-            </>
-          ) : (
-            <>
-              {premiumWorkouts.map((workout, idx) => (
-                <View key={workout.name} style={[styles.workoutCard, { opacity: 0.6 }]}> 
-                  <View style={styles.workoutHeader}>
-                    <Text style={styles.workoutTitle}>{workout.name}</Text>
-                    <Ionicons name="lock-closed" size={22} color="#ff4444" style={{ marginLeft: 8 }} />
-                  </View>
-                  {workout.goalType ? (
-                    <View style={styles.goalTypeBadge}>
-                      <Text style={styles.goalTypeBadgeText}>{formatGoalType(workout.goalType)}</Text>
-                    </View>
-                  ) : null}
-                  <Text style={styles.workoutDescription}>{workout.description}</Text>
-                  <View style={styles.workoutMeta}>
-                    <Ionicons name="time-outline" size={20} color="#666" />
-                    <Text style={styles.metaText}>{workout.duration}</Text>
-                    <Ionicons name="flame-outline" size={20} color="#666" />
-                    <Text style={styles.metaText}>{workout.intensity}</Text>
-                  </View>
-                  <View style={styles.exercises}>
-                    <Text style={styles.exercisesTitle}>Exercises:</Text>
-                    {workout.exercises.map((ex, i) => (
-                      <Text key={i} style={styles.exercisesList}>• {ex}</Text>
-                    ))}
-                  </View>
-                  {workout.howTo && (
-                    <View style={styles.howToSection}>
-                      <Text style={styles.howToTitle}>How to:</Text>
-                      <Text style={styles.howToText}>{workout.howTo}</Text>
-                    </View>
-                  )}
-                  <View style={{ alignItems: 'center', marginTop: 10 }}>
-                    <Text style={{ color: '#ff4444', fontWeight: 'bold', fontSize: 14 }}>Upgrade to Premium to start these workouts</Text>
-                  </View>
-                </View>
-              ))}
-            </>
-          )}
+                  </>
+                ) : (
+                  // -------- 4. Injury / equipment block message --------
+                  <Text style={styles.workoutDescription}>
+                    {injuryBlockReason === 'leg_day' &&
+                      'Lower/leg day is paused because of your injury settings. Rest or do light mobility.'}
+                    {injuryBlockReason === 'injury' &&
+                      'No workouts left after applying your injury filters. Tap Injuries to adjust, or pick a different training day.'}
+                    {injuryBlockReason === 'equipment' &&
+                      'No workouts match your equipment. Open Equipment, select more gear, or turn off "Filter recommendations."'}
+                  </Text>
+                )}
+              </>
+            );
+          })()}
         </View>
+
+
+        {/* ================================================================ */}
+        {/* Workout Category Buttons — bottom of the workout screen           */}
+        {/* ================================================================ */}
+        {/* Three quick-access buttons that open dedicated category screens.  */}
+        {/* These replace the old inline "Your Workouts" / "Workout Types" /  */}
+        {/* "Premium Workouts" sections that used to live here — every       */}
+        {/* workout listing now happens on its own screen so the main page   */}
+        {/* stays clean and only shows the split-plan recommendations above. */}
+        <View style={styles.workoutCategoryButtonsRow}>
+          <TouchableOpacity
+            style={styles.workoutCategoryButton}
+            onPress={() => router.push('/your-workouts')}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="bookmark-outline" size={24} color="#00ffff" />
+            <Text style={styles.workoutCategoryButtonText}>Your Workouts</Text>
+            <Text style={styles.workoutCategoryButtonSubtext}>Custom builds</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.workoutCategoryButton}
+            onPress={() => router.push('/more-workouts')}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="layers-outline" size={24} color="#00ffff" />
+            <Text style={styles.workoutCategoryButtonText}>More Workouts</Text>
+            <Text style={styles.workoutCategoryButtonSubtext}>Starter library</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.workoutCategoryButton}
+            onPress={() => router.push('/premium-workouts')}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="star-outline" size={24} color="#ffd700" />
+            <Text style={styles.workoutCategoryButtonText}>Premium</Text>
+            <Text style={styles.workoutCategoryButtonSubtext}>Pro routines</Text>
+          </TouchableOpacity>
+        </View>
+
 
         {/* Workout Logs Modal - Now a separate component */}
         <WorkoutLogs 
@@ -3878,24 +3699,75 @@ const startSprintStepTracking = async () => {
       {/* Run/Walk Tab Content */}
       {activeTab === 'run' && (
         <SafeAreaView style={styles.container}>
+          {/*
+            ===================================================
+            Run-tab header — segmented activity switcher
+            ===================================================
+            Replaces the older "Activity" settings button (which
+            opened a full modal) with an inline segmented control:
+            Run / Walk / Bike / Timed. One tap is all it takes to
+            switch modes, and the active one is highlighted in
+            cyan (or gold for the gamified Timed Distance).
+            The list-icon on the right opens the run history.
+          */}
           <View style={styles.runHeader}>
-            <View style={styles.activityDisplay}>
-              <Ionicons 
-                name={sprintMode ? "flash" : activityType === 'run' ? "fitness" : activityType === 'walk' ? "walk" : "bicycle"} 
-                size={20} 
-                color={sprintMode ? "#ffd700" : "#00ffff"} 
-              />
-              <Text style={styles.activityDisplayText}>
-                {sprintMode ? 'Timed Distance' : activityType === 'run' ? 'Running' : activityType === 'walk' ? 'Walking' : activityType === 'bike' ? 'Cycling' : 'Timed Distance'}
-              </Text>
-            </View>
-            <View style={styles.runHeaderButtons}>
-              <TouchableOpacity 
-                style={styles.chooseActivityButton}
-                onPress={() => setShowActivityModal(true)}
+            <View style={styles.activitySwitcher}>
+              {[
+                { key: 'run', icon: 'fitness', label: 'Run' },
+                { key: 'walk', icon: 'walk', label: 'Walk' },
+                { key: 'bike', icon: 'bicycle', label: 'Bike' },
+              ].map(({ key, icon, label }) => {
+                const isActive = activityType === key && !sprintMode;
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={[styles.activitySwitcherButton, isActive && styles.activitySwitcherButtonActive]}
+                    onPress={() => {
+                      setActivityType(key);
+                      setSprintMode(false);
+                    }}
+                  >
+                    <Ionicons name={icon} size={18} color={isActive ? '#000' : '#666'} />
+                    <Text style={[styles.activitySwitcherText, isActive && styles.activitySwitcherTextActive]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <TouchableOpacity
+                style={[
+                  styles.activitySwitcherButton,
+                  (sprintMode || activityType === 'challenge') && styles.activitySwitcherButtonActiveChallenge,
+                ]}
+                onPress={() => {
+                  setActivityType('challenge');
+                  setShowSprintModal(true);
+                }}
               >
-                <Ionicons name="settings-outline" size={20} color="#00ffff" />
-                <Text style={styles.chooseActivityButtonText}>Activity</Text>
+                <Ionicons
+                  name="flash"
+                  size={18}
+                  color={(sprintMode || activityType === 'challenge') ? '#000' : '#ffd700'}
+                />
+                <Text
+                  style={[
+                    styles.activitySwitcherText,
+                    styles.activitySwitcherTextCompact,
+                    (sprintMode || activityType === 'challenge') && styles.activitySwitcherTextActiveChallenge,
+                  ]}
+                >
+                  Timed
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.runHeaderButtons}>
+              <TouchableOpacity
+                style={styles.headerIconButton}
+                onPress={() => router.push('/run-log')}
+                accessibilityLabel="Open run history"
+              >
+                <Ionicons name="list-outline" size={22} color="#00ffff" />
               </TouchableOpacity>
             </View>
           </View>
@@ -3939,43 +3811,55 @@ const startSprintStepTracking = async () => {
             )}
           </MapView>
 
-          <View style={styles.overlay}>
-            <View style={styles.controlsContainer}>
-              <View style={styles.unitToggle}>
-                <Text style={styles.unitText}>KM</Text>
-                <Switch
-                  value={useMiles}
-                  onValueChange={setUseMiles}
-                  trackColor={{ false: '#767577', true: '#00ffff' }}
-                  thumbColor={useMiles ? '#00ffff' : '#f4f3f4'}
-                />
-                <Text style={styles.unitText}>MI</Text>
-              </View>
-              <View style={styles.autoZoomToggle}>
-                <Text style={styles.unitText}>Auto Zoom</Text>
-                <Switch
-                  value={autoZoom}
-                  onValueChange={setAutoZoom}
-                  trackColor={{ false: '#767577', true: '#00ffff' }}
-                  thumbColor={autoZoom ? '#00ffff' : '#f4f3f4'}
-                />
-              </View>
-              <TouchableOpacity 
-                style={styles.runLogButton}
-                onPress={() => router.push('/run-log')}
-              >
-                <Ionicons name="list-outline" size={20} color="#00ffff" />
-              </TouchableOpacity>
-            </View>
+          {/*
+            ===================================================
+            Draggable bottom-sheet stats overlay
+            ===================================================
+            Wrapped in `Animated.View` so its `height` can be
+            tweened by the panResponder + spring. The `pan
+            Handlers` spread plumbs raw touch events into our
+            PanResponder instance defined above.
 
-            <View style={styles.statsContainer}>
+            The drag handle bar at the top is also tap-able as
+            a fallback for users who don't realize they can
+            swipe — calls `toggleOverlay()` to snap between
+            collapsed and expanded.
+          */}
+          <Animated.View
+            style={[
+              styles.overlay,
+              overlayExpanded ? styles.overlayExpanded : styles.overlayCollapsed,
+              { height: overlayHeight, bottom: runOverlayBottom },
+            ]}
+            {...panResponder.panHandlers}
+          >
+            <TouchableOpacity
+              style={[styles.dragHandle, !overlayExpanded && styles.dragHandleCollapsed]}
+              onPress={toggleOverlay}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={overlayExpanded ? 'Collapse stats panel' : 'Expand stats panel'}
+            >
+              <View style={styles.dragHandleBar} />
+            </TouchableOpacity>
+
+            <View
+              style={[
+                styles.statsContainer,
+                !overlayExpanded && styles.statsContainerCollapsed,
+              ]}
+            >
               <View style={styles.statBox}>
-                <Text style={styles.statLabel}>
+                <Text
+                  style={[
+                    styles.statLabel,
+                    !overlayExpanded && styles.statLabelCollapsed,
+                  ]}
+                >
                   {sprintMode ? 'Progress' : 'Distance'}
                 </Text>
                 {sprintMode ? (
                   <View style={styles.sprintProgressContainer}>
-                    {/* Finish Line */}
                     <Animated.View
                       style={[
                         styles.finishLine,
@@ -3985,25 +3869,23 @@ const startSprintStepTracking = async () => {
                             scale: finishLineOpacity.interpolate({
                               inputRange: [0, 1],
                               outputRange: [0.8, 1],
-                            })
-                          }]
-                        }
+                            }),
+                          }],
+                        },
                       ]}
                     >
                       <View style={styles.finishLineFlag} />
                       <Text style={styles.finishLineText}>FINISH</Text>
                       <View style={styles.finishLineFlag} />
                     </Animated.View>
-
                     <Text style={styles.statValue}>
                       {((distance * 1000) / distanceNeededToTravel * 100).toFixed(1)}%
                     </Text>
                     <Text style={styles.sprintProgressText}>
                       {(distance * 1000).toFixed(0)} / {distanceNeededToTravel.toFixed(0)} m
                     </Text>
-                    {/* Animated Progress Bar */}
                     <View style={styles.progressBarContainer}>
-                      <Animated.View 
+                      <Animated.View
                         style={[
                           styles.progressBarFill,
                           {
@@ -4011,12 +3893,10 @@ const startSprintStepTracking = async () => {
                               inputRange: [0, 1],
                               outputRange: ['0%', '100%'],
                             }),
-                          }
+                          },
                         ]}
                       />
                     </View>
-
-                    {/* Celebration Message - Enhanced with better animation */}
                     {sprintCompleted && (
                       <Animated.View
                         style={[
@@ -4030,9 +3910,9 @@ const startSprintStepTracking = async () => {
                               scale: celebrationScale.interpolate({
                                 inputRange: [0, 1],
                                 outputRange: [0.8, 1],
-                              })
-                            }]
-                          }
+                              }),
+                            }],
+                          },
                         ]}
                       >
                         <LinearGradient
@@ -4048,62 +3928,159 @@ const startSprintStepTracking = async () => {
                     )}
                   </View>
                 ) : (
-                  <Text style={styles.statValue}>
-                    {useMiles ? (distance * 0.621371).toFixed(2) : distance.toFixed(2)} {useMiles ? 'mi' : 'km'}
-                  </Text>
+                  <>
+                    <Text
+                      style={[
+                        styles.statValue,
+                        !overlayExpanded && styles.statValueCollapsed,
+                      ]}
+                    >
+                      {useImperial
+                        ? (distance * 0.621371).toFixed(2)
+                        : distance.toFixed(2)}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.statUnit,
+                        !overlayExpanded && styles.statUnitCollapsed,
+                      ]}
+                    >
+                      {useImperial ? 'mi' : 'km'}
+                    </Text>
+                  </>
                 )}
               </View>
+
+              {overlayExpanded && (
+                <>
+                  <View style={styles.statDivider} />
+                  <View style={styles.statBox}>
+                    <Text style={styles.statLabel}>
+                      {activityType === 'bike' ? 'Speed' : 'Avg Pace'}
+                    </Text>
+                    <Text style={styles.statValue}>
+                      {activityType === 'bike'
+                        ? currentPace > 0
+                          ? currentPace.toFixed(1)
+                          : '--'
+                        : averagePace > 0
+                          ? formatPace(averagePace)
+                          : '--:--'}
+                    </Text>
+                    <Text style={styles.statUnit}>
+                      {activityType === 'bike'
+                        ? useImperial
+                          ? 'mph'
+                          : 'kph'
+                        : `/${useImperial ? 'mi' : 'km'}`}
+                    </Text>
+                  </View>
+                </>
+              )}
+
+              {overlayExpanded && <View style={styles.statDivider} />}
+
               <View style={styles.statBox}>
-                <Text style={styles.statLabel}>
-                  {activityType === 'bike' ? 'Speed' : 'Avg Pace'}
+                <Text
+                  style={[
+                    styles.statLabel,
+                    !overlayExpanded && styles.statLabelCollapsed,
+                  ]}
+                >
+                  Time
                 </Text>
-                <Text style={styles.statValue}>
-                  {activityType === 'bike' ? 
-                    (currentPace > 0 ? `${(currentPace * (useMiles ? 0.621371 : 1)).toFixed(1)} ${useMiles ? 'mph' : 'kph'}` : '--') :
-                    (averagePace > 0 ? `${formatPace(averagePace)} /${useMiles ? 'mi' : 'km'}` : '--:--')
-                  }
-                </Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statLabel}>Time</Text>
-                <Text style={styles.statValue}>
+                <Text
+                  style={[
+                    styles.statValue,
+                    !overlayExpanded && styles.statValueCollapsed,
+                  ]}
+                >
                   {formatRunTime(elapsed)}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.actionButtonsContainer}>
+            <View
+              style={[
+                styles.actionButtonContainer,
+                overlayExpanded && styles.actionButtonContainerExpanded,
+              ]}
+            >
               {recording && (
-                <TouchableOpacity
-                  style={[styles.runButton, paused ? styles.resumeRunButton : styles.pauseRunButton]}
-                  onPress={pauseActivity}
-                >
-                  <Ionicons name={paused ? "play" : "pause"} size={20} color="#fff" />
-                  <Text style={styles.runButtonText}>{paused ? "Resume" : "Pause"}</Text>
-                </TouchableOpacity>
+                <>
+                  <TouchableOpacity
+                    style={[
+                      styles.runButton,
+                      paused ? styles.resumeRunButton : styles.pauseRunButton,
+                      !overlayExpanded && styles.runButtonCollapsed,
+                    ]}
+                    onPress={pauseActivity}
+                  >
+                    <Ionicons
+                      name={paused ? 'play' : 'pause'}
+                      size={overlayExpanded ? 22 : 18}
+                      color="#fff"
+                    />
+                    <Text
+                      style={[
+                        styles.runButtonText,
+                        !overlayExpanded && styles.runButtonTextCollapsed,
+                      ]}
+                    >
+                      {paused ? 'Resume' : 'Pause'}
+                    </Text>
+                  </TouchableOpacity>
+                  {!paused && (
+                    <TouchableOpacity
+                      style={[
+                        styles.stopRunButton,
+                        !overlayExpanded && styles.stopRunButtonCollapsed,
+                      ]}
+                      onPress={stopActivity}
+                    >
+                      <Ionicons
+                        name="stop"
+                        size={overlayExpanded ? 22 : 18}
+                        color="#fff"
+                      />
+                      <Text
+                        style={[
+                          styles.runButtonText,
+                          !overlayExpanded && styles.runButtonTextCollapsed,
+                        ]}
+                      >
+                        End
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
               )}
-              
-              {recording && !paused && (
-                <TouchableOpacity
-                  style={styles.stopRunButton}
-                  onPress={stopActivity}
-                >
-                  <Ionicons name="stop" size={20} color="#fff" />
-                  <Text style={styles.runButtonText}>End {activityType.charAt(0).toUpperCase() + activityType.slice(1)}</Text>
-                </TouchableOpacity>
-              )}
-              
+
               {!recording && (
                 <TouchableOpacity
-                  style={styles.startRunButton}
+                  style={[
+                    styles.startRunButton,
+                    !overlayExpanded && styles.startRunButtonCollapsed,
+                  ]}
                   onPress={startActivity}
                 >
-                  <Ionicons name="play" size={24} color="#fff" />
-                  <Text style={styles.startRunButtonText}>Start {activityType.charAt(0).toUpperCase() + activityType.slice(1)}</Text>
+                  <Ionicons
+                    name="play"
+                    size={overlayExpanded ? 28 : 22}
+                    color="#000"
+                  />
+                  <Text
+                    style={[
+                      styles.startRunButtonText,
+                      !overlayExpanded && styles.startRunButtonTextCollapsed,
+                    ]}
+                  >
+                    Start {activityType.charAt(0).toUpperCase() + activityType.slice(1)}
+                  </Text>
                 </TouchableOpacity>
               )}
             </View>
-          </View>
+          </Animated.View>
           
           {/* Countdown Overlay - Shows 3-2-1 before sprint starts */}
           {countdown !== null && (
@@ -4148,110 +4125,14 @@ const startSprintStepTracking = async () => {
         </View>
       </Modal>
 
-      {/* Activity Selection Modal */}
-      <Modal
-        visible={showActivityModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowActivityModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.activityModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Choose Activity Type</Text>
-              <TouchableOpacity 
-                style={styles.closeButton}
-                onPress={() => setShowActivityModal(false)}
-              >
-                <Ionicons name="close" size={24} color="#fff" />
-              </TouchableOpacity>
-            </View>
-            
-            <View style={styles.activityOptions}>
-              <TouchableOpacity 
-                style={[styles.activityOption, activityType === 'run' && styles.activeActivityOption]}
-                onPress={() => {
-                  setActivityType('run');
-                  setShowActivityModal(false);
-                }}
-              >
-                <Ionicons 
-                  name="walk" 
-                  size={32} 
-                  color={activityType === 'run' ? '#000' : '#00ffff'} 
-                />
-                <Text style={[styles.activityOptionText, activityType === 'run' && styles.activeActivityOptionText]}>
-                  Run
-                </Text>
-                <Text style={styles.activityOptionDescription}>
-                  Track your running sessions with GPS
-                </Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={[styles.activityOption, activityType === 'walk' && styles.activeActivityOption]}
-                onPress={() => {
-                  setActivityType('walk');
-                  setShowActivityModal(false);
-                }}
-              >
-                <Ionicons 
-                  name="footsteps" 
-                  size={32} 
-                  color={activityType === 'walk' ? '#000' : '#00ffff'} 
-                />
-                <Text style={[styles.activityOptionText, activityType === 'walk' && styles.activeActivityOptionText]}>
-                  Walk
-                </Text>
-                <Text style={styles.activityOptionDescription}>
-                  Track your walking sessions with GPS
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.activityOption, activityType === 'bike' && styles.activeActivityOption]}
-                onPress={() => {
-                  setActivityType('bike');
-                  setShowActivityModal(false);
-                }}
-              >
-                <Ionicons 
-                  name="bicycle" 
-                  size={32} 
-                  color={activityType === 'bike' ? '#000' : '#00ffff'} 
-                />
-                <Text style={[styles.activityOptionText, activityType === 'bike' && styles.activeActivityOptionText]}>
-                  Bike
-                </Text>
-                <Text style={styles.activityOptionDescription}>
-                  Track your cycling sessions with GPS
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.activityOption, (activityType === 'challenge' || sprintMode) && styles.activeActivityOptionChallenge]}
-                onPress={() => {
-                  setActivityType('challenge');
-                  setShowActivityModal(false);
-                  setShowSprintModal(true);
-                }}
-              >
-                <Ionicons 
-                  name="flash" 
-                  size={32} 
-                  color={(activityType === 'challenge' || sprintMode) ? '#000' : '#ffd700'} 
-                />
-                <Text style={[styles.activityOptionText, (activityType === 'challenge' || sprintMode) && styles.activeActivityOptionTextChallenge]}>
-                  Timed Distance
-                </Text>
-                <Text style={styles.activityOptionDescription}>
-                  Set a target distance and race against time
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {/*
+        The standalone "Activity Selection Modal" used to live
+        here. It was replaced by the inline segmented switcher
+        in the run-tab header (Run / Walk / Bike / Timed), which
+        is faster and more discoverable. The modal's only entry
+        point — a "Choose Activity" button — was removed at the
+        same time, so this whole block was dead code.
+      */}
 
       {/* Sprint Maxout Modal */}
       <Modal
@@ -4897,7 +4778,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
     marginHorizontal: 20,
+    marginBottom: 6,
+  },
+  // Hint shown right under the "Workout schedule" title so users know
+  // the calendar tiles below are tappable. Subtle muted color pairs
+  // with the cyan accent without competing with the section title.
+  scheduleSectionHint: {
+    fontSize: 12,
+    color: '#888',
+    marginHorizontal: 20,
     marginBottom: 12,
+    fontStyle: 'italic',
   },
   todayStrip: {
     flexDirection: 'row',
@@ -5164,6 +5055,51 @@ const styles = StyleSheet.create({
     color: '#666',
     lineHeight: 20,
   },
+  // ----------------------------------------------------------------
+  // Workout Category Buttons (bottom of the workout screen)
+  // ----------------------------------------------------------------
+  // The row container uses flexDirection: 'row' so the three buttons
+  // sit side-by-side. `gap` adds spacing BETWEEN children without
+  // adding margin to the outer ones (cleaner than margin tricks).
+  // `paddingHorizontal: 20` aligns the row with the rest of the page
+  // sections that also use 20-pixel padding.
+  workoutCategoryButtonsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    marginTop: 10,
+    marginBottom: 30,
+    gap: 10,
+  },
+  // Each button takes 1/3 of the available width because we set
+  // `flex: 1` on three siblings inside a row container. The cyan
+  // border + translucent fill matches the existing actionButton style
+  // used elsewhere on this screen.
+  workoutCategoryButton: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 255, 255, 0.08)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 255, 255, 0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  workoutCategoryButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  workoutCategoryButtonSubtext: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 10,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginTop: 2,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -5297,137 +5233,184 @@ const styles = StyleSheet.create({
   },
   overlay: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 80 : 70,
+    // `bottom` is set inline via `runOverlayBottom` (tab bar + ad banner).
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    padding: 20,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: -2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    overflow: 'hidden',
   },
-  controlsContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 10,
-    borderRadius: 10,
+  overlayExpanded: {
+    paddingTop: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 0,
   },
-  unitToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  autoZoomToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  runLogButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0, 255, 255, 0.1)',
-  },
-  unitText: {
-    color: '#fff',
-    fontSize: 14,
-    marginHorizontal: 10,
+  overlayCollapsed: {
+    paddingTop: 8,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
   },
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 15,
-    borderRadius: 10,
+    paddingVertical: 8,
+  },
+  statsContainerCollapsed: {
+    marginBottom: 12,
+    paddingVertical: 4,
   },
   statBox: {
     alignItems: 'center',
     flex: 1,
   },
   statLabel: {
-    color: '#fff',
-    fontSize: 12,
-    marginBottom: 5,
+    color: '#999',
+    fontSize: 11,
+    fontWeight: '500',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  statLabelCollapsed: {
+    fontSize: 9,
+    marginBottom: 3,
   },
   statValue: {
-    color: '#00ffff',
-    fontSize: 18,
-    fontWeight: 'bold',
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: '700',
+    marginBottom: 2,
   },
-  actionButtonsContainer: {
+  statValueCollapsed: {
+    fontSize: 20,
+    marginBottom: 1,
+  },
+  statUnit: {
+    color: '#666',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  statUnitCollapsed: {
+    fontSize: 10,
+  },
+  statDivider: {
+    width: 1,
+    height: 50,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginHorizontal: 8,
+  },
+  actionButtonContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-    gap: 10,
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 0,
+  },
+  actionButtonContainerExpanded: {
+    marginBottom: 0,
+    paddingBottom: 0,
   },
   startRunButton: {
     backgroundColor: '#00ffff',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
+    paddingHorizontal: 32,
+    paddingTop: 16,
+    paddingBottom: 12,
+    borderRadius: 30,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#00ffff',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+    minWidth: 200,
+  },
+  startRunButtonCollapsed: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+    minWidth: 160,
   },
   startRunButtonText: {
     color: '#000',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '700',
+    marginLeft: 10,
+    letterSpacing: 0.5,
+  },
+  startRunButtonTextCollapsed: {
+    fontSize: 15,
     marginLeft: 8,
   },
   runButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
+    paddingHorizontal: 24,
+    paddingTop: 14,
+    paddingBottom: 10,
+    borderRadius: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#00ffff',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowRadius: 6,
+    elevation: 6,
+    minWidth: 120,
+  },
+  runButtonCollapsed: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 8,
+    borderRadius: 20,
+    minWidth: 90,
   },
   runButtonText: {
-    color: '#000',
+    color: '#fff',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
     marginLeft: 8,
+  },
+  runButtonTextCollapsed: {
+    fontSize: 13,
+    marginLeft: 6,
   },
   pauseRunButton: {
     backgroundColor: '#2196f3',
+    shadowColor: '#2196f3',
   },
   resumeRunButton: {
     backgroundColor: '#ff9800',
+    shadowColor: '#ff9800',
   },
   stopRunButton: {
     backgroundColor: '#ff4444',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 25,
+    paddingHorizontal: 24,
+    paddingTop: 14,
+    paddingBottom: 10,
+    borderRadius: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#ff4444',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowRadius: 6,
+    elevation: 6,
+    minWidth: 100,
+  },
+  stopRunButtonCollapsed: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 8,
+    borderRadius: 20,
+    minWidth: 80,
   },
   gradient: {
     flex: 1,
@@ -5591,6 +5574,92 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     alignItems: 'center',
+  },
+  // ============================================================
+  // Segmented activity switcher (Run / Walk / Bike / Timed)
+  // ============================================================
+  // Sits in the run-tab header. `flex: 1` on the container
+  // makes the four pills share width equally, and `minWidth: 0`
+  // on each button stops them from refusing to shrink when the
+  // labels would otherwise overflow on narrow screens.
+  activitySwitcher: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
+    flex: 1,
+    marginRight: 10,
+  },
+  activitySwitcherButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 4,
+    flex: 1,
+    minWidth: 0,
+  },
+  activitySwitcherButtonActive: {
+    backgroundColor: '#00ffff',
+  },
+  activitySwitcherText: {
+    color: '#999',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  activitySwitcherTextCompact: {
+    fontSize: 11,
+  },
+  activitySwitcherTextActive: {
+    color: '#000',
+  },
+  activitySwitcherButtonActiveChallenge: {
+    backgroundColor: '#ffd700',
+  },
+  activitySwitcherTextActiveChallenge: {
+    color: '#000',
+  },
+  // Round, faintly-glowing icon button for "Open run history"
+  // sitting at the right edge of the header. Uses a subtle
+  // cyan tint to match the rest of the run-tab chrome without
+  // competing with the brighter activity switcher next to it.
+  headerIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.25)',
+  },
+  // ============================================================
+  // Draggable overlay drag-handle bar
+  // ============================================================
+  // The little horizontal pill at the very top of the bottom
+  // sheet. We give it generous vertical padding so the touch
+  // target is comfortable (the visible bar itself is only 4px
+  // tall — way too small to reliably hit). The bar's own
+  // background is a translucent white so it reads as an
+  // affordance over both light and dark map tiles.
+  dragHandle: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  dragHandleCollapsed: {
+    paddingVertical: 4,
+    marginBottom: 4,
+  },
+  dragHandleBar: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
   },
   sprintButton: {
     flexDirection: 'row',
@@ -5971,7 +6040,94 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+  },
+  // -----------------------------------------------------------------
+  // Compact variant of the rest-day card.
+  // Used under the "Today's plan" header where the original vertical
+  // stack (icon → title → 2-line message → CTA) ate too much vertical
+  // space. We switch to a HORIZONTAL row:
+  //   [icon] | [title]
+  //          | [message]
+  //          | [Schedule CTA]
+  // The icon sits centered vertically next to the text column, and
+  // padding shrinks from 24 → 12. End result is roughly half the
+  // height of the original full-size card.
+  // -----------------------------------------------------------------
+  scheduledRestDayCardCompact: {
+    flexDirection: 'row',
     alignItems: 'center',
+    padding: 12,
+    marginTop: 4,
+    gap: 12,
+  },
+  // Icon column: just the bed-outline glyph. We use marginRight via
+  // the parent's `gap` so no margin needed here. `alignSelf: 'center'`
+  // keeps the icon vertically centered against the text column even
+  // when the message wraps to two lines.
+  restDayCompactIcon: {
+    alignSelf: 'center',
+  },
+  // Text column. flex: 1 makes it grow to fill the remaining width
+  // beside the icon. Without it, the column would shrink to fit its
+  // content and leave a big empty gap on the right of the card.
+  restDayCompactTextWrap: {
+    flex: 1,
+  },
+  restDayTitleCompact: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#ffa500',
+    marginBottom: 2,
+  },
+  restDayMessageCompact: {
+    fontSize: 12,
+    color: '#bbb',
+    lineHeight: 16,
+    marginBottom: 6,
+  },
+  // Inline "Schedule something" CTA that sits BELOW the message in
+  // the compact card's text column. Small horizontal pill with an
+  // icon + label, kept tight so it fits cleanly on one line.
+  restDayCompactCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 165, 0, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 165, 0, 0.35)',
+  },
+  restDayCompactCtaText: {
+    color: '#ffa500',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // Optional notes line inside the compact rest-day card. Subtle
+  // muted text so it visually sits below the message but above the
+  // CTA — only renders when the user actually typed a note for the
+  // scheduled rest day. `fontStyle: 'italic'` is the cheapest way
+  // to make it read as an annotation rather than primary copy.
+  restDayCompactNotes: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginBottom: 6,
+  },
+  // Subtitle that appears under the unified "Today's plan" header
+  // when we're rendering the recommended-workouts variant. We dim
+  // it slightly and make it smaller than `sectionTitle` so it
+  // reads as a sub-header for the cards that follow rather than a
+  // brand-new section. The matching colour cue (cyan-tinted white)
+  // ties it back to the section's overall theme.
+  todaysPlanSubtitle: {
+    color: 'rgba(255, 255, 255, 0.75)',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 10,
+    marginTop: 2,
   },
   restDayIconContainer: {
     marginBottom: 12,
