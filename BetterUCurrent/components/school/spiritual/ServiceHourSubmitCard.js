@@ -1,14 +1,8 @@
 import React, { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-} from "react-native";
+import { View, Text, TextInput, StyleSheet } from "react-native";
 import { submitServiceHourLog, fetchMyTotalApprovedServiceHours } from "../../../lib/spiritualSchoolClient";
 import { spiritualTheme } from "./spiritualTheme";
+import { SpiritualPrimaryButton } from "./SpiritualPrimaryButton";
 
 /** Form to submit service hours pending staff approval. */
 export function ServiceHourSubmitCard({ orgId, orgReady = true }) {
@@ -74,7 +68,7 @@ export function ServiceHourSubmitCard({ orgId, orgReady = true }) {
       <TextInput
         style={[styles.single, locked && styles.fieldOff]}
         placeholder="Hours (e.g. 2.5)"
-        placeholderTextColor="#555"
+        placeholderTextColor={spiritualTheme.placeholder}
         keyboardType="decimal-pad"
         value={hoursTxt}
         onChangeText={setHoursTxt}
@@ -83,20 +77,19 @@ export function ServiceHourSubmitCard({ orgId, orgReady = true }) {
       <TextInput
         style={[styles.area, locked && styles.fieldOff]}
         placeholder="What did you do? Where? (helps staff verify)"
-        placeholderTextColor="#555"
+        placeholderTextColor={spiritualTheme.placeholder}
         value={desc}
         onChangeText={setDesc}
         multiline
         editable={!locked}
       />
-      <TouchableOpacity
-        style={[styles.btn, locked && styles.btnDisabled]}
+      <SpiritualPrimaryButton
+        label="Submit for approval"
+        disabledLabel="Submit (needs school link)"
         onPress={submit}
-        disabled={busy || locked}
-        accessibilityRole="button"
-      >
-        {busy ? <ActivityIndicator color="#000" /> : <Text style={styles.bt}>Submit for approval</Text>}
-      </TouchableOpacity>
+        disabled={locked}
+        loading={busy}
+      />
       {hint ? (
         <Text style={styles.note} accessibilityLiveRegion="polite">
           {hint}
@@ -118,13 +111,13 @@ const styles = StyleSheet.create({
   h2: { color: spiritualTheme.accent, fontWeight: "800", fontSize: 17, marginBottom: 6 },
   sm: { color: spiritualTheme.sub, fontSize: 13, marginBottom: 4, lineHeight: 19 },
   sm2: { color: spiritualTheme.subMuted, fontSize: 12, marginBottom: 10, lineHeight: 17 },
-  lockBanner: { color: "#d4b896", fontSize: 12, marginBottom: 10, fontWeight: "600" },
-  smHi: { color: "#fff", fontWeight: "800" },
+  lockBanner: { color: spiritualTheme.lockBanner, fontSize: 12, marginBottom: 10, fontWeight: "600" },
+  smHi: { color: spiritualTheme.text, fontWeight: "800" },
   single: {
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     borderRadius: 10,
-    color: "#fff",
+    color: spiritualTheme.text,
     padding: 12,
     marginBottom: 10,
     fontSize: 16,
@@ -136,20 +129,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.12)",
     borderRadius: 10,
-    color: "#fff",
+    color: spiritualTheme.text,
     padding: 12,
     marginBottom: 12,
     fontSize: 14,
     backgroundColor: "rgba(0,0,0,0.28)",
   },
   fieldOff: { opacity: 0.5 },
-  btn: {
-    paddingVertical: 14,
-    backgroundColor: spiritualTheme.accent,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  btnDisabled: { backgroundColor: "#3a4849" },
-  bt: { color: "#000", fontWeight: "800", fontSize: 15 },
-  note: { marginTop: 10, fontSize: 13, color: "#8a9aa8", lineHeight: 18 },
+  note: { marginTop: 10, fontSize: 13, color: spiritualTheme.sub, lineHeight: 18 },
 });

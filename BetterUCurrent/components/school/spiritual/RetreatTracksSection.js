@@ -1,10 +1,17 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { SectionEmptyHint } from "./sectionEmptyHint";
 import { spiritualTheme } from "./spiritualTheme";
 
 export function RetreatTracksSection({ tracksWithPrompts, loading }) {
   const [open, setOpen] = useState({});
+
+  useEffect(() => {
+    if (tracksWithPrompts?.length === 1) {
+      const id = tracksWithPrompts[0].track.id;
+      setOpen((s) => (s[id] ? s : { ...s, [id]: true }));
+    }
+  }, [tracksWithPrompts]);
 
   if (loading) {
     return (
@@ -85,9 +92,9 @@ const styles = StyleSheet.create({
     backgroundColor: spiritualTheme.cardBg,
   },
   cardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  trackTitle: { color: "#fff", fontWeight: "700", fontSize: 16, flex: 1 },
+  trackTitle: { color: spiritualTheme.text, fontWeight: "700", fontSize: 16, flex: 1 },
   chev: { color: spiritualTheme.accent, fontSize: 20, fontWeight: "300", marginLeft: 8 },
-  slug: { color: "#67727a", fontSize: 12, marginTop: 6 },
+  slug: { color: spiritualTheme.subMuted, fontSize: 12, marginTop: 6 },
   promptBox: { marginTop: 12, gap: 8 },
   promptRow: {
     paddingVertical: 10,
@@ -95,6 +102,6 @@ const styles = StyleSheet.create({
     borderTopColor: "rgba(255,255,255,0.08)",
   },
   kind: { color: "#c77dff", fontSize: 11, textTransform: "uppercase", marginBottom: 4, fontWeight: "700" },
-  body: { color: "#d2d8dc", fontSize: 14, lineHeight: 20 },
+  body: { color: spiritualTheme.sub, fontSize: 14, lineHeight: 20 },
   emptyPr: { color: spiritualTheme.subMuted, fontSize: 13, paddingVertical: 8 },
 });

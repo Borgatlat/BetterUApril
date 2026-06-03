@@ -1,20 +1,19 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import Slider from "@react-native-community/slider";
 import { insertSpiritualPulse } from "../../../lib/spiritualSchoolClient";
 import { spiritualTheme } from "./spiritualTheme";
+import { SpiritualPrimaryButton } from "./SpiritualPrimaryButton";
 
 /**
  * Ignatian-style pulse (consolation / desolation). Intensity 1–5 is rounded before Postgres insert.
- * @param {object} props
- * @param {string | null} props.orgId
- * @param {boolean} [props.orgReady=true] — false grays UI until school/org is linked
  */
 export function SpiritualPulseCard({ orgId, orgReady = true }) {
   const [path, setPath] = useState("consolation");
   const [intensity, setIntensity] = useState(3);
   const [busy, setBusy] = useState(false);
   const [lastOk, setLastOk] = useState(null);
+  const [isError, setIsError] = useState(false);
 
   const locked = !orgReady || !orgId;
 
@@ -22,14 +21,16 @@ export function SpiritualPulseCard({ orgId, orgReady = true }) {
     if (locked) return;
     setBusy(true);
     setLastOk(null);
+    setIsError(false);
     try {
       await insertSpiritualPulse({
         orgId,
         state: path,
         intensity: Math.round(intensity),
       });
-      setLastOk("Logged — gentle closeness beats harsh judgment.");
+      setLastOk("Saved. Be gentle with yourself — one check-in at a time.");
     } catch (e) {
+      setIsError(true);
       setLastOk(e?.message ?? String(e));
     } finally {
       setBusy(false);
@@ -37,10 +38,11 @@ export function SpiritualPulseCard({ orgId, orgReady = true }) {
   };
 
   return (
-    <View style={[styles.wrap, locked && styles.wrapLocked]} accessibilityElementsHidden={false}>
-      <Text style={styles.h2}>Ignatian discernment pulse</Text>
+    <View style={[styles.wrap, locked && styles.wrapLocked]}>
+      <Text style={styles.h2}>How&apos;s your spirit?</Text>
       <Text style={styles.muted}>
-        Tap what fits right now — consolation (drawn toward gratitude) vs desolation (heavy or withdrawn).
+        Ignatian check-in: are you feeling drawn toward God (consolation) or pulled away / heavy
+        (desolation)? There&apos;s no wrong answer — it helps you notice patterns.
       </Text>
       {locked ? (
         <Text style={styles.lockBanner}>School link needed to save this privately to your campus.</Text>
@@ -54,8 +56,8 @@ export function SpiritualPulseCard({ orgId, orgReady = true }) {
             accessibilityRole="button"
             accessibilityState={{ selected: path === "consolation" }}
           >
-            <Text style={styles.pathBtnTitle}>Spiritual consolation</Text>
-            <Text style={styles.pathSm}>Peace · Motivation · Connection</Text>
+            <Text style={styles.pathBtnTitle}>Consolation</Text>
+            <Text style={styles.pathSm}>Peace · gratitude · motivation</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.pathBtn, path === "desolation" && styles.pathActiveDes]}
@@ -63,8 +65,8 @@ export function SpiritualPulseCard({ orgId, orgReady = true }) {
             accessibilityRole="button"
             accessibilityState={{ selected: path === "desolation" }}
           >
-            <Text style={styles.pathBtnTitle}>Spiritual desolation</Text>
-            <Text style={styles.pathSm}>Anxiety · Heavy heart · Withdrawal</Text>
+            <Text style={styles.pathBtnTitle}>Desolation</Text>
+            <Text style={styles.pathSm}>Anxiety · heaviness · withdrawal</Text>
           </TouchableOpacity>
         </View>
 
@@ -81,22 +83,21 @@ export function SpiritualPulseCard({ orgId, orgReady = true }) {
           accessibilityLabel="Intensity slider from one to five"
         />
 
-        <TouchableOpacity
-          style={[styles.saveBtn, locked && styles.saveDisabled]}
-          onPress={save}
-          disabled={busy || locked}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: busy || locked }}
-        >
-          {busy ? (
-            <ActivityIndicator color="#000" />
-          ) : (
-            <Text style={styles.saveTxt}>{locked ? "Save (needs school link)" : "Save check-in"}</Text>
-          )}
-        </TouchableOpacity>
+        <View style={{ marginTop: 14 }}>
+          <SpiritualPrimaryButton
+            label="Save check-in"
+            disabledLabel="Save (needs school link)"
+            onPress={save}
+            disabled={locked}
+            loading={busy}
+          />
+        </View>
       </View>
       {lastOk ? (
-        <Text style={styles.note} accessibilityLiveRegion="polite">
+        <Text
+          style={[styles.note, isError ? styles.noteErr : styles.noteOk]}
+          accessibilityLiveRegion="polite"
+        >
           {lastOk}
         </Text>
       ) : null}
@@ -116,7 +117,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,179,71,0.2)",
   },
   lockBanner: {
-    color: "#d4b896",
+    color: spiritualTheme.lockBanner,
     fontSize: 12,
     marginBottom: 12,
     lineHeight: 17,
@@ -136,17 +137,10 @@ const styles = StyleSheet.create({
   },
   pathActive: { borderColor: spiritualTheme.accent, backgroundColor: "rgba(0,229,229,0.12)" },
   pathActiveDes: { borderColor: "#b388ff", backgroundColor: "rgba(179,136,255,0.1)" },
-  pathBtnTitle: { color: "#fff", fontWeight: "700", fontSize: 13 },
-  pathSm: { color: "#8a9399", fontSize: 11, marginTop: 4, lineHeight: 15 },
-  intLabel: { color: "#c5ccd1", marginBottom: 8, fontWeight: "600", fontSize: 13 },
-  saveBtn: {
-    marginTop: 14,
-    backgroundColor: spiritualTheme.accent,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  saveDisabled: { backgroundColor: "#3a4849" },
-  saveTxt: { color: "#000", fontWeight: "800", fontSize: 15 },
-  note: { color: "#7a8790", marginTop: 12, fontSize: 13, lineHeight: 18 },
+  pathBtnTitle: { color: spiritualTheme.text, fontWeight: "700", fontSize: 13 },
+  pathSm: { color: spiritualTheme.subMuted, fontSize: 11, marginTop: 4, lineHeight: 15 },
+  intLabel: { color: spiritualTheme.sub, marginBottom: 8, fontWeight: "600", fontSize: 13 },
+  note: { marginTop: 12, fontSize: 13, lineHeight: 18 },
+  noteOk: { color: spiritualTheme.success },
+  noteErr: { color: spiritualTheme.danger },
 });

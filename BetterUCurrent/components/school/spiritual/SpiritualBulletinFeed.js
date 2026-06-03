@@ -15,6 +15,7 @@ import {
 import { SectionEmptyHint } from "./sectionEmptyHint";
 import { spiritualTheme } from "./spiritualTheme";
 import { formatBulletinKind } from "./formatBulletinKind";
+import { SpiritualPrimaryButton } from "./SpiritualPrimaryButton";
 
 /** Student-facing bulletin; staff sees moderation controls via `canModerate`. */
 export function SpiritualBulletinFeed({ posts, readonly, onRefresh, canModerate }) {
@@ -62,7 +63,11 @@ export function SpiritualBulletinFeed({ posts, readonly, onRefresh, canModerate 
                 {canModerate && p.moderation_status === "pending" ? (
                   <View style={styles.row}>
                     <TouchableOpacity style={styles.ap} disabled={busyId === p.id} onPress={() => moderate(p.id, "approve")}>
-                      {busyId === p.id ? <ActivityIndicator /> : <Text style={styles.apT}>Approve</Text>}
+                      {busyId === p.id ? (
+                        <ActivityIndicator color={spiritualTheme.success} />
+                      ) : (
+                        <Text style={styles.apT}>Approve</Text>
+                      )}
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.rx} disabled={busyId === p.id} onPress={() => moderate(p.id, "reject")}>
                       <Text style={styles.rxT}>Reject</Text>
@@ -118,15 +123,19 @@ export function SpiritualBulletinComposer({ orgId, orgReady = true, onPosted }) 
       <TextInput
         style={[styles.ta, locked && styles.taOff]}
         placeholder="Your message…"
-        placeholderTextColor="#555"
+        placeholderTextColor={spiritualTheme.placeholder}
         value={body}
         onChangeText={setBody}
         multiline
         editable={!locked}
       />
-      <TouchableOpacity style={[styles.btn, locked && styles.btnOff]} onPress={post} disabled={busy || locked}>
-        {busy ? <ActivityIndicator color="#000" /> : <Text style={styles.btnT}>Submit for staff review</Text>}
-      </TouchableOpacity>
+      <SpiritualPrimaryButton
+        label="Submit for staff review"
+        disabledLabel="Submit (needs school link)"
+        onPress={post}
+        disabled={locked}
+        loading={busy}
+      />
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
     </View>
   );
@@ -143,9 +152,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.08)",
     backgroundColor: "rgba(255,255,255,0.03)",
   },
-  kind: { color: "#9ab", fontSize: 12, fontWeight: "700", letterSpacing: 0.3 },
-  body: { color: "#e4eaed", marginTop: 6, fontSize: 14, lineHeight: 20 },
-  date: { color: "#7a8a94", fontSize: 12, marginTop: 6 },
+  kind: { color: spiritualTheme.subMuted, fontSize: 12, fontWeight: "700", letterSpacing: 0.3 },
+  body: { color: spiritualTheme.sub, marginTop: 6, fontSize: 14, lineHeight: 20 },
+  date: { color: spiritualTheme.subMuted, fontSize: 12, marginTop: 6 },
   status: { color: "#c9a962", fontSize: 12, marginTop: 8 },
   row: { flexDirection: "row", gap: 10, marginTop: 10 },
   ap: {
@@ -164,11 +173,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   rxT: { color: "#f99", fontWeight: "700" },
-  compTitle: { color: "#e8eaec", fontWeight: "700", fontSize: 15 },
-  lock: { color: "#d4b896", fontSize: 12, fontWeight: "600", marginBottom: 8 },
+  compTitle: { color: spiritualTheme.text, fontWeight: "700", fontSize: 15 },
+  lock: { color: spiritualTheme.lockBanner, fontSize: 12, fontWeight: "600", marginBottom: 8 },
   dim: { opacity: 0.55 },
   swRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  swLabel: { flex: 1, color: "#9aa", fontSize: 13 },
+  swLabel: { flex: 1, color: spiritualTheme.sub, fontSize: 13 },
   ta: {
     minHeight: 80,
     textAlignVertical: "top",
@@ -179,14 +188,6 @@ const styles = StyleSheet.create({
     color: "#fff",
     backgroundColor: "rgba(0,0,0,0.25)",
   },
-  btn: {
-    paddingVertical: 14,
-    backgroundColor: spiritualTheme.accent,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  btnOff: { backgroundColor: "#3a4849" },
-  btnT: { color: "#000", fontWeight: "800", fontSize: 15 },
   taOff: { opacity: 0.55 },
-  msg: { fontSize: 13, color: "#8a9aa8", lineHeight: 18 },
+  msg: { fontSize: 13, color: spiritualTheme.sub, lineHeight: 18 },
 });

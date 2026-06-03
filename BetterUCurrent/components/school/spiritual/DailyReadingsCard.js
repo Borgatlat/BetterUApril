@@ -12,7 +12,7 @@ import { buildUsccbDailyReadingsUrl } from "../../../lib/spiritualDefaults";
 import { spiritualTheme } from "./spiritualTheme";
 
 /** Opens USCCB Mass readings in the system browser (canonical daily lectionary). */
-export function DailyReadingsCard() {
+export function DailyReadingsCard({ compact = false }) {
   const url = buildUsccbDailyReadingsUrl();
 
   const onOpen = async () => {
@@ -26,24 +26,28 @@ export function DailyReadingsCard() {
 
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, compact && styles.cardCompact]}
       onPress={onOpen}
       activeOpacity={0.88}
       accessibilityRole="button"
       accessibilityHint="Opens readings in your browser"
     >
       <View style={styles.row}>
-        <View style={styles.iconWrap}>
-          <Ionicons name="book-outline" size={24} color="#d4b56a" />
+        <View style={[styles.iconWrap, compact && styles.iconWrapCompact]}>
+          <Ionicons name="book-outline" size={compact ? 20 : 24} color="#d4b56a" />
         </View>
         <View style={styles.textCol}>
-          <Text style={styles.title}>Daily Mass readings</Text>
-          <Text style={styles.sub}>USCCB · today’s Mass texts (opens outside the app)</Text>
-          <Text style={styles.meta} numberOfLines={1}>
-            {url.replace("https://", "")}
+          <Text style={[styles.title, compact && styles.titleCompact]}>Mass readings</Text>
+          <Text style={[styles.sub, compact && styles.subCompact]}>
+            {compact ? "USCCB · today" : "USCCB · today’s Mass texts (opens in browser)"}
           </Text>
+          {!compact ? (
+            <Text style={styles.meta} numberOfLines={1}>
+              {url.replace("https://", "")}
+            </Text>
+          ) : null}
         </View>
-        <Ionicons name="open-outline" size={22} color="#8a9196" />
+        <Ionicons name="open-outline" size={compact ? 18 : 22} color={spiritualTheme.subMuted} />
       </View>
     </TouchableOpacity>
   );
@@ -56,8 +60,13 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: "rgba(212,181,106,0.28)",
+    flex: 1,
   },
-  row: { flexDirection: "row", alignItems: "center", gap: 12 },
+  cardCompact: {
+    padding: 12,
+    minHeight: 100,
+  },
+  row: { flexDirection: "row", alignItems: "center", gap: 10 },
   iconWrap: {
     width: 44,
     height: 44,
@@ -66,8 +75,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  iconWrapCompact: { width: 36, height: 36, borderRadius: 10 },
   textCol: { flex: 1 },
-  title: { color: "#fff", fontWeight: "800", fontSize: 17 },
-  sub: { color: "#c9bc98", fontSize: 13, marginTop: 4, lineHeight: 19 },
-  meta: { color: spiritualTheme.subMuted, fontSize: 11, marginTop: 8 },
+  title: { color: spiritualTheme.text, fontWeight: "800", fontSize: 17 },
+  titleCompact: { fontSize: 15 },
+  sub: { color: spiritualTheme.sub, fontSize: 13, marginTop: 4, lineHeight: 18 },
+  subCompact: { fontSize: 11, lineHeight: 15 },
+  meta: { color: spiritualTheme.subMuted, fontSize: 11, marginTop: 6 },
 });

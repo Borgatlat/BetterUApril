@@ -1,18 +1,11 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TextInput,
-  Switch,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-} from "react-native";
+import { View, Text, TextInput, Switch, StyleSheet } from "react-native";
 import { insertPrayerIntention } from "../../../lib/spiritualSchoolClient";
 import { spiritualTheme } from "./spiritualTheme";
+import { SpiritualPrimaryButton } from "./SpiritualPrimaryButton";
 
 /** Private journaling + optional moderated community prayer request. */
-export function IntentionsBoardCard({ orgId, orgReady = true }) {
+export function IntentionsBoardCard({ orgId, orgReady = true, onSharedForPrayerWall }) {
   const [body, setBody] = useState("");
   const [shareAnon, setShareAnon] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -38,12 +31,16 @@ export function IntentionsBoardCard({ orgId, orgReady = true }) {
         shareAnonymous: shareAnon,
       });
       setBody("");
+      const wasShared = shareAnon;
       setShareAnon(false);
-      setHint(
-        shareAnon
-          ? "Submitted. Campus ministers review before anything appears publicly."
-          : "Saved privately for you.",
-      );
+      if (wasShared) {
+        setHint(
+          "Submitted for review. Campus ministers approve before anything appears on the prayer wall.",
+        );
+        onSharedForPrayerWall?.();
+      } else {
+        setHint("Saved privately for you.");
+      }
     } catch (e) {
       setHint(e?.message ?? String(e));
     } finally {
@@ -54,19 +51,23 @@ export function IntentionsBoardCard({ orgId, orgReady = true }) {
   return (
     <View style={[styles.wrap, locked && styles.wrapMuted]}>
       <Text style={styles.h2}>Intentions board</Text>
-      <Text style={styles.lead}>Only you see this unless you enable the anonymous feed switch.</Text>
-      {locked ? <Text style={styles.lockBanner}>Saving needs your school organization on file.</Text> : null}
+      <Text style={styles.lead}>Only you see this unless you turn on sharing below.</Text>
+      {locked ? (
+        <Text style={styles.lockBanner}>Saving needs your school organization on file.</Text>
+      ) : null}
       <TextInput
         style={[styles.input, locked && styles.inputDisabled]}
         placeholder="Type a prayer or intention..."
-        placeholderTextColor="#586066"
+        placeholderTextColor={spiritualTheme.placeholder}
         value={body}
         onChangeText={setBody}
         multiline
         editable={!locked}
       />
       <View style={[styles.switchRow, locked && styles.dimmed]} pointerEvents={locked ? "none" : "auto"}>
-        <Text style={styles.switchLabel}>Share anonymously with the school prayer feed (reviewed by staff)</Text>
+        <Text style={styles.switchLabel}>
+          Share anonymously with campus ministers (not on the prayer wall until approved)
+        </Text>
         <Switch
           trackColor={{ false: "#444", true: "#1a8066" }}
           thumbColor="#fff"
@@ -74,14 +75,13 @@ export function IntentionsBoardCard({ orgId, orgReady = true }) {
           onValueChange={setShareAnon}
         />
       </View>
-      <TouchableOpacity
-        style={[styles.btn, locked && styles.btnDisabled]}
+      <SpiritualPrimaryButton
+        label="Save intention"
+        disabledLabel="Save (needs school link)"
         onPress={submit}
-        disabled={busy}
-        accessibilityRole="button"
-      >
-        {busy ? <ActivityIndicator color="#000" /> : <Text style={styles.btnTxt}>Save intention</Text>}
-      </TouchableOpacity>
+        disabled={locked}
+        loading={busy}
+      />
       {hint ? (
         <Text style={styles.hint} accessibilityLiveRegion="polite">
           {hint}
@@ -100,11 +100,17 @@ const styles = StyleSheet.create({
     backgroundColor: spiritualTheme.cardBg,
   },
   wrapMuted: { borderColor: "rgba(255,179,71,0.18)" },
-  lockBanner: { color: "#d4b896", fontSize: 12, marginBottom: 10, fontWeight: "600", lineHeight: 17 },
+  lockBanner: {
+    color: spiritualTheme.lockBanner,
+    fontSize: 12,
+    marginBottom: 10,
+    fontWeight: "600",
+    lineHeight: 17,
+  },
   h2: { color: spiritualTheme.accent, fontWeight: "800", fontSize: 17, marginBottom: 6 },
   lead: { color: spiritualTheme.sub, fontSize: 13, lineHeight: 19, marginBottom: 10 },
   input: {
-    color: "#e8eef1",
+    color: spiritualTheme.text,
     minHeight: 104,
     textAlignVertical: "top",
     borderWidth: 1,
@@ -118,14 +124,6 @@ const styles = StyleSheet.create({
   inputDisabled: { opacity: 0.55 },
   dimmed: { opacity: 0.55 },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 },
-  switchLabel: { flex: 1, color: "#b8c0c5", fontSize: 13, lineHeight: 18 },
-  btn: {
-    backgroundColor: spiritualTheme.accent,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  btnDisabled: { backgroundColor: "#3a4849" },
-  btnTxt: { color: "#000", fontWeight: "800", fontSize: 15 },
-  hint: { marginTop: 10, fontSize: 13, color: "#8a9aa8", lineHeight: 18 },
+  switchLabel: { flex: 1, color: spiritualTheme.sub, fontSize: 13, lineHeight: 18 },
+  hint: { marginTop: 10, fontSize: 13, color: spiritualTheme.sub, lineHeight: 18 },
 });

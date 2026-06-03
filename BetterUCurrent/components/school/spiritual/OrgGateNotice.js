@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { spiritualTheme } from "./spiritualTheme";
 
 /**
  * Shown when a student session has no org_id yet (profile sync lag or provisioning gap).
@@ -12,7 +13,7 @@ export function OrgGateNotice({ onRetry }) {
       <View style={styles.copy}>
         <Text style={styles.title}>School link needed</Text>
         <Text style={styles.body}>
-          Your account is marked as a student but we don’t see an organization attached yet.
+          Your account is marked as a student but we don&apos;t see an organization attached yet.
           Spiritual check-ins that save to your school need that link — try refreshing after a
           moment, or sign out and sign back in with your school email.
         </Text>
@@ -40,7 +41,14 @@ const styles = StyleSheet.create({
   },
   copy: { flex: 1 },
   title: { color: "#ffc46b", fontWeight: "800", fontSize: 15, marginBottom: 6 },
-  body: { color: "#d4c4b0", fontSize: 13, lineHeight: 19 },
-  btn: { marginTop: 10, alignSelf: "flex-start", paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, backgroundColor: "rgba(255,255,255,0.1)" },
-  btnTxt: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  body: { color: spiritualTheme.sub, fontSize: 13, lineHeight: 19 },
+  btn: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
+  btnTxt: { color: spiritualTheme.text, fontWeight: "700", fontSize: 13 },
 });

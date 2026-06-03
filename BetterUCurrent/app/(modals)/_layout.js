@@ -34,6 +34,13 @@ export default function ModalLayout() {
           animation: 'slide_from_bottom',
         }}
       />
+      <Stack.Screen
+        name="emmaus-request"
+        options={{
+          presentation: 'modal',
+          animation: 'slide_from_bottom',
+        }}
+      />
     </Stack>
   );
 } 

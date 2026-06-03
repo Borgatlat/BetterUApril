@@ -26,6 +26,7 @@ export function useAuthSession() {
     profile: normalized,
     accountType: normalized?.account_type ?? "public",
     orgId: normalized?.org_id ?? null,
+    isPeerMentor: Boolean(normalized?.is_peer_mentor),
     workspace,
     isLoading,
     ...rest,
