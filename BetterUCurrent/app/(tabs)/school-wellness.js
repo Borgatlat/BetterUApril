@@ -1,41 +1,280 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+
   View,
+
   Text,
+
   StyleSheet,
+
   ScrollView,
+
   TouchableOpacity,
-  Linking,
+
   RefreshControl,
+
   ActivityIndicator,
+
 } from "react-native";
-import { useRouter } from "expo-router";
+
+import { useRouter, useFocusEffect } from "expo-router";
+
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+
 import { StudentDailyPulseCard } from "../../components/school/StudentDailyPulseCard";
+
+import { SchoolWellnessHeader } from "../../components/school/wellness/SchoolWellnessHeader";
+
+import { SchoolWellnessSection } from "../../components/school/wellness/SchoolWellnessSection";
+
+import { PulseStatusBanner } from "../../components/school/wellness/PulseStatusBanner";
+
+import { SchoolWellnessQuickRow } from "../../components/school/wellness/SchoolWellnessQuickRow";
+
+import {
+
+  SchoolWellnessHubGrid,
+
+  SchoolWellnessHubTile,
+
+} from "../../components/school/wellness/SchoolWellnessHubTile";
+
+import { PrivacyExpandable } from "../../components/school/wellness/PrivacyExpandable";
+
+import { CrisisSupportCard } from "../../components/school/wellness/CrisisSupportCard";
+import { EmmausStudentRequests } from "../../components/emmaus/EmmausStudentRequests";
+
+import { schoolWellnessTheme as T } from "../../components/school/schoolWellnessTheme";
+
 import { useAuthSession } from "../../hooks/useAuthSession";
+
 import { useAuth } from "../../context/AuthContext";
 
-const ACCENT = "#00e5e5";
+import {
+  fetchSchoolDisplayName,
+  formatOrgIdAsDisplayName,
+} from "../../lib/schoolOrgDisplay";
 
-/**
- * Institutional “home” for students — pulse, quick links, calm resources.
- */
+import { fetchTodayPulse } from "../../lib/schoolWellnessClient";
+import { fetchGradAtGradSummary } from "../../lib/gradAtGradClient";
+import {
+  fetchPendingAssignmentForStudent,
+  subscribeToStudentAssignments,
+} from "../../lib/administrativeAssignmentsClient";
+import { GradAtGradPillarChart } from "../../components/school/GradAtGradPillarChart";
+import { ReflectiveAssignmentCard } from "../../components/school/wellness/ReflectiveAssignmentCard";
+
+
+
 export default function SchoolWellnessHome() {
+
   const router = useRouter();
+
   const insets = useSafeAreaInsets();
-  const { orgId, workspace } = useAuthSession();
-  const { refetchProfile } = useAuth();
+
+  const { workspace, isPeerMentor, orgId } = useAuthSession();
+
+  const { refetchProfile, user } = useAuth();
+
+  const pulseRef = useRef(null);
+
   const [refreshing, setRefreshing] = useState(false);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await refetchProfile?.();
-    } finally {
-      setRefreshing(false);
+  const [pulseLoading, setPulseLoading] = useState(true);
+
+  const [todayPulse, setTodayPulse] = useState(null);
+
+  const [pulseModalOpen, setPulseModalOpen] = useState(false);
+
+  const [loadErr, setLoadErr] = useState(null);
+
+  const [pendingAssignment, setPendingAssignment] = useState(null);
+
+  const [gradSummary, setGradSummary] = useState([]);
+
+  const [gradLoading, setGradLoading] = useState(true);
+
+  const [schoolName, setSchoolName] = useState(() => formatOrgIdAsDisplayName(orgId));
+
+
+
+  useEffect(() => {
+    if (!orgId) {
+      setSchoolName("Your school");
+      return;
     }
-  }, [refetchProfile]);
+    let cancelled = false;
+    fetchSchoolDisplayName(orgId).then((name) => {
+      if (!cancelled) setSchoolName(name);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
+
+  const loadPulse = useCallback(async () => {
+
+    if (workspace !== "student") {
+
+      setPulseLoading(false);
+
+      return;
+
+    }
+
+    setLoadErr(null);
+
+    try {
+
+      const row = await fetchTodayPulse();
+
+      setTodayPulse(row);
+
+    } catch (e) {
+
+      setLoadErr(e?.message ?? String(e));
+
+    } finally {
+
+      setPulseLoading(false);
+
+    }
+
+  }, [workspace]);
+
+
+
+  const loadAssignment = useCallback(async () => {
+
+    if (workspace !== "student") return;
+
+    try {
+
+      const row = await fetchPendingAssignmentForStudent();
+
+      setPendingAssignment(row);
+
+    } catch (e) {
+
+      if (__DEV__) console.warn("[school-wellness] assignment load:", e);
+
+    }
+
+  }, [workspace]);
+
+
+
+  const loadGradAtGrad = useCallback(async () => {
+
+    if (workspace !== "student") {
+
+      setGradLoading(false);
+
+      return;
+
+    }
+
+    try {
+
+      const rows = await fetchGradAtGradSummary();
+
+      setGradSummary(rows);
+
+    } catch (e) {
+
+      if (__DEV__) console.warn("[school-wellness] grad at grad load:", e);
+
+    } finally {
+
+      setGradLoading(false);
+
+    }
+
+  }, [workspace]);
+
+
+
+  useFocusEffect(
+
+    useCallback(() => {
+
+      setPulseLoading(true);
+
+      setGradLoading(true);
+
+      loadPulse();
+
+      loadAssignment();
+
+      loadGradAtGrad();
+
+    }, [loadPulse, loadAssignment, loadGradAtGrad]),
+
+  );
+
+
+
+  useEffect(() => {
+
+    if (!user?.id || workspace !== "student") return undefined;
+
+    const sub = subscribeToStudentAssignments(user.id, () => {
+
+      loadAssignment();
+
+    });
+
+    return () => {
+
+      sub.unsubscribe().catch(() => {});
+
+    };
+
+  }, [user?.id, workspace, loadAssignment]);
+
+
+
+  const onRefresh = useCallback(async () => {
+
+    setRefreshing(true);
+
+    try {
+
+      await refetchProfile?.();
+
+      await loadPulse();
+
+      await loadAssignment();
+
+      await loadGradAtGrad();
+
+    } finally {
+
+      setRefreshing(false);
+
+    }
+
+  }, [refetchProfile, loadPulse, loadAssignment, loadGradAtGrad]);
+
+
+
+  const onAssignmentSubmitted = useCallback(() => {
+
+    setPendingAssignment(null);
+
+  }, []);
+
+
+
+  const onPulseSaved = useCallback((saved) => {
+
+    setTodayPulse(saved ?? null);
+
+    loadPulse();
+
+  }, [loadPulse]);
+
+
 
   // SAFETY NET: if a non-student lands here (e.g. via stale router
   // history or a bad deep link), silently redirect to /home instead
@@ -58,210 +297,297 @@ export default function SchoolWellnessHome() {
     return <View style={styles.container} />;
   }
 
+
+
   return (
+
     <ScrollView
+
       style={styles.container}
+
       contentContainerStyle={[
+
         styles.content,
+
         { paddingTop: Math.max(insets.top, 16) + 4, paddingBottom: insets.bottom + 96 },
+
       ]}
+
       refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} colors={[ACCENT]} />
+
+        <RefreshControl
+
+          refreshing={refreshing}
+
+          onRefresh={onRefresh}
+
+          tintColor={T.accent}
+
+          colors={[T.accent]}
+
+        />
+
       }
+
       keyboardShouldPersistTaps="handled"
+
+      showsVerticalScrollIndicator={false}
+
     >
-      <Text style={styles.h1}>BetterU · School wellness</Text>
-      <Text style={styles.tagline}>Cura personalis — caring for mind, body, and spirit.</Text>
-      <Text style={styles.sub}>
-        Private pulse check-ins and calm pathways. Strength training and classmates live on Home; this hub stays restorative.
-      </Text>
 
-      <View style={styles.trustStrip}>
-        <Ionicons name="shield-checkmark-outline" size={18} color={ACCENT} style={{ marginRight: 10 }} />
-        <Text style={styles.trustStripTxt}>
-          Pulses sent with “anonymize for school dashboard” never show your name in leadership charts — counselors only see identity if you open a formal support request yourself.
-        </Text>
-      </View>
+      <SchoolWellnessHeader schoolName={schoolName} />
 
-      <StudentDailyPulseCard />
+      {loadErr ? (
 
-      <TouchableOpacity
-        style={styles.navCard}
-        onPress={() => router.push("/(tabs)/spiritual")}
-        activeOpacity={0.88}
-        accessibilityRole="button"
-        accessibilityLabel="Open spiritual life dashboard"
-      >
-        <View style={styles.navIcon}>
-          <Ionicons name="compass-outline" size={22} color={ACCENT} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.navTitle}>Spiritual life</Text>
-          <Text style={styles.navSub}>Scripture, discernment, prayer wall, bulletin, campus schedule</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color={ACCENT} />
-      </TouchableOpacity>
+        <TouchableOpacity onPress={loadPulse} style={styles.errRow} accessibilityRole="button">
 
-      <TouchableOpacity
-        style={styles.navCardSecondary}
-        onPress={() => router.push("/(tabs)/mental")}
-        activeOpacity={0.88}
-        accessibilityRole="button"
-        accessibilityLabel="Open mental wellness tab"
-      >
-        <View style={[styles.navIcon, { backgroundColor: "rgba(139,92,246,0.15)" }]}>
-          <Ionicons name="leaf-outline" size={22} color="#c4a8ff" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.navTitle}>Mental wellness</Text>
-          <Text style={styles.navSub}>Sessions, mood tools, and guided exercises</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={22} color="#c4a8ff" />
-      </TouchableOpacity>
+          <Text style={styles.errText}>{loadErr}</Text>
 
+          <Text style={styles.errRetry}>Tap to retry</Text>
 
-      <View style={styles.growthCard}>
-        <View style={styles.growthIcon}>
-          <Ionicons name="rose-outline" size={22} color="#f0abfc" />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.growthTitle}>Whole-person rhythms</Text>
-          <Text style={styles.growthBody}>
-            Use <Text style={styles.boldInline}>Spiritual life</Text> for weekly Live the Fourth, prayer, retreats, & chapel bulletin;
-            pair with <Text style={styles.boldInline}>Mental wellness</Text> exercises for stress resets. Accountability friends & training stay on Home.
-          </Text>
-        </View>
-      </View>
+        </TouchableOpacity>
 
-      <View style={styles.card}>
-        <Text style={styles.h2}>Mental health resources</Text>
-        <ResourceRow
-          icon="call-outline"
-          label="988 Suicide & Crisis Lifeline"
-          onPress={() => Linking.openURL("tel:988")}
-        />
-        <ResourceRow
-          icon="globe-outline"
-          label="Crisis Text Line (text HOME to 741741)"
-          onPress={() => Linking.openURL("https://www.crisistextline.org/")}
-        />
-      </View>
-
-      {refreshing ? (
-        <View style={styles.inlineLoader}>
-          <ActivityIndicator size="small" color={ACCENT} />
-        </View>
       ) : null}
 
-      <Text style={styles.footer}>{orgId ? `School: ${orgId}` : "School: not linked"}</Text>
+
+
+      <SchoolWellnessSection title="Today" subtitle="Check in · focus · support">
+
+        {pendingAssignment ? (
+
+          <ReflectiveAssignmentCard
+
+            assignment={pendingAssignment}
+
+            onSubmitted={onAssignmentSubmitted}
+
+          />
+
+        ) : null}
+
+        <PulseStatusBanner todayPulse={todayPulse} loading={pulseLoading && !refreshing} />
+
+        <SchoolWellnessQuickRow
+          onLogPulse={() => setPulseModalOpen(true)}
+          onFocusLock={() => router.push("/focus-lock")}
+          onCounselor={() => pulseRef.current?.requestCounselor?.()}
+          onAccountability={() => router.push("/accountability")}
+          onEmmaus={() => router.push("/(modals)/emmaus-request")}
+        />
+
+        <StudentDailyPulseCard
+
+          ref={pulseRef}
+
+          todayPulse={todayPulse}
+
+          modalOpen={pulseModalOpen}
+
+          onModalOpenChange={setPulseModalOpen}
+
+          onPulseSaved={onPulseSaved}
+
+          compact
+
+        />
+
+      </SchoolWellnessSection>
+
+
+
+      <SchoolWellnessSection title="Grad at Grad" subtitle="Profile of the Graduate · five pillars">
+
+        <GradAtGradPillarChart summaryRows={gradSummary} loading={gradLoading && !refreshing} />
+
+      </SchoolWellnessSection>
+
+
+
+      <SchoolWellnessSection title={schoolName} subtitle="Fitness, faith, mind & service">
+
+        <SchoolWellnessHubGrid>
+
+          <SchoolWellnessHubTile
+
+            icon="home-outline"
+
+            title="Fitness & community"
+
+            hint="Workouts & friends"
+
+            iconColor={T.accent}
+
+            iconBg={T.accentDim}
+
+            onPress={() => router.replace("/(tabs)/home")}
+
+          />
+
+          <SchoolWellnessHubTile
+
+            icon="compass-outline"
+
+            title="Spiritual life"
+
+            hint="Examen · Live the Fourth"
+
+            iconColor={T.accent}
+
+            iconBg={T.accentDim}
+
+            onPress={() => router.push("/(tabs)/spiritual")}
+
+          />
+
+          <SchoolWellnessHubTile
+
+            icon="leaf-outline"
+
+            title="Mental sessions"
+
+            hint="Exercises & Eleos"
+
+            iconColor={T.purple}
+
+            iconBg={T.purpleDim}
+
+            onPress={() => router.push("/(tabs)/mental")}
+
+          />
+
+          <SchoolWellnessHubTile
+
+            icon="heart-circle-outline"
+
+            title="Volunteer"
+
+            hint="Service hours"
+
+            iconColor={T.accent}
+
+            iconBg={T.accentDim}
+
+            onPress={() => router.push("/volunteer-oppurtunities")}
+
+          />
+
+          <SchoolWellnessHubTile
+
+            icon="people-outline"
+
+            title="Accountability"
+
+            hint="Partners & check-ins"
+
+            iconColor={T.gold}
+
+            iconBg={T.goldDim}
+
+            onPress={() => router.push("/accountability")}
+
+          />
+
+          <SchoolWellnessHubTile
+
+            icon="walk-outline"
+
+            title="Emmaus Companion"
+
+            hint="Raise your hand · peer support"
+
+            iconColor="#8ab4ff"
+
+            iconBg="rgba(138, 180, 255, 0.12)"
+
+            onPress={() => router.push("/(modals)/emmaus-request")}
+
+          />
+
+        </SchoolWellnessHubGrid>
+
+      </SchoolWellnessSection>
+
+
+
+      <SchoolWellnessSection title="Companion care" subtitle="Peer mentors & pastoral connection">
+
+        <EmmausStudentRequests />
+
+        {isPeerMentor ? (
+          <TouchableOpacity
+            style={styles.mentorLink}
+            onPress={() => router.push("/(school)/emmaus")}
+            activeOpacity={0.88}
+            accessibilityRole="button"
+          >
+            <Text style={styles.mentorLinkTxt}>Open Emmaus mentor triage board</Text>
+          </TouchableOpacity>
+        ) : null}
+
+      </SchoolWellnessSection>
+
+
+
+      <SchoolWellnessSection title="Support" subtitle="Privacy & crisis resources" last>
+
+        <PrivacyExpandable />
+
+        <CrisisSupportCard />
+
+      </SchoolWellnessSection>
+
+
+
+      {refreshing ? (
+
+        <View style={styles.inlineLoader}>
+
+          <ActivityIndicator size="small" color={T.accent} />
+
+        </View>
+
+      ) : null}
+
     </ScrollView>
+
   );
+
 }
 
-function ResourceRow({ icon, label, onPress }) {
-  return (
-    <TouchableOpacity style={styles.resource} onPress={onPress} accessibilityRole="button">
-      <View style={{ marginRight: 12 }}>
-        <Ionicons name={icon} size={22} color={ACCENT} />
-      </View>
-      <Text style={styles.resourceText}>{label}</Text>
-      <Ionicons name="chevron-forward" size={18} color="#555" />
-    </TouchableOpacity>
-  );
-}
+
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#050708" },
+
+  container: { flex: 1, backgroundColor: T.screenBg },
+
   content: { paddingHorizontal: 20 },
-  centered: { flex: 1, backgroundColor: "#050708", justifyContent: "center", padding: 24 },
-  h1: { color: "#fff", fontSize: 26, fontWeight: "800", marginBottom: 6, letterSpacing: -0.3 },
-  tagline: { color: ACCENT, fontSize: 14, fontWeight: "700", marginBottom: 8, letterSpacing: 0.2 },
-  sub: { color: "#9aa4ad", fontSize: 15, lineHeight: 22, marginBottom: 14 },
-  trustStrip: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    gap: 4,
-  },
-  trustStripTxt: { flex: 1, color: "#a8b8bc", fontSize: 12, lineHeight: 17 },
-  growthCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-    backgroundColor: "rgba(240,171,252,0.06)",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "rgba(232,159,246,0.22)",
-  },
-  growthIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "rgba(240,171,252,0.12)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  growthTitle: { color: "#f5dafb", fontWeight: "800", fontSize: 16, marginBottom: 8 },
-  growthBody: { color: "#cbc2d6", fontSize: 13, lineHeight: 19 },
-  boldInline: { fontWeight: "800", color: "#fff" },
-  /** Section titles inside bordered cards — keeps hierarchy under the main page `h1`. */
-  h2: { color: ACCENT, fontSize: 16, fontWeight: "700", marginBottom: 10 },
-  card: {
-    backgroundColor: "rgba(255,255,255,0.04)",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  navCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(0,229,229,0.07)",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: "rgba(0,229,229,0.28)",
-  },
-  navCardSecondary: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(139,92,246,0.06)",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "rgba(139,92,246,0.22)",
-  },
-  navIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "rgba(0,229,229,0.14)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-  navTitle: { color: "#fff", fontWeight: "800", fontSize: 16 },
-  navSub: { color: "#88929a", fontSize: 13, lineHeight: 18, marginTop: 4 },
-  muted: { color: "#7a8790", fontSize: 13, lineHeight: 19 },
-  resource: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 14,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.06)",
-  },
-  resourceText: { color: "#e4eaed", flex: 1, fontSize: 15 },
-  link: { color: ACCENT, marginTop: 14, fontWeight: "700", textAlign: "center" },
+
+  centered: { flex: 1, backgroundColor: T.screenBg, justifyContent: "center", padding: 24 },
+
+  muted: { color: T.sub, fontSize: 14, textAlign: "center" },
+
+  link: { color: T.accent, marginTop: 14, fontWeight: "700", textAlign: "center" },
+
+  errRow: { marginBottom: 12 },
+
+  errText: { color: T.danger, fontSize: 13 },
+
+  errRetry: { color: T.accent, fontSize: 12, marginTop: 4, fontWeight: "600" },
+
   inlineLoader: { alignItems: "center", marginVertical: 8 },
-  footer: { color: "#3d454c", fontSize: 11, marginTop: 12, textAlign: "center" },
+
+  mentorLink: {
+    marginTop: 10,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: "rgba(138, 180, 255, 0.1)",
+    borderWidth: 1,
+    borderColor: "rgba(138, 180, 255, 0.3)",
+    alignItems: "center",
+  },
+
+  mentorLinkTxt: { color: "#8ab4ff", fontWeight: "800", fontSize: 14 },
+
 });
+
+

@@ -164,3 +164,161 @@ export function getTrackingWaterLiters(row) {
   const ml = Number(row?.water_consumed_ml) || 0;
   return ml / 1000;
 }
+
+/** Shared card surface — matches Home `actionCard` / `seeActivityCard` neutrals. */
+export const ANALYTICS_CARD = {
+  backgroundColor: 'rgba(255,255,255,0.04)',
+  borderRadius: 16,
+  borderWidth: 1,
+  borderColor: 'rgba(255,255,255,0.06)',
+};
+
+export function parseWorkoutExercisesField(raw) {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const v = JSON.parse(raw);
+      return Array.isArray(v) ? v : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Max weight per exercise per workout → first vs latest for progression UI.
+ * @param {Array<{ completed_at: string, exercises: unknown }>} workouts
+ * @param {number} [limit=8]
+ */
+export function calculateWeightProgressionFromWorkouts(workouts = [], limit = 8) {
+  const exerciseData = {};
+
+  workouts.forEach((workout) => {
+    const exercises = parseWorkoutExercisesField(workout.exercises);
+    if (!exercises?.length) return;
+    const workoutDate = new Date(workout.completed_at);
+    if (Number.isNaN(workoutDate.getTime())) return;
+
+    exercises.forEach((exercise) => {
+      const exerciseName = exercise.name || exercise.exerciseName || exercise.title;
+      if (!exerciseName || !exercise.sets?.length) return;
+
+      const completedSets = exercise.sets.filter((set) => {
+        if (!set) return false;
+        const weight = parseFloat(set.weight) || 0;
+        if (weight <= 0) return false;
+        const repsRaw = set.reps;
+        const reps =
+          typeof repsRaw === 'string' && repsRaw.includes('-')
+            ? parseInt(repsRaw.split('-')[0], 10) || 0
+            : parseInt(repsRaw, 10) || 0;
+        if (set.completed === true) return true;
+        return reps > 0;
+      });
+      if (completedSets.length === 0) return;
+
+      const maxWeight = Math.max(...completedSets.map((set) => parseFloat(set.weight) || 0));
+      if (maxWeight <= 0) return;
+
+      if (!exerciseData[exerciseName]) {
+        exerciseData[exerciseName] = {
+          firstWeight: maxWeight,
+          firstDate: workoutDate,
+          latestWeight: maxWeight,
+          latestDate: workoutDate,
+          allWeights: [],
+          workoutCount: 0,
+        };
+      }
+
+      if (workoutDate > exerciseData[exerciseName].latestDate) {
+        exerciseData[exerciseName].latestWeight = maxWeight;
+        exerciseData[exerciseName].latestDate = workoutDate;
+      } else if (workoutDate.getTime() === exerciseData[exerciseName].latestDate.getTime()) {
+        if (maxWeight > exerciseData[exerciseName].latestWeight) {
+          exerciseData[exerciseName].latestWeight = maxWeight;
+        }
+      }
+
+      exerciseData[exerciseName].allWeights.push({
+        weight: maxWeight,
+        date: workoutDate,
+        volume:
+          maxWeight *
+          completedSets
+            .filter((set) => parseFloat(set.weight) === maxWeight)
+            .reduce((sum, set) => sum + (parseInt(set.reps, 10) || 0), 0),
+      });
+      exerciseData[exerciseName].workoutCount += 1;
+    });
+  });
+
+  return Object.entries(exerciseData)
+    .map(([name, data]) => {
+      const weightIncrease = data.latestWeight - data.firstWeight;
+      const percentIncrease =
+        data.firstWeight > 0 ? parseFloat(((weightIncrease / data.firstWeight) * 100).toFixed(1)) : 0;
+      const daysDiff = (data.latestDate - data.firstDate) / (1000 * 60 * 60 * 24);
+      const weeksDiff = daysDiff / 7;
+      const weeklyIncrease = weeksDiff > 0 ? parseFloat((weightIncrease / weeksDiff).toFixed(1)) : 0;
+
+      return {
+        name,
+        firstWeight: data.firstWeight,
+        latestWeight: data.latestWeight,
+        weightIncrease,
+        percentIncrease,
+        weeklyIncrease,
+        workoutCount: data.workoutCount,
+        allWeights: data.allWeights.sort((a, b) => a.date - b.date),
+      };
+    })
+    .filter((ex) => ex.workoutCount >= 1)
+    .sort((a, b) => {
+      if (a.workoutCount >= 2 && b.workoutCount >= 2) {
+        return b.weightIncrease - a.weightIncrease;
+      }
+      return b.latestWeight - a.latestWeight;
+    })
+    .slice(0, limit);
+}
+
+/** Totals for the selected analytics window (workouts / mental / runs already filtered). */
+export function buildPeriodActivityTotals(workouts = [], mental = [], runs = []) {
+  const runDistanceM = runs.reduce((sum, r) => sum + (Number(r.distance_meters) || 0), 0);
+  const runDurationSec = runs.reduce((sum, r) => sum + (Number(r.duration_seconds) || 0), 0);
+  const liftProgression = calculateWeightProgressionFromWorkouts(workouts, 99);
+  const liftsTracked = liftProgression.length;
+  const liftsProgressing = liftProgression.filter(
+    (e) => e.workoutCount >= 2 && e.weightIncrease !== 0,
+  ).length;
+
+  return {
+    workouts: workouts.length,
+    mental: mental.length,
+    runs: runs.length,
+    runDistanceMiles: runDistanceM / 1609.34,
+    runDurationMinutes: Math.round(runDurationSec / 60),
+    liftsTracked,
+    liftsProgressing,
+  };
+}
+
+export function formatPrValue(record) {
+  if (record?.weight_kg != null && Number(record.weight_kg) > 0) {
+    const lbs = Number(record.weight_kg) * 2.20462;
+    return `${lbs.toFixed(lbs >= 100 ? 0 : 1)} lbs`;
+  }
+  if (record?.time_minutes != null && Number(record.time_minutes) > 0) {
+    const m = Number(record.time_minutes);
+    if (m >= 60) {
+      const h = Math.floor(m / 60);
+      const rem = Math.round(m % 60);
+      return `${h}h ${rem}m`;
+    }
+    return `${m.toFixed(m >= 10 ? 0 : 1)} min`;
+  }
+  return '—';
+}

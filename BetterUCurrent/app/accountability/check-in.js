@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { navigateToAccountability } from '../../utils/safeNavigation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUser } from '../../context/UserContext';
 import { PremiumAvatar } from '../components/PremiumAvatar';
@@ -20,10 +21,13 @@ import {
   submitCheckInReply,
   getCheckInsForPartnership,
   getAccountabilityPartners,
+  updatePartnershipRhythm,
 } from '../../utils/accountabilityService';
 import { getWeekLabel, getWeekStartDate, getCheckInStreak } from '../../utils/accountabilityUtils';
 import { supabase } from '../../lib/supabase';
 import WeeklyReflection from '../(modals)/WeeklyReflection';
+import AccountabilityPromptPicker from '../../components/accountability/AccountabilityPromptPicker';
+import MeetupPlanCard from '../../components/accountability/MeetupPlanCard';
 
 export default function CheckInScreen() {
   const { partnershipId, partnerId } = useLocalSearchParams();
@@ -38,6 +42,8 @@ export default function CheckInScreen() {
   const [notes, setNotes] = useState('');
   const [goalsMet, setGoalsMet] = useState('');
   const [goalsTotal, setGoalsTotal] = useState('');
+  const [partnership, setPartnership] = useState(null);
+  const [selectedPromptIds, setSelectedPromptIds] = useState([]);
   const [consistencyRating, setConsistencyRating] = useState(null);
   const [biggestWin, setBiggestWin] = useState('');
   const [nextFocus, setNextFocus] = useState('');
@@ -59,6 +65,7 @@ export default function CheckInScreen() {
         setCheckIn(myCheckIn);
         const partner = partners.find((p) => p.partner_id === partnerId);
         setPartnerProfile(partner?.partner || null);
+        setPartnership(partner || null);
 
         const weekStart = getWeekStartDate();
         const { data: partnerRow } = await supabase
@@ -120,6 +127,27 @@ export default function CheckInScreen() {
     );
   }
 
+  const applyPrompt = (prompt) => {
+    const prefix = prompt.question + '\n\n';
+    const append = (prev) => (prev?.trim() ? `${prev.trim()}\n\n${prefix}` : prefix);
+    const setters = {
+      notes: setNotes,
+      biggest_win: setBiggestWin,
+      next_focus: setNextFocus,
+      how_you_can_help: setHowYouCanHelp,
+      message_to_partner: setMessageToPartner,
+    };
+    if (prompt.targetField === 'meetup_notes') {
+      setPartnership((p) =>
+        p ? { ...p, meetup_notes: append(p.meetup_notes || '') } : p,
+      );
+    } else {
+      const setter = setters[prompt.targetField];
+      if (setter) setter((prev) => append(prev));
+    }
+    setSelectedPromptIds((ids) => (ids.includes(prompt.id) ? ids : [...ids, prompt.id]));
+  };
+
   const handleSubmit = async () => {
     if (!checkIn) return;
     setSubmitting(true);
@@ -133,9 +161,15 @@ export default function CheckInScreen() {
         next_focus: nextFocus || undefined,
         how_you_can_help: howYouCanHelp || undefined,
         message_to_partner: messageToPartner || undefined,
+        guidedPromptIds: selectedPromptIds,
       });
+      if (partnership?.id && partnership.meetup_notes?.trim()) {
+        await updatePartnershipRhythm(partnership.id, {
+          meetupNotes: partnership.meetup_notes.trim(),
+        }).catch(() => {});
+      }
       Alert.alert(`Submitted`, `Your partner will be notified. You can come back to see ${partnerProfile?.full_name || partnerProfile?.username || 'Partner'} check-in.`);
-      router.back();
+      navigateToAccountability(router);
     } catch (e) {
       Alert.alert('Error', e.message);
     } finally {
@@ -183,7 +217,7 @@ export default function CheckInScreen() {
         showsVerticalScrollIndicator={false}
       >
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigateToAccountability(router)}>
           <Ionicons name="arrow-back" size={24} color="#00ffff" />
         </TouchableOpacity>
         <Text style={styles.screenTitle}>Check-in</Text>
@@ -202,6 +236,16 @@ export default function CheckInScreen() {
         )}
       </View>
 
+      <MeetupPlanCard
+        partnership={partnership}
+        onEdit={() =>
+          router.push({
+            pathname: '/accountability/partnership-settings',
+            params: { partnershipId },
+          })
+        }
+      />
+
       {isSubmitted ? (
         <View style={styles.done}>
           <Ionicons name="checkmark-circle" size={48} color="#00ff00" />
@@ -209,6 +253,10 @@ export default function CheckInScreen() {
         </View>
       ) : (
         <>
+          <AccountabilityPromptPicker
+            selectedIds={selectedPromptIds}
+            onSelectPrompt={applyPrompt}
+          />
           <Text style={styles.sectionTitle}>How did your week go?</Text>
           <TextInput
             style={styles.input}

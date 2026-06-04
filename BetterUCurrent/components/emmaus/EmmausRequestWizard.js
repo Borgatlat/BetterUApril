@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuthSession } from "../../hooks/useAuthSession";
-import { createCompanionRequest } from "../../lib/emmausCompanionClient";
+import { createCompanionRequest, checkEmmausCompanionAvailable } from "../../lib/emmausCompanionClient";
+import { formatApiError } from "../../lib/formatApiError";
 import { EmmausStepCategory } from "./EmmausStepCategory";
 import { EmmausStepSupportType } from "./EmmausStepSupportType";
 import { EmmausStepFormatUrgency } from "./EmmausStepFormatUrgency";
@@ -40,9 +41,37 @@ export function EmmausRequestWizard() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [done, setDone] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   const isSilent = draft.supportType === "silent_prayer_only";
   const maxStep = TOTAL_STEPS;
+
+  const runReadyCheck = useCallback(async () => {
+    if (workspace !== "student" || !orgId) {
+      setReady(false);
+      setChecking(false);
+      if (!orgId) {
+        setErr("Your school is not linked on your profile yet.");
+      }
+      return;
+    }
+    setChecking(true);
+    try {
+      await checkEmmausCompanionAvailable();
+      setReady(true);
+      setErr(null);
+    } catch (e) {
+      setReady(false);
+      setErr(formatApiError(e));
+    } finally {
+      setChecking(false);
+    }
+  }, [workspace, orgId]);
+
+  useEffect(() => {
+    runReadyCheck();
+  }, [runReadyCheck]);
 
   const canNext = useMemo(() => {
     if (step === 1) return Boolean(draft.category);
@@ -68,6 +97,10 @@ export function EmmausRequestWizard() {
       setErr("School link required. Refresh your profile or sign in with your school email.");
       return;
     }
+    if (!draft.supportType || !draft.category) {
+      setErr("Complete each step before sending.");
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
@@ -81,7 +114,7 @@ export function EmmausRequestWizard() {
       });
       setDone(true);
     } catch (e) {
-      setErr(e?.message ?? String(e));
+      setErr(formatApiError(e));
     } finally {
       setBusy(false);
     }
@@ -107,7 +140,10 @@ export function EmmausRequestWizard() {
         <TouchableOpacity onPress={goBack} hitSlop={12} accessibilityLabel="Back">
           <Ionicons name={done ? "close" : "chevron-back"} size={26} color={T.accent} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Emmaus Companion</Text>
+        <View style={{ flex: 1, alignItems: "center" }}>
+          <Text style={styles.headerTitle}>Raise your hand</Text>
+          <Text style={styles.headerSub}>Emmaus Companion · private to your campus</Text>
+        </View>
         <View style={{ width: 26 }} />
       </View>
 
@@ -166,12 +202,12 @@ export function EmmausRequestWizard() {
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
-            style={[styles.primary, (!canNext || busy) && styles.primaryOff]}
+            style={[styles.primary, (!canNext || busy || checking || !ready) && styles.primaryOff]}
             onPress={goNext}
-            disabled={!canNext || busy}
+            disabled={!canNext || busy || checking || !ready}
             activeOpacity={0.88}
           >
-            {busy ? (
+            {busy || checking ? (
               <ActivityIndicator color={T.textOnAccent} />
             ) : (
               <Text style={styles.primaryTxt}>{step === maxStep ? "Send request" : "Continue"}</Text>
@@ -188,11 +224,13 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: T.border,
   },
-  headerTitle: { color: T.text, fontSize: 17, fontWeight: "800" },
+  headerTitle: { color: T.text, fontSize: 18, fontWeight: "800" },
+  headerSub: { color: T.subMuted, fontSize: 11, fontWeight: "600", marginTop: 2 },
   dots: { flexDirection: "row", justifyContent: "center", gap: 8, marginBottom: 8 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "rgba(255,255,255,0.15)" },
   dotOn: { backgroundColor: T.accent },

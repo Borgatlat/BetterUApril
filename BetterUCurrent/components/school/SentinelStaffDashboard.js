@@ -10,16 +10,31 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useAuthSession } from "../../hooks/useAuthSession";
 import {
   fetchSentinelMetrics,
   fetchPendingAlertsForOrg,
 } from "../../lib/schoolWellnessClient";
+import {
+  fetchJsnAccreditationMetrics,
+  refreshJsnAccreditationCache,
+} from "../../lib/jsnAccreditationClient";
 import { formatWeeklyAnonymizedExport } from "../../lib/schoolWellnessAnalytics";
 import { PastoralMinistryPanel } from "./PastoralMinistryPanel";
+import { LeadershipHero } from "./leadership/LeadershipHero";
+import { LeadershipExecutiveStrip } from "./leadership/LeadershipExecutiveStrip";
+import { LeadershipQuickNav } from "./leadership/LeadershipQuickNav";
+import { LeadershipValueCard } from "./leadership/LeadershipValueCard";
+import { LeadershipSectionHeader } from "./leadership/LeadershipSectionHeader";
+import {
+  LeadershipMetricCard,
+  LeadershipMetricsRow,
+} from "./leadership/LeadershipMetricCard";
+import { institutionalTheme as I } from "./institutionalTheme";
 
-const ACCENT = "#00e5e5";
-const GREEN = "#5ce1a3";
+const ACCENT = I.accent;
+const GREEN = I.success;
 const AMBER = "#e8c170";
 
 /**
@@ -28,9 +43,11 @@ const AMBER = "#e8c170";
  */
 export function SentinelStaffDashboard() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { orgId, workspace } = useAuthSession();
   const [dashTab, setDashTab] = useState("wellness");
   const [metrics, setMetrics] = useState(null);
+  const [jsnMetrics, setJsnMetrics] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -39,12 +56,14 @@ export function SentinelStaffDashboard() {
     if (!orgId || workspace !== "staff") return;
     setError(null);
     try {
-      const [m, a] = await Promise.all([
+      const [m, a, jsn] = await Promise.all([
         fetchSentinelMetrics(orgId),
         fetchPendingAlertsForOrg(orgId),
+        fetchJsnAccreditationMetrics(orgId).catch(() => null),
       ]);
       setMetrics(m);
       setAlerts(a);
+      setJsnMetrics(jsn);
     } catch (e) {
       setError(e?.message ?? String(e));
     }
@@ -56,8 +75,14 @@ export function SentinelStaffDashboard() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await load();
-    setRefreshing(false);
+    try {
+      if (orgId) {
+        await refreshJsnAccreditationCache().catch(() => {});
+      }
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const exportJson = async () => {
@@ -149,23 +174,59 @@ export function SentinelStaffDashboard() {
           }
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.hero}>
-            <View style={styles.heroTop}>
-              <View style={styles.heroIconWrap}>
-                <Ionicons name="ribbon-outline" size={26} color={ACCENT} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.heroTitle}>Whole-student leadership view</Text>
-                <Text style={styles.heroSub}>
-                  Principals use this workspace to watch anonymized cohort patterns, pair them with pastoral
-                  programs (cura personalis), and respond when students voluntarily ask for help.
-                </Text>
-              </View>
-            </View>
-            <View style={styles.orgChip}>
-              <Text style={styles.orgChipTxt}>ORG · {orgId}</Text>
-            </View>
-          </View>
+          <LeadershipHero
+            orgId={orgId}
+            title="Campus leadership console"
+            subtitle="Built for Jesuit and college-prep leaders: anonymized wellness intelligence, pastoral formation tools, MTSS triage, Emmaus peer accompaniment, and board-ready exports — one subscription that replaces scattered spreadsheets."
+            icon="shield-checkmark-outline"
+          />
+
+          <LeadershipExecutiveStrip
+            openAlerts={alerts.length}
+            pulseSample={n}
+            stressSpike={Boolean(metrics?.stress_spike_warning)}
+          />
+
+          <LeadershipValueCard />
+
+          <LeadershipQuickNav
+            items={[
+              {
+                id: "triage",
+                title: "Triage queue",
+                subtitle: "Live MTSS dispatch · tier 3 crisis routing",
+                icon: "pulse",
+                iconColor: "#ff9aa6",
+                variant: "triage",
+                onPress: () => router.push("/(school)/triage"),
+              },
+              {
+                id: "emmaus",
+                title: "Emmaus Companion",
+                subtitle: "Anonymous peer requests until accepted · urgent today",
+                icon: "walk-outline",
+                variant: "emmaus",
+                onPress: () => router.push("/(school)/emmaus"),
+              },
+              {
+                id: "report",
+                title: "Board report",
+                subtitle: "FERPA-safe cohort export · accreditation artifact",
+                icon: "document-text-outline",
+                variant: "report",
+                onPress: () => router.push("/(school)/board-report"),
+              },
+              {
+                id: "disciplinary",
+                title: "Reflective assignments",
+                subtitle: "Restorative discipline · live student submissions",
+                icon: "create-outline",
+                iconColor: AMBER,
+                variant: "disciplinary",
+                onPress: () => router.push("/(school)/disciplinary"),
+              },
+            ]}
+          />
 
           <View style={styles.infoCard}>
             <Text style={styles.infoTitle}>Why this satisfies day-to-day compliance conversations</Text>
@@ -204,11 +265,10 @@ export function SentinelStaffDashboard() {
             </View>
           ) : null}
 
-          <Text style={styles.sectionTitle}>7-day cohort signals</Text>
-          <Text style={styles.sectionMuted}>
-            Averages drawn from anonymized pooling only. Trend across multiple weeks beats any single datapoint —
-            screenshot this panel after pull-to-refresh for standing meetings.
-          </Text>
+          <LeadershipSectionHeader
+            title="7-day cohort signals"
+            subtitle="Averages from students who opt into aggregate pooling. Screenshot after refresh for dean, principal, or board standing meetings."
+          />
 
           {lowSample ? (
             <View style={styles.warnPill}>
@@ -220,26 +280,66 @@ export function SentinelStaffDashboard() {
             </View>
           ) : null}
 
-          <View style={styles.metricsRow}>
-            <MetricTile
+          <LeadershipMetricsRow>
+            <LeadershipMetricCard
               icon="happy-outline"
               label="Avg mood"
-              sub="Likert · higher is brighter mood"
+              sub="Likert · higher is brighter"
               value={fmt(metrics?.mood_avg_7d)}
             />
-            <MetricTile
+            <LeadershipMetricCard
               icon="flash-outline"
               label="Avg stress"
               sub="Higher = heavier load"
               value={fmt(metrics?.stress_avg_7d)}
             />
-            <MetricTile
+            <LeadershipMetricCard
               icon="moon-outline"
-              label="Avg sleep qual."
-              sub="Higher = rested"
+              label="Avg sleep"
+              sub="Higher = more rested"
               value={fmt(metrics?.sleep_avg_7d)}
             />
-          </View>
+          </LeadershipMetricsRow>
+
+          <LeadershipSectionHeader
+            title="Formation & accreditation"
+            subtitle="Org-level aggregates for Profile of the Graduate and pastoral KPIs — no student names."
+          />
+          <LeadershipMetricsRow>
+            <LeadershipMetricCard
+              icon="heart-outline"
+              label="Service hrs"
+              sub="Approved communal"
+              value={
+                jsnMetrics?.total_communal_service_hours != null
+                  ? String(Number(jsnMetrics.total_communal_service_hours).toFixed(1))
+                  : "—"
+              }
+              highlight
+            />
+            <LeadershipMetricCard
+              icon="search-outline"
+              label="Examen %"
+              sub="≥1 session / org"
+              value={
+                jsnMetrics?.daily_examen_adoption_pct != null
+                  ? `${jsnMetrics.daily_examen_adoption_pct}%`
+                  : "—"
+              }
+              highlight
+            />
+            <LeadershipMetricCard
+              icon="flame-outline"
+              label="Prayer wall"
+              sub="Moderated posts"
+              value={
+                jsnMetrics?.prayer_wall_engagements != null
+                  ? String(jsnMetrics.prayer_wall_engagements)
+                  : "—"
+              }
+              highlight
+            />
+          </LeadershipMetricsRow>
 
           <View style={styles.sampleCard}>
             <Text style={styles.sampleStrong}>Rolling sample</Text>
@@ -364,17 +464,6 @@ function fmt(v) {
   return Math.round(v * 1000) / 1000;
 }
 
-function MetricTile({ icon, label, sub, value }) {
-  return (
-    <View style={styles.metricTile}>
-      <Ionicons name={icon} size={22} color={ACCENT} style={{ marginBottom: 10 }} />
-      <Text style={styles.metricTileLabel}>{label}</Text>
-      <Text style={styles.metricTileValue}>{value}</Text>
-      <Text style={styles.metricTileSub}>{sub}</Text>
-    </View>
-  );
-}
-
 function CheckStep({ n, text }) {
   return (
     <View style={styles.checkRow}>
@@ -389,7 +478,7 @@ function CheckStep({ n, text }) {
 const styles = StyleSheet.create({
   shell: { flex: 1, backgroundColor: "#050708" },
   segmentWrap: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 12 },
-  segmentLabel: { color: "#6d7882", fontSize: 11, fontWeight: "800", letterSpacing: 1, marginBottom: 8 },
+  segmentLabel: { color: I.subMuted, fontSize: 11, fontWeight: "800", letterSpacing: 1, marginBottom: 8 },
   segment: {
     flexDirection: "row",
     gap: 10,
@@ -407,7 +496,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.03)",
   },
   segmentOn: { borderColor: "rgba(0,229,229,0.55)", backgroundColor: "rgba(0,229,229,0.12)" },
-  segmentTxt: { color: "#8b949f", fontSize: 13, fontWeight: "700" },
+  segmentTxt: { color: I.subMuted, fontSize: 13, fontWeight: "700" },
   segmentTxtOn: { color: "#fff" },
 
   container: { flex: 1, backgroundColor: "#050708" },
@@ -478,7 +567,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     letterSpacing: -0.2,
   },
-  sectionMuted: { color: "#7c8a93", fontSize: 13, lineHeight: 19, marginBottom: 12 },
+  sectionMuted: { color: I.sub, fontSize: 13, lineHeight: 19, marginBottom: 12 },
 
   principleRow: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 12 },
   principleTxt: { flex: 1, color: "#b5bec4", fontSize: 13, lineHeight: 20 },
@@ -530,7 +619,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 4,
   },
-  metricTileSub: { color: "#6d7982", fontSize: 11, lineHeight: 15 },
+  metricTileSub: { color: I.subMuted, fontSize: 11, lineHeight: 15 },
 
   sampleCard: {
     marginBottom: 6,
@@ -669,8 +758,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     gap: 8,
   },
-  emptyTitle: { color: "#8a959c", fontWeight: "700", fontSize: 16 },
-  emptySub: { color: "#5c6870", fontSize: 13, textAlign: "center", paddingHorizontal: 32, lineHeight: 18 },
+  emptyTitle: { color: I.sub, fontWeight: "700", fontSize: 16 },
+  emptySub: { color: I.subMuted, fontSize: 13, textAlign: "center", paddingHorizontal: 32, lineHeight: 18 },
 
   footerNote: {
     marginTop: 24,
@@ -687,4 +776,33 @@ const styles = StyleSheet.create({
 
   muted: { color: "#88929b", fontSize: 14, textAlign: "center" },
   small: { color: "#6d7982", fontSize: 12, lineHeight: 18 },
+
+  quickNavRow: { gap: 10, marginBottom: 16 },
+  quickNavBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  quickNavTriage: {
+    backgroundColor: "rgba(255,91,107,0.06)",
+    borderColor: "rgba(255,91,107,0.28)",
+  },
+  quickNavEmmaus: {
+    backgroundColor: "rgba(138,180,255,0.06)",
+    borderColor: "rgba(138,180,255,0.28)",
+  },
+  quickNavReport: {
+    backgroundColor: "rgba(0,229,229,0.06)",
+    borderColor: "rgba(0,229,229,0.28)",
+  },
+  quickNavDisciplinary: {
+    backgroundColor: "rgba(232,193,112,0.06)",
+    borderColor: "rgba(232,193,112,0.28)",
+  },
+  quickNavTitle: { color: "#fff", fontWeight: "800", fontSize: 14 },
+  quickNavSub: { color: "#9aa6ae", fontSize: 12, marginTop: 2 },
 });

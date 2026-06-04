@@ -4730,7 +4730,7 @@ const ActiveWorkoutScreen = () => {
       <TouchableOpacity 
         style={{
           position: 'absolute',
-          bottom: 100,
+          bottom: 140,
           right: 20,
           zIndex: 1000,
         }}

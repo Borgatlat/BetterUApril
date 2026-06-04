@@ -10,7 +10,7 @@ export default function StaffDashboardScreen() {
     <>
       <Stack.Screen
         options={{
-          title: "Leadership wellness",
+          title: "Campus Leadership Console",
           headerShown: true,
           headerStyle: { backgroundColor: "#050708" },
           headerTintColor: "#00e5e5",

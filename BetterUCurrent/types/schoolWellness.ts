@@ -24,6 +24,7 @@ export interface Organization {
 export interface UserProfileSchoolFields {
   account_type: AccountType;
   org_id: string | null;
+  is_peer_mentor?: boolean;
 }
 
 export interface DailyPulseLog {
@@ -162,4 +163,194 @@ export interface SpiritualBulletinPostRow {
   starts_at: string | null;
   moderation_status: BulletinModerationStatus;
   created_at: string;
+}
+
+/** -------------------------------------------------------------------------
+ * Phase: FERPA board report + counselor triage + focus mode
+ * ----------------------------------------------------------------------- */
+
+/** MTSS risk tier on a counselor_triage_queue ticket. */
+export type RiskTier = "tier_1" | "tier_2" | "tier_3";
+
+/** Lifecycle status of a counselor_triage_queue ticket. */
+export type TriageStatus = "pending" | "assigned" | "resolved";
+
+/** Raw row shape of public.counselor_triage_queue. */
+export interface CounselorTriageRow {
+  id: string;
+  org_id: string;
+  student_id: string;
+  risk_tier: RiskTier;
+  status: TriageStatus;
+  assigned_counselor_id: string | null;
+  trigger_reason: string;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+}
+
+/** Enriched row returned by RPC staff_list_triage_queue (joins profiles). */
+export interface CounselorTriageRowEnriched extends CounselorTriageRow {
+  student_full_name: string;
+  student_email: string;
+  student_grade_level: string | null;
+  assigned_counselor_name: string | null;
+}
+
+/** Row returned by RPC get_anonymized_weekly_trends. */
+export interface BoardReportRow {
+  org_id: string;
+  grade_level: string;
+  week_start: string;
+  avg_mood: number | null;
+  avg_stress: number | null;
+  avg_sleep: number | null;
+  sample_size: number;
+  data_classification: "aggregated_deidentified";
+}
+
+/** Row returned by RPC get_anonymized_weekly_spiritual_trends. */
+export interface BoardReportSpiritualRow {
+  org_id: string;
+  grade_level: string;
+  week_start: string;
+  avg_intensity: number | null;
+  consolation_count: number;
+  desolation_count: number;
+  sample_size: number;
+  data_classification: "aggregated_deidentified";
+}
+
+/** Shape of the formatted board-report payload (lib/boardReportExport.js). */
+export interface FormattedBoardReportCohort {
+  grade_level: string;
+  week_start: string;
+  avg_mood: number | null;
+  avg_stress: number | null;
+  avg_sleep: number | null;
+  sample_size: number;
+}
+
+export interface FormattedBoardReport {
+  school: string;
+  reporting_period: {
+    start: string;
+    end: string;
+    weeks_included: number;
+  };
+  generated_at: string;
+  data_classification: "aggregated_deidentified";
+  ferpa_notice: string;
+  k_anonymity_floor: number;
+  grade_cohorts: FormattedBoardReportCohort[];
+  spiritual_cohorts: Array<{
+    grade_level: string;
+    week_start: string;
+    avg_intensity: number | null;
+    consolation_count: number;
+    desolation_count: number;
+    sample_size: number;
+  }>;
+}
+
+/** Reason a focus session was forfeited (mirrors SQL CHECK list). */
+export type FocusForfeitReason =
+  | "app_backgrounded"
+  | "app_inactive"
+  | "user_ended_early"
+  | "system_crash";
+
+/** Raw row shape of public.focus_sessions. */
+export interface FocusSessionRow {
+  id: string;
+  student_id: string;
+  org_id: string | null;
+  duration_minutes: number;
+  points_earned: number;
+  completed_successfully: boolean;
+  forfeit_reason: FocusForfeitReason | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
+/** Payload returned by RPC increment_student_rewards_points. */
+export interface FocusRewardResult {
+  ok: boolean;
+  already_awarded: boolean;
+  points: number;
+  total_focus_points?: number;
+}
+
+/** -------------------------------------------------------------------------
+ * Grad at Grad (Profile of the Graduate at Graduation) pillar tracking
+ * ----------------------------------------------------------------------- */
+
+export type GradAtGradPillar =
+  | "open_to_growth"
+  | "intellectually_competent"
+  | "religious"
+  | "loving"
+  | "committed_to_justice";
+
+export interface GradAtGradLogRow {
+  id: string;
+  student_id: string;
+  org_id: string;
+  pillar: GradAtGradPillar;
+  source_activity: string;
+  source_record_id: string | null;
+  points_allocated: number;
+  created_at: string;
+}
+
+/** Row returned by RPC get_student_grad_at_grad_summary. */
+export interface GradAtGradPillarSummary {
+  pillar: GradAtGradPillar;
+  total_points: number;
+}
+
+/** -------------------------------------------------------------------------
+ * JSN accreditation aggregates (org-level, de-identified)
+ * ----------------------------------------------------------------------- */
+
+export interface JsnAccreditationMetricsRow {
+  org_id: string;
+  academic_year_start: string;
+  academic_year_end: string;
+  total_communal_service_hours: number;
+  daily_examen_adoption_pct: number | null;
+  prayer_wall_engagements: number;
+  enrolled_students: number;
+  data_classification: "aggregated_deidentified";
+}
+
+/** -------------------------------------------------------------------------
+ * Reflective disciplinary portal
+ * ----------------------------------------------------------------------- */
+
+export type AdminAssignmentType = "reflective_journal" | "restorative_plan";
+
+export type AdminAssignmentStatus = "assigned" | "submitted" | "approved_by_admin";
+
+export interface AdministrativeAssignmentRow {
+  id: string;
+  student_id: string;
+  org_id: string;
+  assigned_by: string;
+  assignment_type: AdminAssignmentType;
+  prompt_text: string;
+  student_response: string | null;
+  status: AdminAssignmentStatus;
+  due_at: string;
+  created_at: string;
+  updated_at: string;
+  submitted_at: string | null;
+  approved_at: string | null;
+}
+
+/** Enriched row from RPC staff_list_administrative_assignments. */
+export interface AdministrativeAssignmentEnriched extends AdministrativeAssignmentRow {
+  student_full_name: string;
+  student_email: string;
+  assigned_by_name: string | null;
 }

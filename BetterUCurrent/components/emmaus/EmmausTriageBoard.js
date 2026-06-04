@@ -171,11 +171,14 @@ export function EmmausTriageBoard() {
       }
     >
       <View style={styles.hero}>
-        <Ionicons name="walk-outline" size={28} color={ACCENT} />
+        <View style={styles.heroIcon}>
+          <Ionicons name="walk-outline" size={28} color={ACCENT} />
+        </View>
         <View style={{ flex: 1 }}>
+          <Text style={styles.heroEyebrow}>PEER PASTORAL NETWORK</Text>
           <Text style={styles.heroTitle}>Emmaus Companion</Text>
           <Text style={styles.heroSub}>
-            Anonymous until you accept · live feed for your campus
+            Students raise their hand anonymously. You see category and intent only until you accept — then chat opens.
           </Text>
         </View>
       </View>
@@ -296,9 +299,34 @@ const styles = StyleSheet.create({
   content: { padding: 16, gap: 10 },
   centered: { flex: 1, justifyContent: "center", alignItems: "center", padding: 24, backgroundColor: T.screenBg },
   muted: { color: T.sub, textAlign: "center", marginTop: 12, fontSize: 14, lineHeight: 20 },
-  hero: { flexDirection: "row", gap: 12, alignItems: "center", marginBottom: 8 },
+  hero: {
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: T.calmDim,
+    borderWidth: 1,
+    borderColor: "rgba(138,180,255,0.35)",
+  },
+  heroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "rgba(0,0,0,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroEyebrow: {
+    color: T.calm,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
   heroTitle: { color: T.text, fontSize: 20, fontWeight: "800" },
-  heroSub: { color: T.sub, fontSize: 13, marginTop: 4, lineHeight: 18 },
+  heroSub: { color: T.sub, fontSize: 13, marginTop: 6, lineHeight: 18 },
   urgentBanner: {
     flexDirection: "row",
     alignItems: "center",

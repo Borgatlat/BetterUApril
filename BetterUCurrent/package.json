@@ -1,7 +1,7 @@
 {
   "name": "betteru_testflight_v7",
   "main": "index.js",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "scripts": {
     "start": "expo start --offline",
     "start:online": "expo start",
@@ -13,6 +13,7 @@
     "web": "expo start --web",
     "test": "jest --watchAll",
     "lint": "expo lint",
+    "eas-build-pre-install": "node scripts/eas-sync-ios-plist.cjs",
     "eas-build-on-success": "echo 'Build succeeded!'",
     "eas-build-on-error": "echo 'Build failed!'",
     "verify:eas-production": "node scripts/verify-eas-production.cjs",

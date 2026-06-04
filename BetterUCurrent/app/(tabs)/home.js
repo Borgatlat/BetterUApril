@@ -163,6 +163,28 @@ const HomeScreen = () => {
         </View>
       </View>
 
+      {workspace === 'student' && (
+        <View style={styles.section}>
+          <TouchableOpacity
+            style={[
+              styles.seeActivityCard,
+              { backgroundColor: hexToRgba(accent, 0.06), borderColor: hexToRgba(accent, 0.1) },
+            ]}
+            onPress={() => router.replace('/(tabs)/school-wellness')}
+            activeOpacity={0.85}
+          >
+            <View style={[styles.analyticsEntryIcon, { backgroundColor: hexToRgba(accent, 0.12) }]}>
+              <Ionicons name="school" size={22} color={accent} />
+            </View>
+            <View style={styles.analyticsEntryTextCol}>
+              <Text style={styles.analyticsEntryTitle}>School wellness hub</Text>
+              <Text style={styles.analyticsEntryHint}>Pulse check-ins, spiritual life, campus resources</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#666" />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {homePrefs.showQuote && (
         <View style={styles.quoteSection}>
           <Animated.View
@@ -268,20 +290,16 @@ const HomeScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Analytics</Text>
           <TouchableOpacity
-            style={[
-              styles.seeActivityCard,
-              /* Same surface as “See All Activity” — do not override with white/04 or the card looks “off” vs other rows */
-              { backgroundColor: hexToRgba(accent, 0.06), borderColor: hexToRgba(accent, 0.1) },
-            ]}
+            style={styles.homeNavCard}
             onPress={() => router.push('/(tabs)/analytics')}
             activeOpacity={0.85}
           >
-            <View style={[styles.analyticsEntryIcon, { backgroundColor: hexToRgba(accent, 0.12) }]}>
+            <View style={[styles.actionIconWrap, { backgroundColor: hexToRgba(accent, 0.12) }]}>
               <Ionicons name="analytics" size={22} color={accent} />
             </View>
-            <View style={styles.analyticsEntryTextCol}>
-              <Text style={styles.analyticsEntryTitle}>Analytics dashboard</Text>
-
+            <View style={styles.homeNavCardTextCol}>
+              <Text style={styles.actionLabel}>Analytics dashboard</Text>
+              <Text style={styles.homeNavCardHint}>Strength, workouts, runs & wellness trends</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color="#666" />
           </TouchableOpacity>
@@ -351,13 +369,13 @@ const HomeScreen = () => {
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.actionCard}
-            onPress={() => router.push('/accountability/add-partner')}
+            onPress={() => router.push('/accountability')}
             activeOpacity={0.85}
           >
             <View style={[styles.actionIconWrap, { backgroundColor: 'rgba(139,92,246,0.15)' }]}>
               <Ionicons name="people-circle-outline" size={22} color="#8b5cf6" />
             </View>
-            <Text style={styles.actionLabel}>Add accountability partner</Text>
+            <Text style={styles.actionLabel}>Accountability</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -443,17 +461,18 @@ const styles = StyleSheet.create({
   actionLabel: { fontSize: 14, fontWeight: '600', color: '#fff' },
   seeActivityCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,255,255,0.06)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(0,255,255,0.1)', padding: 16 },
   seeActivityText: { flex: 1, fontSize: 16, fontWeight: '600', color: '#fff', marginLeft: 12 },
-  analyticsEntryIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+  homeNavCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    padding: 16,
+    gap: 12,
   },
-  analyticsEntryTextCol: { flex: 1, marginRight: 8 },
-  analyticsEntryTitle: { fontSize: 16, fontWeight: '600', color: '#fff' },
-  analyticsEntryHint: { fontSize: 13, color: '#888', marginTop: 2 },
+  homeNavCardTextCol: { flex: 1, marginRight: 4 },
+  homeNavCardHint: { fontSize: 13, color: '#888', marginTop: 4 },
 });
 
 export default HomeScreen;

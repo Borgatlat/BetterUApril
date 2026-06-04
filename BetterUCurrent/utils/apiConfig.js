@@ -9,6 +9,7 @@ export const getAnthropicApiKey = () => {
   const key =
     process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ||
     Constants.expoConfig?.extra?.anthropicApiKey ||
+    Constants.expoConfig?.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY ||
     '';
   return String(key).trim();
 };

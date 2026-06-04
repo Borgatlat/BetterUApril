@@ -11,6 +11,8 @@ import { Audio } from 'expo-av';
 import Slider from '@react-native-community/slider';
 import PremiumFeature from './components/PremiumFeature';
 import { useUser } from '../context/UserContext';
+import { receivesSchoolPartnershipPremium } from '../lib/premiumSchool';
+import { isDailyExamenSession } from '../lib/dailyExamNavigation';
 // Live Activities - shows session progress on lock screen
 import { 
   startMentalLiveActivity, 
@@ -36,7 +38,10 @@ const ActiveMentalSession = () => {
   const [isMuted, setIsMuted] = useState(false);
   const soundRef = useRef(null);
   const { isPremium } = useUser();
-  
+  const { profile } = useAuth();
+  const hasPremiumAccess =
+    isPremium || receivesSchoolPartnershipPremium(profile);
+
   // Track actual time spent in session
   const sessionStartTime = useRef(null); // Timestamp when user started the session
   const totalPausedTime = useRef(0); // Total time paused in milliseconds
@@ -63,6 +68,27 @@ const ActiveMentalSession = () => {
     })(),
     session_type: params.type
   }), [params.id, params.title, params.duration, params.description, params.steps, params.type]);
+
+  const isExamenSession = isDailyExamenSession(session);
+  const sessionHasGuidedAudio = useMemo(() => {
+    if (session.id && session.id.length > 20) return false;
+    const audioIds = new Set([
+      'box-breathing',
+      '478-breathing',
+      'body_scan',
+      'body-scan',
+      'mindful_awareness',
+      'mindful-awareness',
+      'mindful-meditation',
+      'progressive_relaxation',
+      'progressive-relaxation',
+      'visualization',
+      'peaceful_place',
+      'peaceful-place',
+    ]);
+    return audioIds.has(session.id);
+  }, [session.id]);
+  const showAudioUpsell = !hasPremiumAccess && !isExamenSession && sessionHasGuidedAudio;
 
   console.log('Session object:', session);
 
@@ -112,8 +138,8 @@ const ActiveMentalSession = () => {
         if (soundRef.current) {
           await soundRef.current.unloadAsync();
         }
-        // Only load audio for premium users
-        if (!isPremium) {
+        // Only load audio for premium / school-partnership users
+        if (!hasPremiumAccess) {
           soundRef.current = null;
           if (isMounted) {
             setSound(null);
@@ -183,7 +209,7 @@ const ActiveMentalSession = () => {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, isPremium]);
+  }, [session.id, hasPremiumAccess]);
 
   // Play audio when session is activated
   useEffect(() => {
@@ -363,9 +389,7 @@ const ActiveMentalSession = () => {
 
   // Rotate through steps automatically (only when active).
   // Daily Examen (St. Ignatius): 3 min total, 5 steps → 36 sec per step. Other sessions: 10 sec per step.
-  const stepIntervalMs = (session.id === 'daily-examen' || session.session_type === 'examen')
-    ? 36000
-    : 10000;
+  const stepIntervalMs = isExamenSession ? 36000 : 10000;
 
   useEffect(() => {
     let stepInterval = null;
@@ -615,7 +639,7 @@ const ActiveMentalSession = () => {
                   }
                   
                   setIsActive(willBeActive);
-                  if (isPremium && sound) {
+                  if (hasPremiumAccess && sound) {
                     if (willBeActive) {
                       sound.playAsync();
                     } else {
@@ -633,8 +657,7 @@ const ActiveMentalSession = () => {
             </TouchableOpacity>
           </View>
         </View>
-          {/* Red upgrade message for free users */}
-          {!isPremium && (
+          {showAudioUpsell && (
             <Text style={{ color: '#ff4444', textAlign: 'center', marginTop: 10, fontWeight: 'bold' }}>
               Upgrade to Premium to access guided audio for this session.
             </Text>
@@ -642,8 +665,8 @@ const ActiveMentalSession = () => {
       </View>
 
         {/* Audio Controls: only for premium users */}
-        {isPremium && sound && (
-          <PremiumFeature isPremium={isPremium} onPress={() => {}}>
+        {hasPremiumAccess && sound && (
+          <PremiumFeature isPremium={hasPremiumAccess} onPress={() => {}}>
             <View style={styles.audioControls}>
               <TouchableOpacity onPress={toggleMute} style={styles.muteButton}>
                 <Ionicons 

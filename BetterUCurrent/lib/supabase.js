@@ -1,6 +1,23 @@
 import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+
+const DEFAULT_SUPABASE_URL = 'https://kmpufblmilcvortrfilp.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcHVmYmxtaWxjdm9ydHJmaWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2Mjg2MzYsImV4cCI6MjA1OTIwNDYzNn0.JYJ5WSZWp04AGxfcX2GsiPrTn2QUStCfCHmdDNyxo04';
+
+const supabaseUrl =
+  process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ||
+  Constants.expoConfig?.extra?.supabaseUrl ||
+  Constants.expoConfig?.env?.EXPO_PUBLIC_SUPABASE_URL ||
+  DEFAULT_SUPABASE_URL;
+
+const supabaseAnonKey =
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+  Constants.expoConfig?.extra?.supabaseAnonKey ||
+  Constants.expoConfig?.env?.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+  DEFAULT_SUPABASE_ANON_KEY;
 
 /*
 -- Create trainer_messages table
@@ -27,11 +44,9 @@ CREATE INDEX idx_trainer_messages_user_date ON trainer_messages(user_id, date);
 CREATE INDEX idx_daily_message_count_user_date ON daily_message_count(user_id, date);
 */
 
-const supabaseUrl = 'https://kmpufblmilcvortrfilp.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttcHVmYmxtaWxjdm9ydHJmaWxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2Mjg2MzYsImV4cCI6MjA1OTIwNDYzNn0.JYJ5WSZWp04AGxfcX2GsiPrTn2QUStCfCHmdDNyxo04';
-
 // Add detailed logging function
 const logSupabaseError = (error, operation) => {
+  if (typeof __DEV__ !== 'undefined' && !__DEV__) return;
   console.error(`Supabase ${operation} error:`, {
     message: error.message,
     code: error.code,
@@ -47,15 +62,21 @@ const logSupabaseError = (error, operation) => {
 const retryOperation = async (operation, maxRetries = 3) => {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`Attempting ${operation} (try ${attempt}/${maxRetries})`);
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log(`Attempting ${operation} (try ${attempt}/${maxRetries})`);
+      }
       const result = await operation();
-      console.log(`${operation} successful on attempt ${attempt}`);
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log(`${operation} successful on attempt ${attempt}`);
+      }
       return result;
     } catch (error) {
       logSupabaseError(error, operation);
       if (attempt === maxRetries) throw error;
       const delay = Math.min(1000 * Math.pow(2, attempt), 10000);
-      console.log(`Retrying in ${delay}ms...`);
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.log(`Retrying in ${delay}ms...`);
+      }
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }

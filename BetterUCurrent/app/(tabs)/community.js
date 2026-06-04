@@ -25,6 +25,8 @@ import AddEventModal from '../(modals)/AddEventModal';
 import { COMMUNITY_THEME } from '../../config/communityTheme';
 import { useAuthSession } from '../../hooks/useAuthSession';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
+import { CommunityTabBar } from '../../components/community/CommunityTabBar';
+import { CommunityFeedToolbar } from '../../components/community/CommunityFeedToolbar';
 
 /** Design tokens for Community styles — same object everywhere so the screen matches Feed/League. */
 const T = COMMUNITY_THEME;
@@ -116,7 +118,6 @@ const CommunityScreen = () => {
   const [groupAvatar, setGroupAvatar] = useState(null);
   const [isPublic, setIsPublic] = useState(true);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
-  const [showFilterModal, setShowFilterModal] = useState(false);
   const [showCreateEventModal, setShowCreateEventModal] = useState(false);
   const [activeFeedFilter, setActiveFeedFilter] = useState(PostType.ALL);
   // One-time dismissible nudge at top of feed: "Your friends are active — share a workout or run?"
@@ -1265,12 +1266,50 @@ const CommunityScreen = () => {
         extraDataPromises.push(Promise.resolve({ type: 'run_comments', data: [] }));
       }
 
-      // Spotify + comments load in parallel
+      if (topWorkoutIds.length > 0) {
+        extraDataPromises.push(
+          supabase
+            .from('workout_kudos')
+            .select('workout_id, user_id, created_at')
+            .in('workout_id', topWorkoutIds)
+            .then((result) => ({ type: 'workout_kudos', data: result.data || [], error: result.error }))
+        );
+      } else {
+        extraDataPromises.push(Promise.resolve({ type: 'workout_kudos', data: [] }));
+      }
+
+      if (topMentalIds.length > 0) {
+        extraDataPromises.push(
+          supabase
+            .from('mental_session_kudos')
+            .select('session_id, user_id, created_at')
+            .in('session_id', topMentalIds)
+            .then((result) => ({ type: 'mental_kudos', data: result.data || [], error: result.error }))
+        );
+      } else {
+        extraDataPromises.push(Promise.resolve({ type: 'mental_kudos', data: [] }));
+      }
+
+      if (topRunIds.length > 0) {
+        extraDataPromises.push(
+          supabase
+            .from('run_kudos')
+            .select('run_id, user_id, created_at')
+            .in('run_id', topRunIds)
+            .then((result) => ({ type: 'run_kudos', data: result.data || [], error: result.error }))
+        );
+      } else {
+        extraDataPromises.push(Promise.resolve({ type: 'run_kudos', data: [] }));
+      }
+
+      // Spotify, comments, and kudos load in parallel
       const extraDataResults = await Promise.all(extraDataPromises);
 
-      // Process results (no likes/kudos payloads)
       let spotifyTrackMap = {};
       const commentsMap = {};
+      const workoutKudosMap = {};
+      const mentalKudosMap = {};
+      const runKudosMap = {};
 
       extraDataResults.forEach(result => {
         if (result.type === 'spotify' && result.data) {
@@ -1301,6 +1340,21 @@ const CommunityScreen = () => {
             if (!commentsMap[c.run_id]) commentsMap[c.run_id] = [];
             commentsMap[c.run_id].push(c);
           });
+        } else if (result.type === 'workout_kudos' && result.data) {
+          result.data.forEach((k) => {
+            if (!workoutKudosMap[k.workout_id]) workoutKudosMap[k.workout_id] = [];
+            workoutKudosMap[k.workout_id].push(k);
+          });
+        } else if (result.type === 'mental_kudos' && result.data) {
+          result.data.forEach((k) => {
+            if (!mentalKudosMap[k.session_id]) mentalKudosMap[k.session_id] = [];
+            mentalKudosMap[k.session_id].push(k);
+          });
+        } else if (result.type === 'run_kudos' && result.data) {
+          result.data.forEach((k) => {
+            if (!runKudosMap[k.run_id]) runKudosMap[k.run_id] = [];
+            runKudosMap[k.run_id].push(k);
+          });
         }
       });
 
@@ -1309,6 +1363,7 @@ const CommunityScreen = () => {
           return {
             ...activity,
             comments: commentsMap[activity.id] || [],
+            kudos: workoutKudosMap[activity.id] || [],
             workout_session_id: activity.workout_session_id,
             spotify_tracks_preview: (activity.workout_session_id && spotifyTrackMap[activity.workout_session_id])
               ? spotifyTrackMap[activity.workout_session_id].slice(-3)
@@ -1321,11 +1376,13 @@ const CommunityScreen = () => {
           return {
             ...activity,
             comments: commentsMap[activity.id] || [],
+            kudos: mentalKudosMap[activity.id] || [],
           };
         } else if (activity.type === 'run') {
           return {
             ...activity,
             comments: commentsMap[activity.id] || [],
+            kudos: runKudosMap[activity.id] || [],
           };
         } else if (activity.type === 'event') {
           return {
@@ -2111,77 +2168,35 @@ const CommunityScreen = () => {
     return (
     <View style={styles.container}>
       <View style={styles.headerContainer}>
-        {/* Same width as search button so the title stays visually centered */}
-        <View style={styles.headerSideSpacer} />
-
-        <Text style={styles.header}>Community</Text>
-
+        <View style={styles.headerTextBlock}>
+          <Text style={styles.header}>Community</Text>
+          <Text style={styles.headerSub}>
+            {activeTab === 'feed'
+              ? 'Friends’ workouts & wins'
+              : activeTab === 'friends'
+                ? 'Connect & grow together'
+                : activeTab === 'groups'
+                  ? 'Teams & challenges'
+                  : 'Compete in your league'}
+          </Text>
+        </View>
         <TouchableOpacity
           style={styles.searchIconButton}
           onPress={() => setShowSearchModal(true)}
           accessibilityLabel="Search community"
         >
-          <Ionicons name="search-outline" size={24} color={T.communityAccent} />
+          <Ionicons name="search-outline" size={22} color={T.communityAccent} />
         </TouchableOpacity>
       </View>
 
-      {/* Row 1: Feed only — primary “social feed” surface */}
-      <View style={styles.tabStripRowPrimary}>
-        <TouchableOpacity
-          style={[styles.tabPillFeedFull, activeTab === 'feed' && styles.tabPillActive]}
-          onPress={() => setActiveTab('feed')}
-          activeOpacity={0.7}
-        >
-          <View style={styles.tabPillIconWrap}>
-            <Ionicons
-              name={activeTab === 'feed' ? 'newspaper' : 'newspaper-outline'}
-              size={18}
-              color={activeTab === 'feed' ? T.communityAccent : T.communityTextMuted}
-            />
-          </View>
-          <Text
-            style={[styles.tabPillLabel, activeTab === 'feed' && styles.tabPillLabelActive]}
-            numberOfLines={1}
-          >
-            Feed
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Row 2: Friends | Groups | League */}
-      <View style={styles.tabStripRow}>
-        {[
-          { id: 'friends', icon: 'people', label: 'Friends', badge: friendRequests.length },
-          { id: 'groups', icon: 'people-circle', label: 'Groups', badge: invitations.length },
-          { id: 'league', icon: 'trophy', label: 'League', badge: 0 },
-        ].map((t) => (
-          <TouchableOpacity
-            key={t.id}
-            style={[styles.tabPill, activeTab === t.id && styles.tabPillActive]}
-            onPress={() => setActiveTab(t.id)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.tabPillIconWrap}>
-              <Ionicons
-                name={activeTab === t.id ? t.icon : `${t.icon}-outline`}
-                size={18}
-                color={activeTab === t.id ? T.communityAccent : T.communityTextMuted}
-              />
-              {t.badge > 0 && (
-                <View style={styles.tabPillBadge}>
-                  <Text style={styles.tabPillBadgeText}>{t.badge > 9 ? '9+' : t.badge}</Text>
-                </View>
-              )}
-            </View>
-            <Text
-              style={[styles.tabPillLabel, activeTab === t.id && styles.tabPillLabelActive]}
-              numberOfLines={1}
-            >
-              {t.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      <CommunityTabBar
+        activeTab={activeTab}
+        onChange={setActiveTab}
+        badges={{
+          friends: friendRequests.length,
+          groups: invitations.length,
+        }}
+      />
 
       <View style={styles.contentArea}>
       {activeTab === 'league' ? (
@@ -2204,65 +2219,13 @@ const CommunityScreen = () => {
       >
         {activeTab === 'feed' ? (
           <>
-            {/* Filter bar and chips: show for feed tab even when feed is empty */}
-            <View style={styles.filterContainer}>
-              <TouchableOpacity style={styles.filterButton} onPress={() => setShowFilterModal(true)}>
-                <Ionicons name="filter-outline" size={24} color="#00ffff" />
-                <Text style={styles.filterButtonText}>Filter</Text>
-              </TouchableOpacity>
-              {/* Add event moved here so the header stays Feed | Groups | League + search only */}
-              <TouchableOpacity style={styles.filterButton} onPress={() => setShowCreateEventModal(true)}>
-                <Ionicons name="add-circle-outline" size={24} color="#00ffff" />
-                <Text style={styles.filterButtonText}>Event</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.filterChipsScroll}
-              contentContainerStyle={styles.filterChipsContent}
-            >
-              {Object.values(PostType).map((value) => {
-                const label = value === PostType.ALL ? 'All' : value.charAt(0).toUpperCase() + value.slice(1);
-                const isActive = activeFeedFilter === value;
-                return (
-                  <TouchableOpacity
-                    key={value}
-                    style={[styles.filterChip, isActive && styles.filterChipActive]}
-                    onPress={() => filterPostByType(value)}
-                  >
-                    <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>{label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-            <Modal visible={showFilterModal} animationType="slide" transparent={true} onRequestClose={() => setShowFilterModal(false)}>
-              <View style={styles.filterModalOverlay}>
-                <View style={styles.filterModalContent}>
-                  <Text style={styles.filterModalTitle}>Filter Posts</Text>
-                  <FlatList
-                    data={Object.values(PostType)}
-                    keyExtractor={(item) => item}
-                    renderItem={({ item }) => (
-                      <TouchableOpacity
-                        style={styles.filterModalItem}
-                        onPress={() => {
-                          filterPostByType(item);
-                          setShowFilterModal(false);
-                        }}
-                      >
-                        <Text style={styles.filterModalItemText}>
-                          {item === PostType.ALL ? 'All' : item.charAt(0).toUpperCase() + item.slice(1)}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
-                  />
-                  <TouchableOpacity style={styles.filterModalCloseButton} onPress={() => setShowFilterModal(false)}>
-                    <Ionicons name="close" size={24} color="#00ffff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </Modal>
+            <CommunityFeedToolbar
+              userProfile={userProfile}
+              activeFilter={activeFeedFilter}
+              onFilterChange={filterPostByType}
+              onSharePress={() => router.push('/(tabs)/workout')}
+              onCreateEvent={() => setShowCreateEventModal(true)}
+            />
             {/* Show initial loading only on first load when feed is empty */}
             {/* Note: RefreshControl already shows its own loading indicator, so we don't need another one */}
             {initialFeedLoading && feed.length === 0 ? (
@@ -2299,33 +2262,38 @@ const CommunityScreen = () => {
               </View>
             ) : (
               <>
-              {/* Dismissible nudge when feed has posts: encourages user to share a workout or run */}
-              {showParticipationNudge && (
-                <View style={styles.participationNudgeCard}>
+              {showParticipationNudge ? (
+                <TouchableOpacity
+                  style={styles.storiesNudge}
+                  onPress={() => {
+                    setShowParticipationNudge(false);
+                    router.push('/(tabs)/workout');
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <View style={styles.storiesNudgeIcon}>
+                    <Ionicons name="flash" size={18} color="#051a1a" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.storiesNudgeTitle}>Friends are active</Text>
+                    <Text style={styles.storiesNudgeSub}>Tap to share your workout or run</Text>
+                  </View>
                   <TouchableOpacity
-                    style={styles.participationNudgeDismiss}
                     onPress={() => setShowParticipationNudge(false)}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    hitSlop={12}
+                    accessibilityLabel="Dismiss"
                   >
-                    <Ionicons name="close" size={20} color="#94a3b8" />
+                    <Ionicons name="close" size={20} color={T.communityTextMuted} />
                   </TouchableOpacity>
-                  <Text style={styles.participationNudgeText}>Your friends are active. Share a workout or run?</Text>
-                  <TouchableOpacity
-                    style={styles.participationNudgeButton}
-                    onPress={() => router.push('/(tabs)/workout')}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={styles.participationNudgeButtonText}>Share</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            
-                {/* .map() instead of nested FlatList — VirtualizedList inside ScrollView crashes on device when feed loads */}
+                </TouchableOpacity>
+              ) : null}
+
                 <View style={styles.feedList}>
                 {feed.map((item) => {
                   const profile = profileMap[item.user_id] || profileMap[item.creator_id] || {};
                   const isOwnActivity = item.user_id === userProfile?.id;
                   const commentCount = Array.isArray(item.comments) ? item.comments.length : 0;
+                  const kudos = Array.isArray(item.kudos) ? item.kudos : [];
 
                   if (item.type === 'workout') {
                     const durationSeconds = resolveDurationSeconds(item.duration_seconds, item.duration, 'seconds');
@@ -2352,6 +2320,7 @@ const CommunityScreen = () => {
                         userId={item.user_id}
                         photoUrl={item.photo_url}
                         initialCommentCount={commentCount}
+                        initialKudos={kudos}
                         borderColor={item.border_color || undefined}
                         // TEMPORARILY DISABLED: Music visibility on feed cards
                         // spotifyTracksPreview={item.spotify_tracks_preview || []}
@@ -2385,6 +2354,7 @@ const CommunityScreen = () => {
                         userId={item.user_id}
                         photoUrl={item.photo_url}
                         initialCommentCount={commentCount}
+                        initialKudos={kudos}
                         borderColor={item.border_color || undefined}
                       />
                     );
@@ -2535,6 +2505,7 @@ const CommunityScreen = () => {
                          userId={item.user_id}
                          photoUrl={item.photo_url}
                          initialCommentCount={commentCount}
+                         initialKudos={kudos}
                          runData={{
                            path: item.path,
                            distance_meters: item.distance_meters,
@@ -2612,29 +2583,34 @@ const CommunityScreen = () => {
           </>
         ) : activeTab === 'groups' ? (
           <View style={styles.groupsContainer}>
-            <View style={styles.groupsHeader}>
-              <Text style={styles.sectionTitle}>Groups</Text>
+            <View style={styles.panelToolbar}>
+              <TextInput
+                style={styles.searchInputCompact}
+                placeholder="Search groups…"
+                placeholderTextColor={T.communityTextMuted}
+                value={groupSearch}
+                onChangeText={(text) => {
+                  setGroupSearch(text);
+                  searchGroups(text);
+                }}
+              />
               {isPremium ? (
-                <TouchableOpacity onPress={() => setShowCreateGroupModal(true)}>
-                  <Ionicons name="add-circle" size={28} color="#00ffff" />
+                <TouchableOpacity
+                  style={styles.panelToolbarBtn}
+                  onPress={() => setShowCreateGroupModal(true)}
+                  accessibilityLabel="Create group"
+                >
+                  <Ionicons name="add" size={24} color="#051a1a" />
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity onPress={() => setShowPremiumModal(true)}>
-                  <Ionicons name="add-circle" size={28} color="#666" />
+                <TouchableOpacity
+                  style={[styles.panelToolbarBtn, styles.panelToolbarBtnMuted]}
+                  onPress={() => setShowPremiumModal(true)}
+                >
+                  <Ionicons name="lock-closed" size={20} color={T.communityTextMuted} />
                 </TouchableOpacity>
               )}
             </View>
-
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search groups..."
-              placeholderTextColor="#888"
-              value={groupSearch}
-              onChangeText={(text) => {
-                setGroupSearch(text);
-                searchGroups(text);
-              }}
-            />
 
             {invitations.length > 0 && (
               <View style={styles.section}>
@@ -2741,17 +2717,16 @@ const CommunityScreen = () => {
           </View>
         ) : (
           <>
-            <View style={styles.searchSection}>
-              <Text style={styles.searchHeader}>Add Friends</Text>
-              {schoolClassmatesOnly ? (
-                <Text style={{ color: T.communityTextMuted, fontSize: 12, marginBottom: 8 }}>
-                  Search classmates by BetterU username — same school only.
-                </Text>
-              ) : null}
+            <View style={styles.friendsSearchCard}>
+              <Ionicons name="search" size={18} color={T.communityTextMuted} style={{ marginRight: 10 }} />
               <TextInput
-                style={styles.searchInput}
-                placeholder="Search users..."
-                placeholderTextColor="#888"
+                style={styles.friendsSearchInput}
+                placeholder={
+                  schoolClassmatesOnly
+                    ? 'Find classmates by username…'
+                    : 'Search by username…'
+                }
+                placeholderTextColor={T.communityTextMuted}
                 value={search}
                 onChangeText={handleSearch}
               />
@@ -3271,11 +3246,95 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   header: {
-    color: T.communityAccent,
-    fontWeight: 'bold',
-    fontSize: 28,
-    marginBottom: 4,
-    textAlign: 'center',
+    color: T.communityTextPrimary,
+    fontWeight: '800',
+    fontSize: 26,
+    letterSpacing: -0.5,
+  },
+  headerSub: {
+    color: T.communityTextMuted,
+    fontSize: 13,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  headerTextBlock: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  storiesNudge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 14,
+    padding: 14,
+    borderRadius: T.communityRadius,
+    backgroundColor: 'rgba(0, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: T.communityBorderActive,
+  },
+  storiesNudgeIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: T.communityAccent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  storiesNudgeTitle: {
+    color: T.communityTextPrimary,
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  storiesNudgeSub: {
+    color: T.communityTextSecondary,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  panelToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  searchInputCompact: {
+    flex: 1,
+    backgroundColor: T.communityCardBg,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    color: T.communityTextPrimary,
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: T.communityBorder,
+  },
+  panelToolbarBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: T.communityAccent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  panelToolbarBtnMuted: {
+    backgroundColor: T.communityCardBg,
+    borderWidth: 1,
+    borderColor: T.communityBorder,
+  },
+  friendsSearchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: T.communityCardBg,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: T.communityBorder,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  friendsSearchInput: {
+    flex: 1,
+    paddingVertical: 12,
+    color: T.communityTextPrimary,
+    fontSize: 15,
   },
   searchInput: {
     backgroundColor: 'rgba(0, 255, 255, 0.05)',
@@ -4054,11 +4113,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: T.spacing.md,
-    marginBottom: 4,
-  },
-  headerSideSpacer: {
-    width: 44,
-    height: 44,
+    marginBottom: T.spacing.xs,
   },
   searchIconButton: {
     width: 44,
@@ -4186,7 +4241,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   feedList: {
-    marginTop: 16,
+    marginTop: 4,
   },
   loadMoreButton: {
     backgroundColor: 'rgba(0, 255, 255, 0.1)',

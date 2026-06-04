@@ -14,8 +14,8 @@ import MentalSessionSummary from '../components/MentalSessionSummary';
 import { FloatingAITherapist } from '../../components/FloatingAITherapist';
 import { MentalSessionShareModal } from '../../components/MentalSessionShareModal';
 import { SharedMentalSessionsList } from '../../components/SharedMentalSessionsList';
-import { StudentDailyPulseCard } from '../../components/school/StudentDailyPulseCard';
 import { VolunteerPromoCard } from '../../components/school/VolunteerPromoCard';
+import { useAuthSession } from '../../hooks/useAuthSession';
 import { DAILY_EXAMEN_CATEGORY } from '../../lib/dailyExamNavigation';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 
@@ -130,6 +130,7 @@ const MentalScreen = () => {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { scrollPaddingBottom } = useBottomChromeInsets();
+  const { workspace } = useAuthSession();
   const { user } = useAuth();
   const { updateMood, incrementStat, mood } = useTracking();
   const [showMoodModal, setShowMoodModal] = useState(false);
@@ -628,7 +629,19 @@ const MentalScreen = () => {
           </View>
         </View>
 
-        <StudentDailyPulseCard />
+        {workspace === 'student' ? (
+          <TouchableOpacity
+            style={styles.schoolWellnessChip}
+            onPress={() => router.replace('/(tabs)/school-wellness')}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Open School wellness pulse"
+          >
+            <Ionicons name="pulse-outline" size={18} color="#00ffff" />
+            <Text style={styles.schoolWellnessChipText}>School wellness pulse → School tab</Text>
+            <Ionicons name="chevron-forward" size={16} color="#666" />
+          </TouchableOpacity>
+        ) : null}
 
         {/* AI Wellness Recommendation Banner */}
         <View style={styles.aiRecommendationBanner}>
@@ -1355,6 +1368,24 @@ const styles = StyleSheet.create({
   },
   enhancedActionButtonSmallText: {
     color: '#ddd',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  schoolWellnessChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0, 229, 229, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 229, 229, 0.22)',
+  },
+  schoolWellnessChipText: {
+    flex: 1,
+    color: '#9aa4ad',
     fontSize: 13,
     fontWeight: '600',
   },

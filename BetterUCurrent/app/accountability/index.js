@@ -11,13 +11,22 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { navigateToHome } from '../../utils/safeNavigation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUser } from '../../context/UserContext';
 import { PremiumAvatar } from '../components/PremiumAvatar';
 import {
   getAccountabilityPartners,
   removeAccountabilityPartner,
+  triggerWeeklyCheckInReminders,
+  getCheckInsForPartnership,
 } from '../../utils/accountabilityService';
+import {
+  formatRhythmSummary,
+  isCheckInDueThisWeek,
+  isCheckInDayToday,
+} from '../../utils/accountabilityUtils';
+import { syncPartnershipLocalReminder } from '../../lib/accountabilityReminders';
 
 export default function AccountabilityScreen() {
   const { userProfile } = useUser();
@@ -30,8 +39,40 @@ export default function AccountabilityScreen() {
   const load = useCallback(async () => {
     if (!userProfile?.id) return;
     try {
+      try {
+        await triggerWeeklyCheckInReminders();
+      } catch (reminderErr) {
+        console.warn('[accountability] server reminders:', reminderErr?.message);
+      }
+
       const list = await getAccountabilityPartners(userProfile.id);
-      setPartners(list);
+      const enriched = await Promise.all(
+        list.map(async (p) => {
+          try {
+            const history = await getCheckInsForPartnership(p.id, 6);
+            return {
+              ...p,
+              checkInDue: isCheckInDueThisWeek(history, userProfile.id),
+              isCheckInDay: isCheckInDayToday(p.check_in_day),
+            };
+          } catch {
+            return { ...p, checkInDue: true, isCheckInDay: false };
+          }
+        }),
+      );
+      setPartners(enriched);
+
+      await Promise.all(
+        enriched.map((p) =>
+          syncPartnershipLocalReminder({
+            partnershipId: p.id,
+            partnerName: p.partner?.full_name || p.partner?.username || 'your partner',
+            checkInDay: p.check_in_day || 'sunday',
+            reminderHourUtc: p.reminder_hour_utc ?? 18,
+            enabled: p.reminders_enabled !== false,
+          }).catch(() => {}),
+        ),
+      );
     } catch (e) {
       console.error(e);
     } finally {
@@ -82,7 +123,7 @@ export default function AccountabilityScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigateToHome(router)}>
           <Ionicons name="arrow-back" size={24} color="#00ffff" />
         </TouchableOpacity>
         <Text style={styles.title}>Accountability partners</Text>
@@ -113,23 +154,52 @@ export default function AccountabilityScreen() {
         renderItem={({ item }) => {
           const name = item.partner?.full_name || item.partner?.username || 'Partner';
           return (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() =>
-                router.push({
-                  pathname: '/accountability/check-in',
-                  params: { partnershipId: item.id, partnerId: item.partner_id },
-                })
-              }
-              activeOpacity={0.8}
-            >
-              <PremiumAvatar uri={item.partner?.avatar_url} size={48} />
-              <View style={styles.cardContent}>
-                <Text style={styles.cardName}>{name}</Text>
-                <Text style={styles.cardMeta}>Tap for this week's check-in</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={24} color="#666" />
-            </TouchableOpacity>
+            <View style={styles.card}>
+              <TouchableOpacity
+                style={styles.cardMain}
+                onPress={() =>
+                  router.push({
+                    pathname: '/accountability/check-in',
+                    params: { partnershipId: item.id, partnerId: item.partner_id },
+                  })
+                }
+                activeOpacity={0.8}
+              >
+                <PremiumAvatar uri={item.partner?.avatar_url} size={48} />
+                <View style={styles.cardContent}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.cardName}>{name}</Text>
+                    {item.checkInDue ? (
+                      <View style={styles.dueBadge}>
+                        <Text style={styles.dueBadgeText}>
+                          {item.isCheckInDay ? 'Due today' : 'Due this week'}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={styles.doneBadge}>
+                        <Text style={styles.doneBadgeText}>Done</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.cardMeta} numberOfLines={2}>
+                    {formatRhythmSummary(item)}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={24} color="#666" />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.settingsLink}
+                onPress={() =>
+                  router.push({
+                    pathname: '/accountability/partnership-settings',
+                    params: { partnershipId: item.id },
+                  })
+                }
+              >
+                <Ionicons name="calendar-outline" size={16} color="#00ffff" />
+                <Text style={styles.settingsLinkText}>Rhythm & meetup</Text>
+              </TouchableOpacity>
+            </View>
           );
         }}
       />
@@ -159,16 +229,41 @@ const styles = StyleSheet.create({
   },
   addButtonText: { marginLeft: 10, color: '#000', fontWeight: '600' },
   card: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#1a1a1a',
-    padding: 16,
     borderRadius: 12,
     marginBottom: 12,
+    overflow: 'hidden',
   },
+  cardMain: { flexDirection: 'row', alignItems: 'center', padding: 16 },
   cardContent: { flex: 1, marginLeft: 12 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
   cardName: { fontSize: 16, fontWeight: '600', color: '#fff' },
-  cardMeta: { fontSize: 12, color: '#888' },
+  cardMeta: { fontSize: 12, color: '#888', marginTop: 4 },
+  dueBadge: {
+    backgroundColor: '#ff950033',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  dueBadgeText: { color: '#ff9500', fontSize: 11, fontWeight: '700' },
+  doneBadge: {
+    backgroundColor: '#00ff0033',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  doneBadgeText: { color: '#6f6', fontSize: 11, fontWeight: '700' },
+  settingsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#252525',
+  },
+  settingsLinkText: { color: '#00ffff', fontSize: 12, fontWeight: '600' },
   empty: { alignItems: 'center', paddingVertical: 48 },
   emptyText: { fontSize: 16, color: '#ccc', marginTop: 12 },
   emptySubtext: { fontSize: 14, color: '#666', marginTop: 4 },

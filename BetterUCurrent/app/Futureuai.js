@@ -35,8 +35,14 @@ import Markdown from 'react-native-markdown-display';
 import UserPlan from '../components/UserPlan';
 import { loadFutureuPlanArtifact, saveFutureuPlanArtifact } from '../utils/futureuPlanStorage';
 import QuestionsArtifact from '../components/questionsArtifact';
-
-
+import {
+  PROMPT_MODE,
+  RESPONSE_DEPTH,
+  MODE_OPTIONS,
+  buildSystemPrompt,
+  buildUserContextPayload,
+  extractGoalConstraints,
+} from '../lib/futureuPromptEngine';
 
 const CLAUDE_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 /** Try newest first; fall back to dated snapshots if an alias is not enabled on your Anthropic account. */
@@ -70,159 +76,6 @@ function formatFutureuUserError(err) {
     return 'Network error. Check your connection and try again.';
   }
   return raw || 'Something went wrong. Please try again.';
-}
-
-const PROMPT_MODE = {
-  SPECIFIC: 'specific',
-  COMPOSITE: 'composite',
-};
-
-/** Controls answer length; wired into system prompt + USER_CONTEXT_JSON + max_tokens. */
-const RESPONSE_DEPTH = {
-  QUICK: 'quick',
-  DETAILED: 'detailed',
-};
-
-const DEPTH_OPTIONS = [
-  { id: RESPONSE_DEPTH.QUICK, label: 'Quick', description: 'Short reply + follow-ups' },
-  { id: RESPONSE_DEPTH.DETAILED, label: 'Detailed', description: 'Full sections & plan' },
-];
-
-/**
- * Injected into the system prompt so Quick vs Detailed actually changes model behavior.
- * (Module-level prompt strings cannot read React state — depth must be passed in here.)
- */
-function getResponseDepthBlock(depth) {
-  if (depth === RESPONSE_DEPTH.QUICK) {
-    return `
-Response depth: QUICK (USER_CONTEXT_JSON.response_depth is "quick")
-- Keep the visible Markdown body brief: at most 8-12 short sentences, plus 2-3 bullet lines if helpful.
-- Use at most two ## headings in the body (do not write seven long numbered sections).
-- Still output valid PLAN_JSON and TASKS_JSON as required. For PLAN_JSON use 2-4 milestones and 3-5 checklist items that match the shorter answer.
-- End by saying you will refine their plan after they answer your follow-up questions. Ask 1-3 specific questions (e.g. region, deadline, motivation, resources).
-- Still include PLAN_JSON.implementation_intentions with 3-4 short questions_for_user tailored to their goal (implementation intentions architect); keep the Markdown section compact.
-`;
-  }
-  return `
-Response depth: DETAILED (USER_CONTEXT_JSON.response_depth is "detailed")
-- Follow the full output format below with rich detail in each section.
-- PLAN_JSON may use fuller milestones and up to 12 checklist items as in PLAN_JSON_RULE.
-- End with follow-up questions and state you will refine the plan after they answer.
-- Apply the full IMPLEMENTATION INTENTION architect in the body and PLAN_JSON (see IMPLEMENTATION_INTENTION_RULE in PLAN_JSON shape).
-`;
-}
-
-const TASKS_JSON_RULE = `
-At the very end of your reply, after all sections, add exactly one final line (no text after it):
-TASKS_JSON: ["task 1", "task 2", "task 3", "task 4", "task 5"]
-Use 3-5 short, actionable tasks the user can do this week based on your advice. Do not put TASKS_JSON anywhere else in the message.
-`;
-
-const PLAN_JSON_RULE = `
-After your main answer (before TASKS_JSON), include exactly one line that starts with PLAN_JSON: followed by a single JSON object on the same line or spanning lines until the closing brace.
-The JSON must match this shape:
-{
-  "plan_title": "short title",
-  "goal": "user goal text",
-  "timeframe_days": 90,
-  "persona": { "name": "...", "why_match": "..." },
-  "milestones": [
-    { "id": "m1", "title": "...", "start_day": 1, "end_day": 30, "success_criteria": "..." }
-  ],
-  "checklist": [
-    { "id": "c1", "text": "...", "due_day": 7, "priority": "high", "completed": false }
-  ],
-  "risks": ["optional strings"],
-  "final_thoughts": "short string",
-  "implementation_intentions": {
-    "summary": "one sentence: when + where + first concrete action",
-    "questions_for_user": [
-      "Logistical question tailored to their goal (e.g. exact time block, route, tool)"
-    ],
-    "suggested_if_then": [
-      { "if": "I feel tired or unmotivated", "then": "the smallest action I will still do" }
-    ],
-    "user_commitments": ["optional: fill on later turns when the user answers; short committed if-then or schedule lines"]
-  }
-}
-Rules:
-- timeframe_days must exactly equal the USER_CONTEXT_JSON timeframe_days when provided.
-- Phase granularity: 1-14 days = daily micro-steps in checklist; 15-60 = weekly-style milestones; 61-365 = monthly; >365 = quarterly.
-- checklist: 5-12 items when possible; due_day is day number within timeframe (1..timeframe_days).
-- implementation_intentions is REQUIRED whenever you output a plan. Tailor questions_for_user to USER_CONTEXT_JSON.goal (e.g. SAT prep: tutoring platform, practice test schedule, what to say when scores disappoint; fitness: gym bag location, backup workout; startup: weekly calendar block, who to tell for accountability). Include at least one question about friction: tiredness, procrastination, or decision paralysis. Offer to help find a resource when relevant (e.g. tutoring platforms).
-- suggested_if_then: 2-4 pairs covering their most likely real-world hurdles.
-- Do not put PLAN_JSON anywhere except that one block. Put human-readable "Final Thoughts" in the main body AND duplicate key ideas in final_thoughts.
-- In the Markdown body, after the plan sections, include a heading ## Implementation intentions and briefly list the same questions (so the user sees them in chat); keep questions_for_user and suggested_if_then in sync with that section.
-`;
-
-const IMPLEMENTATION_INTENTION_ARCHITECT = `
-IMPLEMENTATION INTENTION ARCHITECT (reduces cognitive overload at the moment of action)
-- After the strategic plan is clear, force the user to pre-decide when, where, and how they will act—not vague motivation.
-- Ask uncomfortably specific logistics (which time block, which room, which app or bus route, what exact sentence they will say if they want to quit).
-- Separate "clarifying unknowns" (deadline, region) from "implementation intentions" (execution friction). Both matter; implementation intentions must not be skipped.
-- If USER_CONTEXT_JSON.user_turn_index is 2 or higher and the user is answering prior questions, merge their replies into implementation_intentions.user_commitments as short bullet strings, refine suggested_if_then if needed, and adjust checklist only when their answers require it.
-`;
-
-
-const FUTUREU_BASE_RULES = `
-You are Future U inside the BetterU self-improvement app.
-Address the user by name at least once.
-Tone: encouraging, practical, clear, and concise. No emojis.
-Always provide actionable next steps and tie recommendations to BetterU features (daily tasks, tracking, workouts, mental sessions, community).
-Do not provide harmful, illegal, medical, or financial guarantees.
-If uncertain about a factual claim, mark it as uncertain instead of inventing details.
-If the users goal is unclear or not specific(I want to be helpful, I want to be succesful,) than ask follow up questions to turn a vague goal into a more specific one( I want to start a million dollar charity for the homeless, I want to start a million dollars in yearly revenue in an AI education platform startup )
-Use Markdown in the main body (## headings, **bold**).
-${PLAN_JSON_RULE}
-${TASKS_JSON_RULE}
-${IMPLEMENTATION_INTENTION_ARCHITECT}
-After giving the plan, ask follow-up questions when anything important is still unclear. Always pair those with implementation intentions as specified above.
-`;
-
-const FUTUREU_SPECIFIC_PROMPT = `
-Mode: specific_person_path (PRIMARY MODE)
-Goal:
-- Choose ONE specific real person relevant to the user's target future identity.
-- Explain what that person did to reach that outcome.
-- Translate those lessons into practical steps for the user.
-Constraint matching:
-- The chosen person and story must match the user's stated constraint (e.g. if they ask about Harvard admission, pick someone who fits Harvard specifically—not Oxford—unless the user explicitly asked for similar elite schools or a broader comparison).
-- If you cannot name someone who clearly fits, say so briefly and ask follow-up questions instead of substituting a different school or outcome.
-
-Output format (use the full numbered structure when response depth is DETAILED; when QUICK, follow the QUICK rules in the Response depth block above instead of expanding every section at length):
-1) Chosen Person + Why this match
-2) Their Path Timeline (3-7 milestones)
-3) What to Copy (skills, habits, decisions)
-4) Your Time-Based Plan (must use timeframe_days from USER_CONTEXT_JSON exactly; one coherent plan, not a separate fixed 30-day block unless timeframe is 30)
-5) BetterU Plan (daily tasks, tracking, workouts, mental sessions, community)
-6) Final Thoughts (body); also fill final_thoughts in PLAN_JSON
-7) Clarifying follow-ups: ask 1-3 questions for anything still unknown (region, deadline, constraints, resources). Say you will refine the plan after they answer.
-8) Implementation intentions (mandatory): in the body under ## Implementation intentions, ask 4-6 logistics and hurdle questions tailored to THIS user's goal—not generic motivation. Examples of the kind of specificity required: what they will do or say if tired or unmotivated; the recurring time block in their real week; exact tool or venue (tutor platform, gym, library, commute); if-then for the single most likely excuse. Mirror the same content in PLAN_JSON.implementation_intentions (questions_for_user, suggested_if_then, summary).
-`;
-
-const FUTUREU_COMPOSITE_PROMPT = `
-Mode: composite_fallback
-Goal:
-- Provide a realistic composite path when no single best specific person is obvious.
-- Explain the common milestones and habits people in that path follow.
-
-Output format (full structure for DETAILED; for QUICK follow the Response depth block):
-1) Why no single person was selected
-2) Composite timeline (3-7 milestones)
-3) What to Copy (skills, habits, decisions)
-4) Your Time-Based Plan (must use timeframe_days from USER_CONTEXT_JSON exactly)
-5) BetterU Plan (daily tasks, tracking, workouts, mental sessions, community)
-6) Final Thoughts (body); also fill final_thoughts in PLAN_JSON
-7) Clarifying follow-ups: ask 1-3 questions; say you will refine the plan after they answer.
-8) Implementation intentions (mandatory): same as specific mode—## Implementation intentions in the body plus PLAN_JSON.implementation_intentions, all tailored to USER_CONTEXT_JSON.goal and hours_per_week.
-`;
-
-function buildSystemPrompt(displayName, mode, responseDepth = RESPONSE_DEPTH.DETAILED) {
-  const userName = (displayName && String(displayName).trim()) || 'friend';
-  const modePrompt =
-    mode === PROMPT_MODE.SPECIFIC ? FUTUREU_SPECIFIC_PROMPT : FUTUREU_COMPOSITE_PROMPT;
-  const depthBlock = getResponseDepthBlock(responseDepth);
-  return `${FUTUREU_BASE_RULES}\n\n${depthBlock}\n\nThe user's preferred name is "${userName}".\n\n${modePrompt}`;
 }
 
 function buildSessionTitle(text) {
@@ -329,20 +182,11 @@ async function callClaude(apiKey, systemPrompt, messages, maxTokens = 2500) {
 
 
 const PRESET_PROMPTS = [
-  'I want to become a software engineer',
+  'I want to become a software engineer at a strong tech company',
+  'I want to get into Harvard for my intended major',
   'I want to become a registered nurse',
-  'I want to become a founder',
-  'I want to become more confident as a leader',
-  'I want to become a sports psychologist',
-];
-
-
-
-
-
-const MODE_OPTIONS = [
-  { id: PROMPT_MODE.SPECIFIC, label: 'Specific Person', description: 'One real role model path' },
-  { id: PROMPT_MODE.COMPOSITE, label: 'Composite', description: 'Blended typical path' },
+  'I want to build a startup with real revenue',
+  'I want to grow as a confident team leader',
 ];
 
 const Futureuai = () => {
@@ -775,17 +619,25 @@ const Futureuai = () => {
     const tf = Math.max(1, parseInt(String(timeFrameDays).replace(/\D/g, ''), 10) || 90);
     const hpw = Math.max(0, parseInt(String(hoursPerWeek).replace(/\D/g, ''), 10) || 7);
     const userTurnIndex = [...chatItems, userMessage].filter((m) => m.role === 'user').length;
-    const userPayload = {
+    const goalConstraints = extractGoalConstraints(trimmed);
+    const userPayload = buildUserContextPayload({
       goal: (goal && goal.trim()) || trimmed,
-      timeframe_days: tf,
-      hours_per_week: hpw,
-      user_message: trimmed,
-      response_depth: responseDepth,
-      user_turn_index: userTurnIndex,
-    };
+      timeframeDays: tf,
+      hoursPerWeek: hpw,
+      userMessage: trimmed,
+      responseDepth,
+      userTurnIndex,
+      promptMode,
+      goalConstraints,
+    });
 
     try {
-      const systemPrompt = buildSystemPrompt(displayName, promptMode, responseDepth);
+      const systemPrompt = buildSystemPrompt(
+        displayName,
+        promptMode,
+        responseDepth,
+        goalConstraints,
+      );
       const transcript = [...chatItems, userMessage];
       const recent =
         transcript.length > MAX_MESSAGES_IN_CONTEXT
@@ -1008,11 +860,7 @@ const Futureuai = () => {
             </TouchableOpacity>
             <View style={styles.headerTitles}>
               <Text style={styles.title}>Future U</Text>
-              <Text style={styles.subtitle}>Career & identity guide</Text>
-              {usageHint ? <Text style={styles.usageHint}>{usageHint}</Text> : null}
-              <Text style={styles.disclaimer}>
-                For planning and motivation only — not medical, legal, or financial advice.
-              </Text>
+              <Text style={styles.subtitle}>Pathfinding coach</Text>
             </View>
             <TouchableOpacity style={styles.headerIconBtn} onPress={clearChat}>
               <Ionicons name="trash-outline" size={22} color="#ff6b6b" />
@@ -1069,58 +917,33 @@ const Futureuai = () => {
             </View>
           )}
 
-          <View style={styles.modeToggleRow}>
-            {MODE_OPTIONS.map((option) => {
-              const selected = promptMode === option.id;
-              return (
-                <TouchableOpacity
-                  key={option.id}
-                  style={[styles.modeToggleButton, selected && styles.modeToggleButtonActive]}
-                  onPress={() => setPromptMode(option.id)}
-                  disabled={loading}
-                  activeOpacity={0.85}
-                >
-                  <Text style={[styles.modeToggleTitle, selected && styles.modeToggleTitleActive]}>
-                    {option.label}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.modeToggleSubtitle,
-                      selected && styles.modeToggleSubtitleActive,
-                    ]}
+          <View style={styles.pathModeBar}>
+            <Text style={styles.pathModeLabel}>Path style</Text>
+            <View style={styles.pathModeSegment}>
+              {MODE_OPTIONS.map((option) => {
+                const selected = promptMode === option.id;
+                return (
+                  <TouchableOpacity
+                    key={option.id}
+                    style={[styles.pathModeBtn, selected && styles.pathModeBtnActive]}
+                    onPress={() => setPromptMode(option.id)}
+                    disabled={loading}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
                   >
-                    {option.description}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <View style={styles.depthToggleRow}>
-            {DEPTH_OPTIONS.map((option) => {
-              const selected = responseDepth === option.id;
-              return (
-                <TouchableOpacity
-                  key={option.id}
-                  style={[styles.depthToggleButton, selected && styles.depthToggleButtonActive]}
-                  onPress={() => setResponseDepth(option.id)}
-                  disabled={loading}
-                  activeOpacity={0.85}
-                >
-                  <Text style={[styles.depthToggleTitle, selected && styles.depthToggleTitleActive]}>
-                    {option.label}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.depthToggleSubtitle,
-                      selected && styles.depthToggleSubtitleActive,
-                    ]}
-                  >
-                    {option.description}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+                    <Text style={[styles.pathModeBtnText, selected && styles.pathModeBtnTextActive]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.pathModeHint}>
+              {promptMode === PROMPT_MODE.SPECIFIC
+                ? MODE_OPTIONS[0].description
+                : MODE_OPTIONS[1].description}
+            </Text>
           </View>
 
           <FlatList
@@ -1135,10 +958,13 @@ const Futureuai = () => {
               <View style={styles.emptyWrap}>
                 <Text style={styles.emptyTitle}>Who do you want to become?</Text>
                 <Text style={styles.emptyBody}>
-                  Open the left menu to revisit past chats. Start a new prompt and Future U will save
-                  this conversation to Supabase.
+                  Choose Role model for one real exemplar, or General path for a typical playbook. Be
+                  specific (school, role, sport) so answers match your target—not a nearby substitute.
                 </Text>
-                <Text style={styles.emptyHint}>Try a starter prompt below.</Text>
+                <Text style={styles.emptyDisclaimer}>
+                  Planning & motivation only — not medical, legal, or financial advice.
+                </Text>
+                <Text style={styles.emptyHint}>Starter prompts below · menu icon for past chats</Text>
               </View>
             }
             ListFooterComponent={
@@ -1173,6 +999,41 @@ const Futureuai = () => {
             showsVerticalScrollIndicator={false}
           />
           <BlurView intensity={40} tint="dark" style={[styles.inputBar, { paddingBottom: 12 + insets.bottom }]}>
+            <View style={styles.composerMetaRow}>
+              {usageHint ? <Text style={styles.usageHint}>{usageHint}</Text> : <View />}
+              <TouchableOpacity
+                style={[
+                  styles.depthChip,
+                  responseDepth === RESPONSE_DEPTH.QUICK && styles.depthChipActive,
+                ]}
+                onPress={() =>
+                  setResponseDepth((d) =>
+                    d === RESPONSE_DEPTH.QUICK ? RESPONSE_DEPTH.DETAILED : RESPONSE_DEPTH.QUICK,
+                  )
+                }
+                disabled={loading}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  responseDepth === RESPONSE_DEPTH.QUICK
+                    ? 'Brief replies on. Tap for full plan.'
+                    : 'Full plan on. Tap for brief replies.'
+                }
+              >
+                <Ionicons
+                  name={responseDepth === RESPONSE_DEPTH.QUICK ? 'flash' : 'reader-outline'}
+                  size={14}
+                  color={responseDepth === RESPONSE_DEPTH.QUICK ? '#0f172a' : '#c4b5fd'}
+                />
+                <Text
+                  style={[
+                    styles.depthChipText,
+                    responseDepth === RESPONSE_DEPTH.QUICK && styles.depthChipTextActive,
+                  ]}
+                >
+                  {responseDepth === RESPONSE_DEPTH.QUICK ? 'Brief' : 'Full plan'}
+                </Text>
+              </TouchableOpacity>
+            </View>
             {editingUserMessageId ? (
               <View style={styles.editBanner}>
                 <Text style={styles.editBannerText}>Editing your message</Text>
@@ -1302,10 +1163,9 @@ const styles = StyleSheet.create({
   },
   headerIconBtn: { padding: 8 },
   headerTitles: { flex: 1, marginHorizontal: 4 },
-  title: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
-  subtitle: { fontSize: 12, color: '#c4b5fd', opacity: 0.95, marginTop: 2 },
-  usageHint: { fontSize: 11, color: '#86efac', marginTop: 4, fontWeight: '600' },
-  disclaimer: { fontSize: 10, color: '#94a3b8', marginTop: 4, lineHeight: 14, maxWidth: 220 },
+  title: { fontSize: 20, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
+  subtitle: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+  usageHint: { fontSize: 11, color: '#86efac', fontWeight: '600', flex: 1 },
   sidebarOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 20,
@@ -1362,59 +1222,71 @@ const styles = StyleSheet.create({
   chatListHeader: {
     paddingBottom: 4,
   },
-  modeToggleRow: {
-    flexDirection: 'row',
-    gap: 8,
+  pathModeBar: {
     paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingTop: 6,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(139, 92, 246, 0.18)',
   },
-  modeToggleButton: {
-    flex: 1,
+  pathModeLabel: {
+    color: '#64748b',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  pathModeSegment: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(15, 15, 24, 0.85)',
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.25)',
+    padding: 3,
+  },
+  pathModeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 9,
+    alignItems: 'center',
+  },
+  pathModeBtnActive: {
+    backgroundColor: 'rgba(34, 211, 238, 0.2)',
+  },
+  pathModeBtnText: { color: '#94a3b8', fontSize: 13, fontWeight: '700' },
+  pathModeBtnTextActive: { color: '#e0f2fe' },
+  pathModeHint: {
+    color: '#64748b',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 8,
+    paddingHorizontal: 2,
+  },
+  composerMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 8,
+  },
+  depthChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: 'rgba(139, 92, 246, 0.35)',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
   },
-  modeToggleButtonActive: {
+  depthChipActive: {
+    backgroundColor: '#22d3ee',
     borderColor: '#22d3ee',
-    backgroundColor: 'rgba(34, 211, 238, 0.12)',
-    shadowColor: '#22d3ee',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  modeToggleTitle: { color: '#cbd5e1', fontSize: 12, fontWeight: '700' },
-  modeToggleTitleActive: { color: '#e0f2fe' },
-  modeToggleSubtitle: { color: '#94a3b8', fontSize: 11, marginTop: 2 },
-  modeToggleSubtitleActive: { color: '#e9d5ff' },
-  depthToggleRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 6,
-  },
-  depthToggleButton: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(196, 181, 253, 0.22)',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    backgroundColor: 'rgba(30, 27, 45, 0.6)',
-  },
-  depthToggleButtonActive: {
-    borderColor: '#a78bfa',
-    backgroundColor: 'rgba(139, 92, 246, 0.18)',
-  },
-  depthToggleTitle: { color: '#cbd5e1', fontSize: 11, fontWeight: '800' },
-  depthToggleTitleActive: { color: '#ede9fe' },
-  depthToggleSubtitle: { color: '#94a3b8', fontSize: 10, marginTop: 2 },
-  depthToggleSubtitleActive: { color: '#ddd6fe' },
+  depthChipText: { color: '#c4b5fd', fontSize: 11, fontWeight: '700' },
+  depthChipTextActive: { color: '#0f172a' },
   listContent: {
     paddingHorizontal: 16,
     paddingTop: 6,
@@ -1424,7 +1296,8 @@ const styles = StyleSheet.create({
   emptyWrap: { paddingVertical: 20, paddingHorizontal: 4 },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 10 },
   emptyBody: { fontSize: 14, lineHeight: 22, color: '#cbd5e1' },
-  emptyHint: { fontSize: 13, color: '#22d3ee', marginTop: 16 },
+  emptyDisclaimer: { fontSize: 12, color: '#64748b', marginTop: 12, lineHeight: 18 },
+  emptyHint: { fontSize: 13, color: '#22d3ee', marginTop: 14 },
   messageRow: { flexDirection: 'row', marginVertical: 8, maxWidth: '92%' },
   userRow: { alignSelf: 'flex-end' },
   assistantRow: { alignSelf: 'flex-start' },

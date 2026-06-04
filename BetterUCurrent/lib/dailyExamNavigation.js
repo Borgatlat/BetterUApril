@@ -8,7 +8,7 @@ export const DAILY_EXAMEN_CATEGORY = {
   title: "Daily Examen",
   icon: "search",
   color: "#FFB74D",
-  description: "A 3-minute reflection on your day",
+  description: "St. Ignatius’s prayerful review of your day with Christ (~3 min)",
   exercises: [
     {
       id: "daily-examen",
@@ -17,17 +17,22 @@ export const DAILY_EXAMEN_CATEGORY = {
       session_type: "examen",
       type: "examen",
       description:
-        "Examination of conscience: find what went wrong, what went right, and how to improve—in 3 minutes.",
+        "The Ignatian Examen: notice where God was with you today, receive mercy, and choose how to live tomorrow.",
       steps: JSON.stringify([
-        "Gratitude — What are you grateful for today? Recall one or two moments or people.",
-        "Light — Pause and invite clarity. Ask to see your day honestly and without harsh judgment.",
-        "Review — Look back at your day. What drew you toward your best self? What pulled you away?",
-        "Sorrow — Where did you fall short? Acknowledge it with kindness, not self-criticism.",
-        "Hope — What one thing will you do differently tomorrow? Set a gentle intention.",
+        "Presence — Become still. God is here. Take a slow breath and ask the Holy Spirit to guide this prayer.",
+        "Gratitude — Thank God for two gifts from today: people, moments, strength, beauty, or grace you received.",
+        "Review — Walk through your day with Christ. Where did you love well? Where did fear, pride, or distraction pull you away?",
+        "Contrition — Name one way you fell short—not to shame yourself, but to bring it to Jesus and ask His mercy.",
+        "Resolution — With the Spirit’s help, choose one small step for tomorrow: prayer, kindness, honesty, courage, or reconciliation.",
       ]),
     },
   ],
 };
+
+/** True for the shared Daily Examen session (school + mental wellness). */
+export function isDailyExamenSession(session) {
+  return session?.id === "daily-examen" || session?.session_type === "examen";
+}
 
 /**
  * Route params for expo-router `push` to category-exercises (same shape as mental.js).

@@ -6,6 +6,13 @@ import { Video } from 'expo-av'; // Import Video component for video playback
 import { supabase } from '../../lib/supabase';
 import { useNotifications } from '../../context/NotificationContext';
 import { useRouter } from 'expo-router';
+import { toggleKudos, supportsKudos } from '../../utils/kudosService';
+import { createKudosNotification } from '../../utils/notificationHelpers';
+import { useAuth } from '../../context/AuthContext';
+import { COMMUNITY_THEME } from '../../config/communityTheme';
+import { formatApiError } from '../../lib/formatApiError';
+
+const KUDOS_ACCENT = COMMUNITY_THEME.communityAccent;
 import CommentsModal from '../(modals)/CommentsModal';
 import ReportModal from '../../components/ReportModal';
 import { PremiumAvatar } from './PremiumAvatar';
@@ -90,6 +97,7 @@ const FeedCard = ({
   userId,
   photoUrl,
   initialCommentCount = 0,
+  initialKudos = [],
   username,
   spotifyTracksPreview = [],
   spotifyTrackCount = 0,
@@ -104,8 +112,11 @@ const FeedCard = ({
   borderColor, // Custom border color for workout posts (set with Sparks)
 }) => {
   const [commentCount, setCommentCount] = useState(initialCommentCount);
+  const [kudosList, setKudosList] = useState(Array.isArray(initialKudos) ? initialKudos : []);
+  const [kudosBusy, setKudosBusy] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState(null);
+  const { user: authUser } = useAuth();
+  const currentUserId = authUser?.id ?? null;
   const [showComments, setShowComments] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
 
@@ -226,14 +237,8 @@ const FeedCard = ({
   }, [initialCommentCount]);
 
   useEffect(() => {
-    const getCurrentUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        setCurrentUserId(user.id);
-      }
-    };
-    getCurrentUser();
-  }, []);
+    setKudosList(Array.isArray(initialKudos) ? initialKudos : []);
+  }, [initialKudos, targetId]);
 
   // Share post - defined at component level so it can be used by the share button in JSX
   const sharePost = useCallback(async () => {
@@ -248,6 +253,79 @@ const FeedCard = ({
   }, [targetId]);
 
   const showInteractRow = type === 'workout' || type === 'mental' || type === 'run';
+  const hasKudosed = currentUserId
+    ? kudosList.some((k) => k.user_id === currentUserId)
+    : false;
+  const kudosCount = kudosList.length;
+
+  const handleKudos = useCallback(async () => {
+    if (kudosBusy) return;
+
+    if (!supportsKudos(type)) {
+      Alert.alert('Kudos', 'Kudos are available on workouts, runs, and mental sessions.');
+      return;
+    }
+
+    if (!targetId) {
+      Alert.alert('Kudos', 'This post cannot receive kudos right now.');
+      return;
+    }
+
+    if (!currentUserId) {
+      Alert.alert('Sign in required', 'Sign in to give kudos to your friends.');
+      return;
+    }
+
+    const wasKudosed = hasKudosed;
+    setKudosBusy(true);
+
+    if (wasKudosed) {
+      setKudosList((prev) => prev.filter((k) => k.user_id !== currentUserId));
+    } else {
+      setKudosList((prev) => [...prev, { user_id: currentUserId, created_at: new Date().toISOString() }]);
+    }
+
+    try {
+      const { kudosed } = await toggleKudos(type, targetId, currentUserId);
+
+      if (kudosed && currentUserId !== userId && userId) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('username, full_name')
+          .eq('id', currentUserId)
+          .single();
+        const giverName = profile?.username || profile?.full_name || 'Someone';
+        try {
+          await createKudosNotification(currentUserId, userId, giverName, type, targetId);
+        } catch (notifyErr) {
+          console.warn('[FeedCard] kudos notification:', notifyErr?.message ?? notifyErr);
+        }
+      }
+    } catch (error) {
+      console.error('[FeedCard] kudos error:', error);
+      if (wasKudosed) {
+        setKudosList((prev) => [...prev, { user_id: currentUserId }]);
+      } else {
+        setKudosList((prev) => prev.filter((k) => k.user_id !== currentUserId));
+      }
+      Alert.alert('Could not update kudos', formatApiError(error));
+    } finally {
+      setKudosBusy(false);
+    }
+  }, [currentUserId, targetId, type, kudosBusy, hasKudosed, userId]);
+
+  const navigateToActivity = useCallback(() => {
+    if (type === 'event') return;
+    if (!targetId) {
+      console.error('No target ID provided for navigation');
+      return;
+    }
+    try {
+      router.push(`/activity/${targetId}`);
+    } catch (error) {
+      console.error('Error navigating to activity:', error);
+    }
+  }, [router, targetId, type]);
 
   const getIcon = () => {
     switch (type) {
@@ -304,39 +382,35 @@ const FeedCard = ({
     elevation: 6,
   } : null;
 
+  const cardStyle = [
+    styles.card,
+    style,
+    eventCardStyle,
+    !eventCardStyle &&
+      borderColor && {
+        borderWidth: 3,
+        borderColor: borderColor,
+        shadowColor: borderColor,
+        shadowOpacity: 0.4,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 5,
+      },
+  ];
+
+  const canOpenActivity = type !== 'event' && Boolean(targetId);
+  const CardBody = canOpenActivity ? TouchableOpacity : View;
+  const cardBodyProps = canOpenActivity
+    ? {
+        onPress: navigateToActivity,
+        activeOpacity: 0.9,
+        accessibilityRole: 'button',
+        accessibilityLabel: 'Open activity details',
+      }
+    : {};
+
   return (
-    <TouchableOpacity 
-      style={[
-        styles.card, 
-        style,
-        // Event cards: special neon blue border
-        eventCardStyle,
-        // Apply custom border color if provided (for workout posts) - only when not event
-        !eventCardStyle && borderColor && {
-          borderWidth: 3,
-          borderColor: borderColor,
-          shadowColor: borderColor,
-          shadowOpacity: 0.4,
-          shadowRadius: 8,
-          shadowOffset: { width: 0, height: 0 },
-          elevation: 5,
-        }
-      ]}
-      onPress={() => {
-        // Event cards don't navigate to activity; join/leave are handled by buttons
-        if (type === 'event') return;
-        try {
-          if (targetId) {
-            router.push(`/activity/${targetId}`);
-          } else {
-            console.error('No target ID provided for navigation');
-          }
-        } catch (error) {
-          console.error('Error navigating to activity:', error);
-        }
-      }}
-      activeOpacity={0.9}
-    >  
+    <View style={cardStyle}>
       <View style={styles.header}>
         <View style={styles.userInfo}>
           <TouchableOpacity onPress={() => {
@@ -371,6 +445,7 @@ const FeedCard = ({
         )}
       </View>
 
+      <CardBody {...cardBodyProps}>
       <View style={styles.titleContainer}>
         <Ionicons name={getIcon()} size={24} color="#00ffff" style={styles.titleIcon} />
         <Text style={styles.title}>{title}</Text>
@@ -632,10 +707,34 @@ const FeedCard = ({
           </View>
         ))}
       </View>
-      
+      </CardBody>
+
       {showInteractRow && (
         <View style={styles.actionsContainer}>
           <View style={styles.topActionsRow}>
+            <TouchableOpacity
+              onPress={handleKudos}
+              style={[styles.kudosButton, hasKudosed && styles.kudosButtonActive]}
+              disabled={kudosBusy}
+              accessibilityLabel={
+                kudosCount > 0
+                  ? `Kudos, ${kudosCount} ${kudosCount === 1 ? 'person' : 'people'}`
+                  : 'Give kudos'
+              }
+              accessibilityRole="button"
+              accessibilityState={{ selected: hasKudosed }}
+            >
+              <Ionicons
+                name={hasKudosed ? 'thumbs-up' : 'thumbs-up-outline'}
+                size={26}
+                color={hasKudosed ? KUDOS_ACCENT : '#6b7280'}
+              />
+              {kudosCount > 0 ? (
+                <Text style={[styles.kudosCountText, hasKudosed && styles.kudosCountTextActive]}>
+                  {kudosCount}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
             <TouchableOpacity
               onPress={sharePost}
               style={styles.shareButton}
@@ -653,8 +752,10 @@ const FeedCard = ({
               accessibilityLabel={`Comments, ${commentCount} ${commentCount === 1 ? 'comment' : 'comments'}`}
               accessibilityRole="button"
             >
-              <Ionicons name="chatbubble-ellipses-outline" size={28} color="#00ffff" />
-              <Text style={styles.commentsText}>{commentCount > 0 ? `(${commentCount})` : ''}</Text>
+              <Ionicons name="chatbubble-ellipses-outline" size={24} color="#00ffff" />
+              {commentCount > 0 ? (
+                <Text style={styles.commentsText}>({commentCount})</Text>
+              ) : null}
             </TouchableOpacity>
             {userId !== currentUserId && (
               <TouchableOpacity
@@ -678,21 +779,44 @@ const FeedCard = ({
         reportedContent={`${type} by ${name}`}
         contentType={type}
       />
-    </TouchableOpacity>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-shareButton: {
-paddingVertical: 8,
-paddingHorizontal: 16,
-borderRadius: 16,
-backgroundColor: 'rgba(0,255,255,0.04)',
-minHeight: 44,
-marginLeft: 10,
-alignItems: 'center',
-justifyContent: 'center',
-},
+  kudosButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    minHeight: 44,
+    gap: 4,
+  },
+  kudosButtonActive: {
+    backgroundColor: 'rgba(0,255,255,0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,255,0.45)',
+  },
+  kudosCountText: {
+    color: '#6b7280',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  kudosCountTextActive: {
+    color: KUDOS_ACCENT,
+  },
+  shareButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,255,255,0.04)',
+    minHeight: 44,
+    marginLeft: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   card: {
     backgroundColor: '#18191b',
     borderRadius: 18,
@@ -898,21 +1022,21 @@ justifyContent: 'center',
     color: '#00ffff',
   },
   commentsButton: {
-   
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center', // Center the content within the button
-    paddingVertical: 8, // Slightly increased padding
-    paddingHorizontal: 16, // Increased padding for better appearance
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 16,
+    backgroundColor: 'rgba(0,255,255,0.04)',
     minHeight: 44,
     marginLeft: 10,
-    backgroundColor: 'rgba(0,255,255,0.04)',  // Consistent height for better touch targets
+    gap: 4,
   },
   commentsText: {
     color: '#00ffff',
-    fontWeight: 'bold',
-    fontSize: 16,
-    marginLeft: 6,
+    fontWeight: '600',
+    fontSize: 14,
   },
   spotifyPreviewContainer: {
     marginTop: 12,

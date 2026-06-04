@@ -125,11 +125,13 @@ const iosPlugins = [
 
 const personalDevPluginBlocklist = new Set(['expo-notifications', 'expo-apple-authentication']);
 
+const withIosProductionPlist = require('./plugins/withIosProductionPlist');
+
 export default {
   expo: {
     name: "BetterU",
     slug: "betterutestflightv8",
-    version: "1.1.6",
+    version: "1.1.7",
     orientation: "portrait",
     // iOS app icons must be fully opaque (no transparency). Repo includes this 1024 source;
     // (If you regenerate a flattened PNG, replace this path.)
@@ -150,7 +152,7 @@ export default {
       bundleIdentifier: "com.enriqueortiz.betteru",
       // Bump buildNumber so iOS/TestFlight treats the next build as a new binary
       // (otherwise you can keep seeing the old app icon due to caching / same build).
-      buildNumber: "12",
+      buildNumber: "13",
       infoPlist: {
         NSCameraUsageDescription: "This app uses the camera to let you take profile pictures.",
         NSPhotoLibraryUsageDescription: "This app uses the photo library to let you select profile pictures.",
@@ -189,12 +191,15 @@ export default {
         backgroundColor: "#000000"
       }
     },
-    plugins: isPersonalIosDev
-      ? iosPlugins.filter((plugin) => {
-          const name = Array.isArray(plugin) ? plugin[0] : plugin;
-          return !personalDevPluginBlocklist.has(name);
-        })
-      : iosPlugins,
+    plugins: [
+      ...(isPersonalIosDev
+        ? iosPlugins.filter((plugin) => {
+            const name = Array.isArray(plugin) ? plugin[0] : plugin;
+            return !personalDevPluginBlocklist.has(name);
+          })
+        : iosPlugins),
+      withIosProductionPlist,
+    ],
     experiments: {
       tsconfigPaths: true
     },
@@ -211,7 +216,10 @@ export default {
         projectId: "57d27416-420d-4d92-8d6d-d1365c22f311"
       },
       openaiApiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY,
+      anthropicApiKey: process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY,
       livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL,
+      supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
+      supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
       admob: {
         // Banner *ad unit* IDs (with /) — created in AdMob console; Android still uses Google's sample test unit until that platform's ad unit is live.
         iosBannerAdUnitId: process.env.EXPO_PUBLIC_ADMOB_IOS_BANNER_AD_UNIT_ID || "ca-app-pub-9221552597487164/1003410305",
@@ -220,15 +228,19 @@ export default {
     },
     env: {
       EXPO_PUBLIC_OPENAI_API_KEY: process.env.EXPO_PUBLIC_OPENAI_API_KEY,
+      EXPO_PUBLIC_ANTHROPIC_API_KEY: process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY,
       EXPO_PUBLIC_ADMOB_IOS_APP_ID: process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID,
       EXPO_PUBLIC_ADMOB_ANDROID_APP_ID: process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID,
       EXPO_PUBLIC_ADMOB_IOS_BANNER_AD_UNIT_ID: process.env.EXPO_PUBLIC_ADMOB_IOS_BANNER_AD_UNIT_ID,
       EXPO_PUBLIC_ADMOB_ANDROID_BANNER_AD_UNIT_ID: process.env.EXPO_PUBLIC_ADMOB_ANDROID_BANNER_AD_UNIT_ID,
-      EXPO_PUBLIC_LIVEKIT_URL: process.env.EXPO_PUBLIC_LIVEKIT_URL
+      EXPO_PUBLIC_LIVEKIT_URL: process.env.EXPO_PUBLIC_LIVEKIT_URL,
+      EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      EXPO_PUBLIC_GOOGLE_MAPS_API_KEY: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY
     },
     owner: "easbetteru",
     // Bare workflow requires a fixed runtime version string (policy-based runtimeVersion is unsupported).
-    runtimeVersion: "1.1.6",
+    runtimeVersion: "1.1.7",
     updates: {
       url: "https://u.expo.dev/57d27416-420d-4d92-8d6d-d1365c22f311"
     }

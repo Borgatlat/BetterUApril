@@ -18,6 +18,7 @@ import {
 } from '../../utils/aiGenerationLimits';
 import { getEngagementLevel } from '../../utils/engagementService';
 import { FloatingAITrainer } from '../../components/FloatingAITrainer';
+import { useBannerAd } from '../../context/BannerAdContext';
 import { AIWorkoutGenerator } from '../../components/AIWorkoutGenerator';
 import { WorkoutShareModal } from '../../components/WorkoutShareModal';
 import MapView, { Polyline, Marker, getMapProvider } from '../../lib/MapView';
@@ -168,6 +169,12 @@ const WorkoutScreen = () => {
   const router = useRouter();
   const params = useLocalSearchParams();
   const [activeTab, setActiveTab] = useState('workout'); // 'workout' or 'run'
+  const { setSuppressed: setBannerSuppressed } = useBannerAd();
+
+  useEffect(() => {
+    setBannerSuppressed(activeTab === 'run');
+    return () => setBannerSuppressed(false);
+  }, [activeTab, setBannerSuppressed]);
   const [showLogs, setShowLogs] = useState(false);
   const [userWorkouts, setUserWorkouts] = useState([]);
 
@@ -4435,7 +4442,7 @@ const startSprintStepTracking = async () => {
         </View>
       </Modal>
       
-      <FloatingAITrainer />
+      {activeTab !== 'run' && <FloatingAITrainer />}
     </View>
   );
 };
@@ -5230,6 +5237,9 @@ const styles = StyleSheet.create({
   map: {
     width: width,
     height: height,
+  },
+  runOverlay: {
+    bottom: Platform.OS === 'ios' ? 24 : 16,
   },
   overlay: {
     position: 'absolute',

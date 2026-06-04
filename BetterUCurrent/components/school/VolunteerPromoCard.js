@@ -5,34 +5,33 @@ import { useRouter } from "expo-router";
 
 /**
  * Navigate to Volunteer opportunities (routes use legacy spelling "oppurtunities").
- * Presented on Mental + Spiritual dashboards.
+ * `compact` — fits the Spiritual Today stack; default card for Mental tab.
  */
-export function VolunteerPromoCard() {
+export function VolunteerPromoCard({ compact = false }) {
   const router = useRouter();
 
   return (
     <TouchableOpacity
-      style={styles.volunteerCard}
+      style={[styles.volunteerCard, compact && styles.volunteerCardCompact]}
       onPress={() => router.push("/volunteer-oppurtunities")}
       activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityLabel="Find volunteer opportunities"
     >
       <View style={styles.volunteerHeader}>
-        <View style={styles.volunteerIconContainer}>
-          <Ionicons name="heart-circle" size={28} color="#00ffff" />
+        <View style={[styles.volunteerIconContainer, compact && styles.volunteerIconCompact]}>
+          <Ionicons name="heart-circle" size={compact ? 22 : 28} color="#00ffff" />
         </View>
         <View style={styles.volunteerTextContainer}>
-          <Text style={styles.volunteerTitle}>Volunteer Opportunities</Text>
-          <Text style={styles.volunteerSubtitle}>Give back and build social fitness</Text>
+          <Text style={[styles.volunteerTitle, compact && styles.volunteerTitleCompact]}>
+            {compact ? "Volunteer today" : "Volunteer Opportunities"}
+          </Text>
+          <Text style={[styles.volunteerSubtitle, compact && styles.volunteerSubtitleCompact]}>
+            {compact ? "Find roles · log service hours" : "Service hours & campus outreach"}
+          </Text>
         </View>
-        <Ionicons name="chevron-forward" size={22} color="#00ffff" />
+        <Ionicons name="chevron-forward" size={compact ? 18 : 22} color="#00ffff" />
       </View>
-
-      <Text style={styles.volunteerDescription}>
-        Find opportunities that match your skills and interests, and make a meaningful impact in
-        your community.
-      </Text>
-
-      
     </TouchableOpacity>
   );
 }
@@ -53,7 +52,6 @@ const styles = StyleSheet.create({
   volunteerHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
   },
   volunteerIconContainer: {
     width: 42,
@@ -77,11 +75,23 @@ const styles = StyleSheet.create({
     color: "#8ddddd",
     fontSize: 13,
   },
-  volunteerDescription: {
-    color: "#d7fefe",
-    fontSize: 14,
-    lineHeight: 21,
-    marginBottom: 12,
+  volunteerCardCompact: {
+    padding: 14,
+    borderRadius: 14,
+  },
+  volunteerIconCompact: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    marginRight: 10,
+  },
+  volunteerTitleCompact: {
+    fontSize: 16,
+    marginBottom: 0,
+  },
+  volunteerSubtitleCompact: {
+    fontSize: 12,
+    marginTop: 2,
   },
   volunteerStatBox: {
     flexDirection: "row",

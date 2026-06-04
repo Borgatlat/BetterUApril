@@ -497,6 +497,52 @@ export async function createLikeNotification(fromUserId, toUserId, fromUserName,
 }
 
 /**
+ * Kudos on feed activities (workout / mental / run). Uses notification type `like` for DB compatibility.
+ */
+export async function createKudosNotification(fromUserId, toUserId, fromUserName, itemType, itemId) {
+  try {
+    const displayName = await getUserDisplayName(fromUserId, fromUserName);
+    const { label, title: activityTitle } = await getActivityDetails(itemType, itemId);
+
+    const title = `${displayName} gave you kudos`;
+    const message = activityTitle
+      ? `Kudos on ${activityTitle}`
+      : `Kudos on your ${label}`;
+
+    const actionData =
+      itemId && typeof itemId === 'string' && !itemId.startsWith('test-')
+        ? {
+            screen: '/(modals)/CommentsScreen',
+            params: { activityId: itemId, activityType: itemType },
+          }
+        : null;
+
+    return await createNotificationWithPush({
+      toUserId,
+      type: 'like',
+      title,
+      message,
+      data: {
+        from_user_id: fromUserId,
+        from_user_name: displayName,
+        item_type: itemType,
+        item_id: itemId,
+        activity_title: activityTitle,
+        activity_label: label,
+        interaction: 'kudos',
+      },
+      isActionable: !!actionData,
+      actionType: actionData ? 'navigate' : null,
+      actionData,
+      priority: 1,
+    });
+  } catch (error) {
+    console.error('Error in createKudosNotification:', error);
+    return { notificationId: null, pushSent: false, error };
+  }
+}
+
+/**
  * Create a workout share notification
  * This is called when someone shares a workout with friends
  */

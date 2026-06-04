@@ -7,6 +7,9 @@ export function resolvePostAuthRoute(workspace, profile) {
     return "/(school)/dashboard";
   }
   if (profile?.onboarding_completed === true) {
+    if (workspace === "student") {
+      return "/(tabs)/school-wellness";
+    }
     return "/(tabs)/home";
   }
   return "/(auth)/onboarding/welcome";

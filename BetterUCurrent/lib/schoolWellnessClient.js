@@ -54,6 +54,27 @@ export async function submitDailyPulse({
 }
 
 /**
+ * Today's pulse row for the logged-in student, or null if not logged yet.
+ */
+export async function fetchTodayPulse() {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError || !user?.id) return null;
+
+  const { data, error } = await supabase
+    .from("daily_pulse_logs")
+    .select("mood, stress_level, sleep_quality, logged_date, anonymize_aggregate")
+    .eq("profile_id", user.id)
+    .eq("logged_date", localDateKey())
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Counselor support: writes identifiable row (allowed only in this flow per product spec).
  * Then notifies staff via Edge Function (service role inserts in-app notifications).
  */

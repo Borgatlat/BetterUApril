@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { hexToRgba } from '../utils/homePageCustomization';
 
 /**
  * Analytics Advice Component
@@ -346,8 +347,8 @@ const AnalyticsAdvice = ({
           ]}
         >
           <View style={styles.adviceHeader}>
-            <View style={[styles.iconContainer, { backgroundColor: `${item.color}20` }]}>
-              <Ionicons name={item.icon} size={20} color={item.color} />
+            <View style={[styles.iconContainer, { backgroundColor: hexToRgba(item.color, 0.12) }]}>
+              <Ionicons name={item.icon} size={22} color={item.color} />
             </View>
             <View style={styles.adviceTextContainer}>
               <Text style={styles.adviceTitle}>{item.title}</Text>
@@ -381,9 +382,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },

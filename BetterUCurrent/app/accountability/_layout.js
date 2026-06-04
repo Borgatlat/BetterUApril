@@ -11,6 +11,7 @@ export default function AccountabilityLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="add-partner" />
       <Stack.Screen name="check-in" />
+      <Stack.Screen name="partnership-settings" />
     </Stack>
   );
 }

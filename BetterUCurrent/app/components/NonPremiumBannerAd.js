@@ -7,6 +7,7 @@ import {
   getBannerAdUnitId,
   isNativeMobileAdsSupported,
 } from '../../lib/adMob';
+import { useBannerAd } from '../../context/BannerAdContext';
 
 function loadBannerAdModule() {
   try {
@@ -23,10 +24,11 @@ function loadBannerAdModule() {
 export default function NonPremiumBannerAd({ style }) {
   const { isPremium, isLoading } = useUser();
   const { setBannerHeight, clearBannerHeight } = useBottomChromeInsets();
+  const { suppressed } = useBannerAd();
   const [adLoaded, setAdLoaded] = useState(false);
   const [adFailed, setAdFailed] = useState(false);
 
-  if (isLoading || isPremium || Platform.OS === 'web') {
+  if (isLoading || isPremium || Platform.OS === 'web' || suppressed) {
     return null;
   }
   if (!isNativeMobileAdsSupported()) return null;

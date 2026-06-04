@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,38 +31,47 @@ import {
   getAnalyticsChartTheme,
   sanitizeChartDataset,
   sumChartValues,
+  buildLineChartConfig,
+  ANALYTICS_CARD,
+  calculateWeightProgressionFromWorkouts,
+  buildPeriodActivityTotals,
+  formatPrValue,
 } from '../../utils/analyticsDataHelpers';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useHomePageCustomization } from '../../hooks/useHomePageCustomization';
 import { hexToRgba } from '../../utils/homePageCustomization';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 
-function parseExercisesField(raw) {
-  if (raw == null) return null;
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'string') {
-    try {
-      const v = JSON.parse(raw);
-      return Array.isArray(v) ? v : null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
+const cardSurfaceStyle = {
+  backgroundColor: ANALYTICS_CARD.backgroundColor,
+  borderRadius: ANALYTICS_CARD.borderRadius,
+  borderWidth: ANALYTICS_CARD.borderWidth,
+  borderColor: ANALYTICS_CARD.borderColor,
+};
 
-/**
- * Analytics Dashboard Screen
- * 
- * This screen provides comprehensive visual analytics including:
- * - Weekly/monthly charts for workouts, mental sessions, calories, water
- * - Trend lines showing improvement over time
- * - Comparison views (this week vs last week)
- * - Heat map calendar for activity streaks
- * - Progress rings for multiple metrics
- * - AI-powered advice for improvement
- */
+/** Section heading with colored ionicon in a soft rounded square — matches Home action cards. */
+const SectionTitle = ({ icon, label, accent }) => (
+  <View style={styles.sectionTitleRow}>
+    <View style={[styles.sectionIconWrap, { backgroundColor: hexToRgba(accent, 0.12) }]}>
+      <Ionicons name={icon} size={18} color={accent} />
+    </View>
+    <Text style={styles.sectionLabel}>{label}</Text>
+  </View>
+);
+
+const StatTile = ({ label, value, sub, icon, color }) => (
+  <View style={[styles.statTile, cardSurfaceStyle]}>
+    <View style={[styles.statTileIcon, { backgroundColor: hexToRgba(color, 0.12) }]}>
+      <Ionicons name={icon} size={20} color={color} />
+    </View>
+    <Text style={styles.statTileValue}>{value}</Text>
+    <Text style={styles.statTileLabel}>{label}</Text>
+    {sub ? <Text style={styles.statTileSub}>{sub}</Text> : null}
+  </View>
+);
+
 const AnalyticsScreen = () => {
+  const router = useRouter();
   const { userProfile } = useUser();
   const { stats, calories, water, protein } = useTracking();
   const insets = useSafeAreaInsets();
@@ -94,6 +104,9 @@ const AnalyticsScreen = () => {
   const [topExercises, setTopExercises] = useState([]);
   const [workoutLogsWithExercises, setWorkoutLogsWithExercises] = useState([]);
   const [recoveryMapRefreshKey, setRecoveryMapRefreshKey] = useState(0);
+  const [runsData, setRunsData] = useState([]);
+  const [personalRecords, setPersonalRecords] = useState([]);
+  const [periodTotals, setPeriodTotals] = useState(null);
   
   // Chart data states
   const [workoutChartData, setWorkoutChartData] = useState(null);
@@ -165,6 +178,8 @@ const AnalyticsScreen = () => {
         mentalResult,
         calorieTrackingResult,
         waterTrackingResult,
+        runsResult,
+        prResult,
       ] = await Promise.all([
         // Fetch workouts for charts (based on selected time period)
         supabase
@@ -211,6 +226,21 @@ const AnalyticsScreen = () => {
           .gte('date', startDateString)
           .lte('date', nowString)
           .order('date', { ascending: true }),
+
+        supabase
+          .from('runs')
+          .select('created_at, distance_meters, duration_seconds')
+          .eq('user_id', userId)
+          .gte('created_at', startDateString)
+          .lte('created_at', nowTimestampIso)
+          .order('created_at', { ascending: true }),
+
+        supabase
+          .from('personal_records')
+          .select('id, exercise, weight_kg, time_minutes, created_at')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(8),
       ]);
 
       if (workoutsResult.error) throw workoutsResult.error;
@@ -232,25 +262,24 @@ const AnalyticsScreen = () => {
       );
       tracking = applyTodayTrackingFromContext(tracking, calories, water);
 
-      setWorkoutData(workoutsResult.data || []);
+      const workoutRows = workoutsResult.data || [];
+      const runRows = runsResult.error ? [] : runsResult.data || [];
+      const prRows = prResult.error ? [] : prResult.data || [];
+
+      setWorkoutData(workoutRows);
       setMentalData(mentalRows);
       setCalorieData(tracking);
       setWaterData(tracking);
+      setRunsData(runRows);
+      setPersonalRecords(prRows);
+      setPeriodTotals(buildPeriodActivityTotals(workoutRows, mentalRows, runRows));
 
-      // Process data into chart format
-      processChartData(workoutsResult.data || [], mentalRows, tracking, timePeriod);
+      processChartData(workoutRows, mentalRows, tracking, timePeriod);
+      calculateComparison(workoutRows, mentalRows, tracking);
 
-      calculateComparison(workoutsResult.data || [], mentalRows, tracking);
-
-      // Calculate weight progression from exercises data (using longer date range)
-      // This analyzes the exercises JSONB field to track how much weight users increased
       const progressionWorkouts = workoutsForProgression.data || [];
       setWorkoutLogsWithExercises(progressionWorkouts);
-      console.log('Workouts for progression:', progressionWorkouts.length, 'workouts found');
-      if (progressionWorkouts.length > 0) {
-        console.log('Sample workout exercises:', progressionWorkouts[0]?.exercises);
-      }
-      calculateWeightProgression(progressionWorkouts);
+      setTopExercises(calculateWeightProgressionFromWorkouts(progressionWorkouts, 8));
 
     } catch (error) {
       console.error('Error fetching analytics data:', error);
@@ -547,182 +576,11 @@ const AnalyticsScreen = () => {
     });
   };
 
-  /**
-   * Calculate weight progression for each exercise
-   * 
-   * This function analyzes the exercises JSONB data stored in user_workout_logs to:
-   * - Track the first recorded weight for each exercise
-   * - Track the latest/heaviest weight for each exercise
-   * - Calculate percentage and absolute weight increases
-   * - Store all weights over time for charting
-   * 
-   * Why group by exercise name? So we can compare the same exercise across different
-   * workouts and track progression. For example, if someone did Bench Press on Jan 1
-   * with 135 lbs and on Jan 15 with 185 lbs, we can show +50 lbs increase.
-   * 
-   * Why use max weight per workout? Users might do different weights across sets
-   * (e.g., 135x10, 155x8, 175x5). Using max weight captures their best effort.
-   */
-  const calculateWeightProgression = (workouts) => {
-    console.log('Calculating weight progression from', workouts.length, 'workouts');
-    
-    // Object to store exercise progression data
-    // Structure: { "Bench Press": { firstWeight: 135, latestWeight: 185, allWeights: [...] } }
-    const exerciseData = {};
-
-    // Loop through each workout to extract exercise data
-    workouts.forEach((workout, workoutIndex) => {
-      const exercises = parseExercisesField(workout.exercises);
-      if (!exercises || exercises.length === 0) {
-        if (workout.exercises != null) {
-          console.log(`Workout ${workoutIndex} has no usable exercises array`);
-        }
-        return;
-      }
-      const workoutDate = new Date(workout.completed_at);
-      
-      // Skip if date is invalid
-      if (isNaN(workoutDate.getTime())) {
-        console.log(`Workout ${workoutIndex} has invalid date:`, workout.completed_at);
-        return;
-      }
-      
-      console.log(`Processing workout ${workoutIndex} with ${exercises.length} exercises`);
-
-      exercises.forEach((exercise) => {
-        const exerciseName = exercise.name || exercise.exerciseName || exercise.title;
-        if (!exerciseName) return;
-
-        // Skip exercises without sets or bodyweight exercises (weight = 0)
-        // We only want to track weighted exercises for progression
-        if (!exercise.sets || exercise.sets.length === 0) return;
-
-        // Find the maximum weight used in this workout for this exercise
-        // Count sets that look “done”: explicit completed flag OR weight+reps filled (matches active-workout save logic)
-        const completedSets = exercise.sets.filter((set) => {
-          if (!set) return false;
-          const weight = parseFloat(set.weight) || 0;
-          if (weight <= 0) return false;
-          const repsRaw = set.reps;
-          const reps = typeof repsRaw === 'string' && repsRaw.includes('-')
-            ? parseInt(repsRaw.split('-')[0], 10) || 0
-            : parseInt(repsRaw, 10) || 0;
-          if (set.completed === true) return true;
-          return reps > 0;
-        });
-        
-        if (completedSets.length === 0) {
-          console.log(`  Exercise "${exerciseName}" has no completed sets with weight > 0`);
-          return;
-        }
-
-        // Get the maximum weight from all completed sets
-        // parseFloat converts string weights to numbers, with fallback to 0
-        const maxWeight = Math.max(
-          ...completedSets.map(set => parseFloat(set.weight) || 0)
-        );
-
-        if (maxWeight > 0) {
-          console.log(`  Exercise "${exerciseName}" max weight: ${maxWeight} lbs`);
-          // First time seeing this exercise? Initialize the tracking object
-          if (!exerciseData[exerciseName]) {
-            exerciseData[exerciseName] = {
-              firstWeight: maxWeight,
-              firstDate: workoutDate,
-              latestWeight: maxWeight,
-              latestDate: workoutDate,
-              allWeights: [], // Store all weights over time for charting
-              workoutCount: 0
-            };
-          }
-
-          // Update latest weight to the most recent workout's weight (not necessarily the heaviest)
-          // For progression tracking, we want to compare first weight vs most recent weight
-          // This gives users a true picture of their progression over time
-          // If the workout date is newer, update to this weight (even if it's lighter than previous)
-          if (workoutDate > exerciseData[exerciseName].latestDate) {
-            exerciseData[exerciseName].latestWeight = maxWeight;
-            exerciseData[exerciseName].latestDate = workoutDate;
-          } else if (workoutDate.getTime() === exerciseData[exerciseName].latestDate.getTime()) {
-            // If same date, use the heavier weight (in case of multiple workouts same day)
-            if (maxWeight > exerciseData[exerciseName].latestWeight) {
-              exerciseData[exerciseName].latestWeight = maxWeight;
-            }
-          }
-
-          // Track all weights over time for trend analysis and charting
-          // This allows us to show a line chart of weight progression
-          exerciseData[exerciseName].allWeights.push({
-            weight: maxWeight,
-            date: workoutDate,
-            // Also calculate volume (weight × reps) for the best set
-            // Volume = total weight moved, which is another useful metric
-            volume: maxWeight * completedSets
-              .filter(set => parseFloat(set.weight) === maxWeight)
-              .reduce((sum, set) => sum + (parseInt(set.reps) || 0), 0)
-          });
-
-          exerciseData[exerciseName].workoutCount++;
-        }
-      });
-    });
-
-    // Convert the exerciseData object to an array and calculate progression metrics
-    // Object.entries converts { "Bench Press": {...} } to [ ["Bench Press", {...}] ]
-    const progressionArray = Object.entries(exerciseData).map(([name, data]) => {
-      // Calculate absolute weight increase (latest - first)
-      const weightIncrease = data.latestWeight - data.firstWeight;
-      
-      // Calculate percentage increase
-      // If firstWeight is 0, we can't divide by it, so return 0
-      // Otherwise: ((new - old) / old) * 100 gives percentage change
-      const percentIncrease = data.firstWeight > 0 
-        ? ((weightIncrease / data.firstWeight) * 100)
-        : 0;
-      
-      // Calculate average weekly increase for more meaningful insights
-      // This tells users "you're adding X lbs per week on average"
-      const daysDiff = (data.latestDate - data.firstDate) / (1000 * 60 * 60 * 24); // Convert ms to days
-      const weeksDiff = daysDiff / 7;
-      const weeklyIncrease = weeksDiff > 0 ? (weightIncrease / weeksDiff) : 0;
-
-      return {
-        name,
-        firstWeight: data.firstWeight,
-        latestWeight: data.latestWeight,
-        weightIncrease,
-        percentIncrease: parseFloat(percentIncrease.toFixed(1)),
-        weeklyIncrease: parseFloat(weeklyIncrease.toFixed(1)),
-        workoutCount: data.workoutCount,
-        // Sort allWeights by date for proper chart display
-        allWeights: data.allWeights.sort((a, b) => a.date - b.date)
-      };
-    });
-
-    // Filter and sort exercises:
-    // - Show exercises done at least 1 time (even with 1 workout, we can show current weight)
-    // - For progression (increase), we'll need at least 2 workouts, but let's show all exercises
-    //   and indicate if they need more data for progression tracking
-    // - Sort by weight increase (biggest gains first) - exercises with no increase sorted by current weight
-    const filteredExercises = progressionArray
-      .filter(ex => ex.workoutCount >= 1) // Lowered from 2 to 1 to show data sooner
-      .sort((a, b) => {
-        // Sort by weight increase if available, otherwise by current weight (most recent/heaviest first)
-        if (a.workoutCount >= 2 && b.workoutCount >= 2) {
-          return b.weightIncrease - a.weightIncrease;
-        }
-        return b.latestWeight - a.latestWeight;
-      })
-      .slice(0, 5); // Take top 5 exercises
-
-    console.log(`Found ${filteredExercises.length} exercises to display:`, filteredExercises.map(e => ({
-      name: e.name,
-      workouts: e.workoutCount,
-      increase: e.weightIncrease
-    })));
-
-    setTopExercises(filteredExercises);
-  };
+  const periodOverviewLabel = useMemo(() => {
+    if (timePeriod === 'week') return 'Last 7 days';
+    if (timePeriod === 'month') return 'Last 4 weeks';
+    return 'Last 12 months';
+  }, [timePeriod]);
 
   /**
    * Handle pull-to-refresh
@@ -739,13 +597,21 @@ const AnalyticsScreen = () => {
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: homeBg }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: hexToRgba(accent, 0.12) }]}>
+        <TouchableOpacity
+          style={[styles.headerBackBtn, { backgroundColor: hexToRgba(accent, 0.12) }]}
+          onPress={() => navigateToHome(router)}
+          accessibilityRole="button"
+          accessibilityLabel="Back to home"
+        >
+          <Ionicons name="arrow-back" size={22} color={accent} />
+        </TouchableOpacity>
         <View style={styles.headerLeft}>
           <View style={[styles.headerIconWrap, { backgroundColor: hexToRgba(accent, 0.12) }]}>
             <Ionicons name="analytics" size={22} color={accent} />
           </View>
           <Text style={styles.headerTitle}>Analytics</Text>
         </View>
-        <View style={[styles.periodSelector, { backgroundColor: 'rgba(255,255,255,0.05)' }]}>
+        <View style={[styles.periodSelector, cardSurfaceStyle, { padding: 4 }]}>
           <TouchableOpacity
             style={[
               styles.periodButton,
@@ -815,9 +681,8 @@ const AnalyticsScreen = () => {
             <Text style={styles.loadingText}>Loading analytics...</Text>
           </View>
         ) : null}
-        {/* Progress Rings - Current Metrics */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>{"Today's Progress"}</Text>
+          <SectionTitle icon="pulse-outline" label={"Today's Progress"} accent={accent} />
           <ProgressRings
             calories={calories}
             water={water}
@@ -828,15 +693,61 @@ const AnalyticsScreen = () => {
           />
         </View>
 
+        {periodTotals && (
+          <View style={styles.section}>
+            <SectionTitle icon="grid-outline" label={`Overview · ${periodOverviewLabel}`} accent={accent} />
+            <View style={styles.statGrid}>
+              <StatTile
+                label="Workouts"
+                value={String(periodTotals.workouts)}
+                icon="barbell-outline"
+                color={accent}
+              />
+              <StatTile
+                label="Mental"
+                value={String(periodTotals.mental)}
+                icon="leaf-outline"
+                color="#8b5cf6"
+              />
+              <StatTile
+                label="Runs"
+                value={String(periodTotals.runs)}
+                sub={
+                  periodTotals.runs > 0
+                    ? `${periodTotals.runDistanceMiles.toFixed(1)} mi`
+                    : undefined
+                }
+                icon="walk-outline"
+                color="#ff6464"
+              />
+              <StatTile
+                label="Lifts tracked"
+                value={String(periodTotals.liftsTracked)}
+                sub={
+                  periodTotals.liftsProgressing > 0
+                    ? `${periodTotals.liftsProgressing} progressing`
+                    : undefined
+                }
+                icon="trending-up-outline"
+                color="#86efac"
+              />
+            </View>
+          </View>
+        )}
+
         {/* Comparison Card - Current Period vs Previous Period */}
         {comparisonData && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>
-              {timePeriod === 'week' ? 'This Week vs Last Week' : 
-               timePeriod === 'month' ? 'This Month vs Last Month' : 
-               'This Year vs Last Year'}
-            </Text>
-            <View style={styles.comparisonCard}>
+            <SectionTitle
+              icon="git-compare-outline"
+              label={
+                timePeriod === 'week' ? 'This Week vs Last Week' :
+                timePeriod === 'month' ? 'This Month vs Last Month' :
+                'This Year vs Last Year'
+              }
+              accent={accent}
+            />
+            <View style={[styles.comparisonCard, cardSurfaceStyle]}>
               <ComparisonItem
                 label="Workouts"
                 thisWeek={comparisonData.workouts.thisWeek}
@@ -873,14 +784,13 @@ const AnalyticsScreen = () => {
           </View>
         )}
 
-        {/* Weight Progression Section - Shows how much users increased weight on their lifts */}
-        {topExercises.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Weight Progression</Text>
-            <Text style={styles.sectionSubtitle}>
-              Track your strength gains by seeing how much you've increased weight on each exercise
-            </Text>
-            <View style={styles.progressionCard}>
+        <View style={styles.section}>
+          <SectionTitle icon="barbell-outline" label="Weight progression" accent={accent} />
+          <Text style={styles.sectionSubtitle}>
+            Max weight per lift from your logged workouts (last 6 months)
+          </Text>
+          {topExercises.length > 0 ? (
+            <View style={[styles.progressionCard, cardSurfaceStyle]}>
               {topExercises.map((exercise, index) => (
                 <View key={index} style={[
                   styles.progressionItem,
@@ -1005,16 +915,50 @@ const AnalyticsScreen = () => {
                 </View>
               ))}
             </View>
+          ) : (
+            <View style={[styles.emptyInsightCard, cardSurfaceStyle]}>
+              <Ionicons name="barbell-outline" size={28} color="#666" />
+              <Text style={styles.emptyInsightTitle}>No lift data yet</Text>
+              <Text style={styles.emptyInsightBody}>
+                Finish a workout and log sets with weight and reps. Your top lifts and trends will show up here.
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {personalRecords.length > 0 && (
+          <View style={styles.section}>
+            <SectionTitle icon="trophy-outline" label="Personal records" accent={accent} />
+            <View style={[styles.progressionCard, cardSurfaceStyle]}>
+              {personalRecords.map((pr, index) => (
+                <View
+                  key={pr.id}
+                  style={[
+                    styles.prRow,
+                    index < personalRecords.length - 1 && styles.progressionItemBorder,
+                  ]}
+                >
+                  <Text style={styles.progressionExerciseName} numberOfLines={1}>
+                    {pr.exercise || 'Record'}
+                  </Text>
+                  <Text style={[styles.prValue, { color: accent }]}>{formatPrValue(pr)}</Text>
+                </View>
+              ))}
+            </View>
           </View>
         )}
 
-        {topExercises.length === 0 && workoutLogsWithExercises.length > 0 && (
+        {periodTotals && periodTotals.runs > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Weight Progression</Text>
-            <Text style={styles.sectionSubtitle}>
-              Workouts are loading, but there are no weighted sets to chart yet. Log exercises with weight on the bar
-              (sets with weight and reps) when you finish a workout — then strength trends appear here.
-            </Text>
+            <SectionTitle icon="walk-outline" label="Running" accent="#ff6464" />
+            <View style={[styles.runSummaryCard, cardSurfaceStyle]}>
+              <Text style={styles.runSummaryBig}>{periodTotals.runs}</Text>
+              <Text style={styles.runSummaryLabel}>runs in this period</Text>
+              <Text style={styles.runSummaryMeta}>
+                {periodTotals.runDistanceMiles.toFixed(1)} mi total · ~
+                {periodTotals.runDurationMinutes} min moving
+              </Text>
+            </View>
           </View>
         )}
 
@@ -1028,21 +972,10 @@ const AnalyticsScreen = () => {
           </View>
         ) : null}
 
-        {/* Activity Heat Map */}
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Activity Heat Map</Text>
-          <ActivityHeatMap
-            workouts={workoutData}
-            mentalSessions={mentalData}
-            accentColor={accent}
-            timePeriod={timePeriod}
-          />
-        </View>
-
         {/* Workout Chart */}
         {workoutChartData && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Workouts</Text>
+            <SectionTitle icon="fitness-outline" label="Workouts" accent={accent} />
             <View
               style={[
                 styles.chartContainer,
@@ -1065,7 +998,7 @@ const AnalyticsScreen = () => {
 
         {mentalChartData && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Mental Sessions</Text>
+            <SectionTitle icon="heart-outline" label="Mental Sessions" accent="#8b5cf6" />
             <View
               style={[
                 styles.chartContainer,
@@ -1088,7 +1021,7 @@ const AnalyticsScreen = () => {
 
         {calorieChartData && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Calories</Text>
+            <SectionTitle icon="flame-outline" label="Calories" accent="#ff4444" />
             <View
               style={[
                 styles.chartContainer,
@@ -1111,7 +1044,7 @@ const AnalyticsScreen = () => {
 
         {waterChartData && (
           <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Water Intake</Text>
+            <SectionTitle icon="water-outline" label="Water Intake" accent="#00aaff" />
             <View
               style={[
                 styles.chartContainer,
@@ -1138,7 +1071,7 @@ const AnalyticsScreen = () => {
 
         {/* AI Advice Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Personalized Advice</Text>
+          <SectionTitle icon="bulb-outline" label="Personalized Advice" accent={accent} />
           <AnalyticsAdvice
             workoutData={workoutData}
             mentalData={mentalData}
@@ -1169,8 +1102,8 @@ const ComparisonItem = ({ label, thisWeek, lastWeek, change, icon, color }) => {
   return (
     <View style={styles.comparisonItem}>
       <View style={styles.comparisonItemLeft}>
-        <View style={[styles.comparisonIconContainer, { backgroundColor: `${color}20` }]}>
-          <Ionicons name={icon} size={20} color={color} />
+        <View style={[styles.comparisonIconContainer, { backgroundColor: hexToRgba(color, 0.12) }]}>
+          <Ionicons name={icon} size={22} color={color} />
         </View>
         <View>
           <Text style={styles.comparisonLabel}>{label}</Text>
@@ -1210,11 +1143,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderBottomWidth: 1,
+    gap: 10,
+  },
+  headerBackBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+  },
+  sectionIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   /** Same idea as home “action” icon circles: soft fill + icon uses accent from prefs. */
   headerIconWrap: {
@@ -1267,9 +1222,9 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.55)',
-    marginBottom: 12,
+    color: '#666',
     letterSpacing: 0.5,
+    flex: 1,
   },
   chartContainer: {
     borderRadius: 16,
@@ -1278,12 +1233,94 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
-  comparisonCard: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
+  chart: {
     borderRadius: 16,
+  },
+  statGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  statTile: {
+    width: '48%',
+    flexGrow: 1,
+    minWidth: '46%',
+    padding: 14,
+    gap: 4,
+  },
+  statTileIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  statTileValue: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  statTileLabel: {
+    color: '#aaa',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  statTileSub: {
+    color: '#666',
+    fontSize: 11,
+    marginTop: 2,
+  },
+  emptyInsightCard: {
+    padding: 20,
+    alignItems: 'center',
+    gap: 8,
+  },
+  emptyInsightTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  emptyInsightBody: {
+    color: '#888',
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+  },
+  prRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  prValue: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  runSummaryCard: {
+    padding: 18,
+    alignItems: 'center',
+  },
+  runSummaryBig: {
+    color: '#fff',
+    fontSize: 36,
+    fontWeight: '800',
+  },
+  runSummaryLabel: {
+    color: '#aaa',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  runSummaryMeta: {
+    color: '#666',
+    fontSize: 13,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  comparisonCard: {
     padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
     gap: 12,
   },
   comparisonItem: {
@@ -1299,9 +1336,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   comparisonIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1340,11 +1377,7 @@ const styles = StyleSheet.create({
     marginTop: -4,
   },
   progressionCard: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 16,
     padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
     gap: 0,
   },
   progressionItem: {

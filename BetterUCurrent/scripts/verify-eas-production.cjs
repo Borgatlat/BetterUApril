@@ -91,5 +91,36 @@ if (fs.existsSync(path.join(root, 'node_modules', 'expo-dev-client'))) {
   fail('expo-dev-client is installed — use production profile only for TestFlight/App Store');
 } else ok('expo-dev-client not in dependencies');
 
+const normalizePath = path.join(root, 'lib', 'schoolProfileNormalize.js');
+const normalizeSrc = fs.readFileSync(normalizePath, 'utf8');
+if (!normalizeSrc.includes('__DEV__') || !normalizeSrc.includes('getSchoolProfileDevStudentOverride')) {
+  fail('schoolProfileNormalize.js must gate dev student overrides behind __DEV__');
+} else ok('Dev school profile override gated for release builds');
+
+const plistPath = path.join(root, 'ios', 'BetterU', 'Info.plist');
+if (fs.existsSync(plistPath) && buildMatch) {
+  const plist = fs.readFileSync(plistPath, 'utf8');
+  const plistBuild = plist.match(/<key>CFBundleVersion<\/key>\s*<string>(\d+)<\/string>/);
+  if (plistBuild && plistBuild[1] !== buildMatch[1]) {
+    fail(
+      `ios/BetterU/Info.plist CFBundleVersion (${plistBuild[1]}) != app.config buildNumber (${buildMatch[1]}). Run: node scripts/eas-sync-ios-plist.cjs`
+    );
+  } else if (plistBuild) {
+    ok(`Info.plist CFBundleVersion matches app.config (${buildMatch[1]})`);
+  }
+}
+
+const migrationDir = path.join(root, 'supabase', 'migrations');
+const phaseMigrations = fs
+  .readdirSync(migrationDir)
+  .filter((f) => f.startsWith('20260601'));
+if (phaseMigrations.length < 4) {
+  fail('Expected 4 phase migrations (20260601*) — apply on Supabase before TestFlight school features work');
+} else ok(`Found ${phaseMigrations.length} institutional phase SQL migrations (apply on Supabase)`);
+
+if (!fs.existsSync(path.join(root, 'docs', 'TESTFLIGHT.md'))) {
+  fail('Missing docs/TESTFLIGHT.md release checklist');
+} else ok('TESTFLIGHT.md checklist present');
+
 console.log(failed ? `\n${failed} issue(s). Fix before EAS production build.` : '\nReady for EAS production build.');
 process.exit(failed ? 1 : 0);

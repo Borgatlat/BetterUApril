@@ -6,7 +6,7 @@ export default function EmmausTriageScreen() {
     <>
       <Stack.Screen
         options={{
-          title: "Emmaus Companion",
+          title: "Emmaus Companion Network",
           headerShown: true,
           headerStyle: { backgroundColor: "#050708" },
           headerTintColor: "#00e5e5",

@@ -204,49 +204,80 @@ export const preloadFeed = async (userId) => {
       }
     }
 
-    // Comments only (likes/kudos UI removed from the app)
-    const commentsPromises = [];
+    const extraPromises = [];
 
     if (workouts.length > 0) {
-      commentsPromises.push(
+      extraPromises.push(
+        supabase.from('workout_comments').select('*').in('workout_id', workouts.map((w) => w.id))
+      );
+      extraPromises.push(
         supabase
-          .from('workout_comments')
-          .select('*')
-          .in('workout_id', workouts.map(w => w.id))
+          .from('workout_kudos')
+          .select('workout_id, user_id, created_at')
+          .in('workout_id', workouts.map((w) => w.id))
       );
     } else {
-      commentsPromises.push(Promise.resolve({ data: [] }));
+      extraPromises.push(Promise.resolve({ data: [] }), Promise.resolve({ data: [] }));
     }
 
     if (mentals.length > 0) {
-      commentsPromises.push(
+      extraPromises.push(
+        supabase.from('mental_session_comments').select('*').in('session_id', mentals.map((m) => m.id))
+      );
+      extraPromises.push(
         supabase
-          .from('mental_session_comments')
-          .select('*')
-          .in('session_id', mentals.map(m => m.id))
+          .from('mental_session_kudos')
+          .select('session_id, user_id, created_at')
+          .in('session_id', mentals.map((m) => m.id))
       );
     } else {
-      commentsPromises.push(Promise.resolve({ data: [] }));
+      extraPromises.push(Promise.resolve({ data: [] }), Promise.resolve({ data: [] }));
     }
 
     if (runs.length > 0) {
-      commentsPromises.push(
+      extraPromises.push(
+        supabase.from('run_comments').select('*').in('run_id', runs.map((r) => r.id))
+      );
+      extraPromises.push(
         supabase
-          .from('run_comments')
-          .select('*')
-          .in('run_id', runs.map(r => r.id))
+          .from('run_kudos')
+          .select('run_id, user_id, created_at')
+          .in('run_id', runs.map((r) => r.id))
       );
     } else {
-      commentsPromises.push(Promise.resolve({ data: [] }));
+      extraPromises.push(Promise.resolve({ data: [] }), Promise.resolve({ data: [] }));
     }
 
-    const [workoutCommentsResult, mentalCommentsResult, runCommentsResult] = await Promise.all(commentsPromises);
+    const [
+      workoutCommentsResult,
+      workoutKudosResult,
+      mentalCommentsResult,
+      mentalKudosResult,
+      runCommentsResult,
+      runKudosResult,
+    ] = await Promise.all(extraPromises);
 
     const workoutComments = workoutCommentsResult.data || [];
     const mentalComments = mentalCommentsResult.data || [];
     const runComments = runCommentsResult.data || [];
 
     const commentsMap = {};
+    const workoutKudosMap = {};
+    const mentalKudosMap = {};
+    const runKudosMap = {};
+
+    (workoutKudosResult.data || []).forEach((k) => {
+      if (!workoutKudosMap[k.workout_id]) workoutKudosMap[k.workout_id] = [];
+      workoutKudosMap[k.workout_id].push(k);
+    });
+    (mentalKudosResult.data || []).forEach((k) => {
+      if (!mentalKudosMap[k.session_id]) mentalKudosMap[k.session_id] = [];
+      mentalKudosMap[k.session_id].push(k);
+    });
+    (runKudosResult.data || []).forEach((k) => {
+      if (!runKudosMap[k.run_id]) runKudosMap[k.run_id] = [];
+      runKudosMap[k.run_id].push(k);
+    });
 
     // Process workout comments
     workoutComments.forEach(c => {
@@ -288,6 +319,7 @@ export const preloadFeed = async (userId) => {
           date: item.completed_at,
           user_id: item.user_id,
           comments: commentsMap[item.id] || [],
+          kudos: workoutKudosMap[item.id] || [],
           spotify_tracks_preview: previewTracks,
           spotify_track_count: trackCount,
           workout_session_id: item.workout_session_id
@@ -307,6 +339,7 @@ export const preloadFeed = async (userId) => {
           date: item.completed_at,
           user_id: item.profile_id,
           comments: commentsMap[item.id] || [],
+          kudos: mentalKudosMap[item.id] || [],
         });
       }
     });
@@ -341,6 +374,7 @@ export const preloadFeed = async (userId) => {
           date: item.start_time,
           user_id: item.user_id,
           comments: commentsMap[item.id] || [],
+          kudos: runKudosMap[item.id] || [],
         });
       }
     });

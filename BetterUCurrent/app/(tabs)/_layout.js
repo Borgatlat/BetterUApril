@@ -11,6 +11,7 @@ import { useAuthSession } from '../../hooks/useAuthSession';
 import { ScheduleRefreshProvider } from '../../context/ScheduleRefreshContext';
 import { BottomChromeProvider } from '../../context/BottomChromeContext';
 import { getBannerDockBottom } from '../../utils/bottomChromeInsets';
+import { BannerAdProvider } from '../../context/BannerAdContext';
 
 const { height, width } = Dimensions.get('window');
 const isIphoneX = Platform.OS === 'ios' && (height >= 812 || width >= 812);
@@ -75,28 +76,8 @@ export default function TabLayout() {
       <TrainerProvider>
         <TherapistProvider>
           <View style={styles.container}>
-            {/*
-              IMPORTANT — Tab ORDER matters!
-              Expo Router treats the FIRST declared <Tabs.Screen> as
-              the initial / fallback route. When the user navigates
-              back from a non-tab screen (like /your-workouts) and the
-              router has nothing left on its stack, it lands them on
-              the initial tab.
-
-              Previously `school-wellness` was first here. Even though
-              it's hidden via `href: null`, it still served as the
-              fallback — which is why a non-student user occasionally
-              saw the "this screen is for verified school students"
-              fallback when hitting back from a workout sub-screen.
-
-              We now declare `home` first so the fallback lands on the
-              normal home tab. The hidden routes (school-wellness,
-              spiritual for non-students, all the modal/nested
-              screens) move to the bottom — they remain registered as
-              routes but never act as the initial.
-            */}
+            <BannerAdProvider>
             <Tabs screenOptions={screenOptions} initialRouteName="home">
-            {/* Visible / regular tabs first — `home` is the fallback */}
             <Tabs.Screen name="home" />
             <Tabs.Screen name="workout" />
             <Tabs.Screen
@@ -105,8 +86,6 @@ export default function TabLayout() {
             />
             <Tabs.Screen name="mental" />
             <Tabs.Screen name="community" />
-
-            {/* Conditionally visible tab — only shown to verified students */}
             <Tabs.Screen
               name="spiritual"
               options={
@@ -115,10 +94,6 @@ export default function TabLayout() {
                   : { href: null }
               }
             />
-
-            {/* Hidden routes (`href: null` keeps them off the tab bar
-                but still routable). Listed AFTER visible tabs so none
-                of them acts as the initial route. */}
             <Tabs.Screen name="school-wellness" options={{ href: null }} />
             <Tabs.Screen name="therapist" options={{ href: null }} />
             <Tabs.Screen name="league" options={{ href: null }} />
@@ -140,6 +115,7 @@ export default function TabLayout() {
             <Tabs.Screen name="analytics" options={{ href: null }} />
           </Tabs>
             <NonPremiumBannerAd style={styles.bannerDock} />
+            </BannerAdProvider>
           </View>
         </TherapistProvider>
       </TrainerProvider>

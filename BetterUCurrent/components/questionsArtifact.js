@@ -33,7 +33,7 @@ export default function QuestionsArtifact({
             <Text style={localStyles.cardTitle}>Shape your plan</Text>
           </View>
           <Text style={localStyles.cardSubtitle}>
-            Answer these so Future U can match timelines and weekly effort to your goal.
+            Optional — tightens your timeline and weekly hours so plans match your schedule.
           </Text>
 
           <View style={localStyles.fieldColumn}>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useImperativeHandle, forwardRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -20,23 +20,27 @@ import {
   submitDailyPulse,
   createCounselorSupportAlert,
 } from "../../lib/schoolWellnessClient";
+import { schoolWellnessTheme as T } from "./schoolWellnessTheme";
 
-const ACCENT = "#00e5e5";
+const CRISIS_RED = "#dc2626";
+const CRISIS_RED_BORDER = "rgba(248,113,113,0.45)";
 
 function LikertRow({ label, value, onChange }) {
   return (
     <View style={styles.likertBlock}>
-      <Text style={styles.likertLabel}>{label}</Text>
-      <Text style={styles.likertValue}>{Math.round(value)}</Text>
+      <View style={styles.likertHeader}>
+        <Text style={styles.likertLabel}>{label}</Text>
+        <Text style={styles.likertValue}>{Math.round(value)}</Text>
+      </View>
       <Slider
         minimumValue={1}
         maximumValue={5}
         step={0.01}
         value={value}
         onValueChange={onChange}
-        minimumTrackTintColor={ACCENT}
+        minimumTrackTintColor={T.accent}
         maximumTrackTintColor="#333"
-        thumbTintColor={ACCENT}
+        thumbTintColor={T.accent}
       />
       <View style={styles.scaleRow}>
         {[1, 2, 3, 4, 5].map((n) => (
@@ -50,48 +54,47 @@ function LikertRow({ label, value, onChange }) {
 }
 
 /**
- * Student-only surface: daily pulse modal + persistent counselor CTA.
- * Returns null for non-students so public B2C layout is unchanged.
+ * Student-only: daily pulse modal + counselor CTA.
+ * Parent controls modal via modalOpen / onModalOpenChange; onPulseSaved refreshes banner.
  */
-export function StudentDailyPulseCard() {
+export const StudentDailyPulseCard = forwardRef(function StudentDailyPulseCard(
+  { todayPulse = null, modalOpen: controlledOpen, onModalOpenChange, onPulseSaved, compact = false },
+  ref,
+) {
   const { workspace, profile, user } = useAuthSession();
-  const [open, setOpen] = useState(false);
-  const [mood, setMood] = useState(3);
-  const [stress, setStress] = useState(3);
-  const [sleep, setSleep] = useState(3);
-  const [anonymize, setAnonymize] = useState(true);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [mood, setMood] = useState(todayPulse?.mood ?? 3);
+  const [stress, setStress] = useState(todayPulse?.stress_level ?? 3);
+  const [sleep, setSleep] = useState(todayPulse?.sleep_quality ?? 3);
+  const [anonymize, setAnonymize] = useState(todayPulse?.anonymize_aggregate ?? true);
   const [saving, setSaving] = useState(false);
   const [requesting, setRequesting] = useState(false);
 
-  if (workspace !== "student" || !profile?.org_id) return null;
-
-  const onSavePulse = async () => {
-    setSaving(true);
-    try {
-      await submitDailyPulse({
-        orgId: profile.org_id,
-        mood: Math.round(mood),
-        stressLevel: Math.round(stress),
-        sleepQuality: Math.round(sleep),
-        anonymizeAggregate: anonymize,
-      });
-      Alert.alert("Saved", "Your daily pulse was logged.");
-      setOpen(false);
-    } catch (e) {
-      Alert.alert("Could not save", e?.message ?? String(e));
-    } finally {
-      setSaving(false);
-    }
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = (v) => {
+    if (isControlled) onModalOpenChange?.(v);
+    else setInternalOpen(v);
   };
 
-  const onRequestCounselor = () => {
+  useEffect(() => {
+    if (todayPulse) {
+      setMood(todayPulse.mood ?? 3);
+      setStress(todayPulse.stress_level ?? 3);
+      setSleep(todayPulse.sleep_quality ?? 3);
+      setAnonymize(todayPulse.anonymize_aggregate ?? true);
+    }
+  }, [todayPulse]);
+
+  const onRequestCounselor = useCallback(() => {
+    if (!profile?.org_id) return;
     Alert.alert(
-      "Request counselor support?",
-      "Your name and school email will be shared with your school counseling team so they can reach you.",
+      "Contact your counselor?",
+      "Your name and school email go to your counseling team so they can reach you.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Confirm",
+          text: "Send request",
           style: "destructive",
           onPress: async () => {
             setRequesting(true);
@@ -103,10 +106,10 @@ export function StudentDailyPulseCard() {
               });
               Alert.alert(
                 "Request sent",
-                "A counselor has been notified. If this is an emergency, also use your school’s crisis line or 988.",
+                "A counselor was notified. In an emergency, call 988 or your school crisis line.",
               );
             } catch (e) {
-              Alert.alert("Could not send request", e?.message ?? String(e));
+              Alert.alert("Could not send", e?.message ?? String(e));
             } finally {
               setRequesting(false);
             }
@@ -114,46 +117,89 @@ export function StudentDailyPulseCard() {
         },
       ],
     );
+  }, [profile, user]);
+
+  useImperativeHandle(ref, () => ({
+    openModal: () => setOpen(true),
+    requestCounselor: onRequestCounselor,
+  }));
+
+  if (workspace !== "student" || !profile?.org_id) return null;
+
+  const loggedToday = Boolean(todayPulse);
+
+  const onSavePulse = async () => {
+    setSaving(true);
+    try {
+      const saved = await submitDailyPulse({
+        orgId: profile.org_id,
+        mood: Math.round(mood),
+        stressLevel: Math.round(stress),
+        sleepQuality: Math.round(sleep),
+        anonymizeAggregate: anonymize,
+      });
+      Alert.alert("Saved", "Pulse logged for today.");
+      setOpen(false);
+      onPulseSaved?.(saved);
+    } catch (e) {
+      Alert.alert("Could not save", e?.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderIcon}>
-          <Ionicons name="school-outline" size={22} color={ACCENT} />
+    <View style={[styles.card, compact && styles.cardCompact]}>
+      <View style={styles.titleRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardTitle}>Today's pulse</Text>
+          <Text style={styles.cardSubtitle}>Mood, stress & sleep · scale 1–5</Text>
         </View>
-        <Text style={styles.cardTitle}>School wellness pulse</Text>
+        {loggedToday ? (
+          <Ionicons name="checkmark-circle" size={26} color={T.pulseDone} accessibilityLabel="Logged today" />
+        ) : null}
       </View>
-      <Text style={styles.cardSubtitle}>
-        Quick check-in for mood, stress, and sleep (1 = low / poor, 5 = high / good). When anonymized,
-        principals see cohort wellness trends—not your name—to plan supports and pastoral outreach.
-      </Text>
-      <TouchableOpacity style={styles.primaryBtn} onPress={() => setOpen(true)} accessibilityRole="button">
-        <Text style={styles.primaryBtnText}>Log today’s pulse</Text>
+
+      <TouchableOpacity
+        style={styles.primaryBtn}
+        onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={loggedToday ? "Update pulse" : "Log pulse"}
+      >
+        <Ionicons name="pulse-outline" size={20} color="#000" style={styles.btnIcon} />
+        <Text style={styles.primaryBtnText}>{loggedToday ? "Update pulse" : "Log pulse"}</Text>
       </TouchableOpacity>
+
+      <View style={styles.divider} />
 
       <TouchableOpacity
         style={styles.crisisBtn}
         onPress={onRequestCounselor}
         disabled={requesting}
         accessibilityRole="button"
+        accessibilityLabel="Request counselor support"
       >
         {requesting ? (
-          <ActivityIndicator color="#000" />
+          <ActivityIndicator color="#fff" />
         ) : (
           <>
-            <Ionicons name="alert-circle" size={22} color="#000" />
+            <Ionicons name="heart" size={20} color="#fff" />
             <Text style={styles.crisisBtnText}>Request counselor support</Text>
           </>
         )}
       </TouchableOpacity>
+      <Text style={styles.crisisHint}>Shares your name with your school counseling team.</Text>
 
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : undefined}
           style={styles.keyboardRoot}
         >
-          <Pressable style={styles.modalDismissArea} onPress={() => setOpen(false)} accessibilityLabel="Dismiss" />
+          <Pressable
+            style={styles.modalDismissArea}
+            onPress={() => setOpen(false)}
+            accessibilityLabel="Dismiss"
+          />
           <View style={styles.modalSheet}>
             <ScrollView
               keyboardShouldPersistTaps="handled"
@@ -161,14 +207,18 @@ export function StudentDailyPulseCard() {
               contentContainerStyle={styles.modalScrollContent}
             >
               <Text style={styles.modalTitle}>Daily pulse</Text>
+              <Text style={styles.modalHint}>1 = low · 5 = high</Text>
               <LikertRow label="Mood" value={mood} onChange={setMood} />
-              <LikertRow label="Stress level" value={stress} onChange={setStress} />
-              <LikertRow label="Sleep quality" value={sleep} onChange={setSleep} />
+              <LikertRow label="Stress" value={stress} onChange={setStress} />
+              <LikertRow label="Sleep" value={sleep} onChange={setSleep} />
               <View style={styles.switchRow}>
-                <Text style={styles.switchLabel}>
-                  Anonymize my aggregate data for the school dashboard
-                </Text>
-                <Switch value={anonymize} onValueChange={setAnonymize} />
+                <Text style={styles.switchLabel}>Keep me anonymous on school dashboards</Text>
+                <Switch
+                  value={anonymize}
+                  onValueChange={setAnonymize}
+                  trackColor={{ false: "#444", true: "rgba(0,229,229,0.5)" }}
+                  thumbColor={anonymize ? T.accent : "#aaa"}
+                />
               </View>
               <View style={styles.modalActions}>
                 <TouchableOpacity onPress={() => setOpen(false)} hitSlop={12}>
@@ -184,44 +234,65 @@ export function StudentDailyPulseCard() {
       </Modal>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "rgba(0,229,229,0.07)",
-    borderRadius: 14,
+    backgroundColor: T.cardBg,
+    borderRadius: T.radiusXl,
     padding: 16,
-    marginBottom: 12,
     borderWidth: 1,
-    borderColor: "rgba(0,229,229,0.22)",
+    borderColor: T.border,
   },
-  cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
-  cardHeaderIcon: { marginRight: 8 },
-  cardTitle: { color: "#fff", fontSize: 18, fontWeight: "800" },
-  cardSubtitle: { color: "#9aa4ad", fontSize: 14, marginBottom: 14, lineHeight: 20 },
+  cardCompact: { marginBottom: 0 },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    marginBottom: 4,
+  },
+  cardTitle: { color: T.text, fontSize: 18, fontWeight: "800", marginBottom: 4 },
+  cardSubtitle: { color: T.subMuted, fontSize: 13, marginBottom: 16 },
   primaryBtn: {
-    backgroundColor: ACCENT,
+    backgroundColor: T.accent,
     paddingVertical: 14,
     borderRadius: 12,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
   },
+  btnIcon: { marginRight: 8 },
   primaryBtnText: { color: "#000", fontWeight: "800", fontSize: 16 },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: T.border,
+    marginVertical: 14,
+  },
   crisisBtn: {
-    marginTop: 12,
-    backgroundColor: "#ffb020",
+    backgroundColor: CRISIS_RED,
     paddingVertical: 14,
     borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    borderWidth: 1,
+    borderColor: CRISIS_RED_BORDER,
   },
-  crisisBtnText: { color: "#000", fontWeight: "900", fontSize: 15 },
-  likertBlock: { marginBottom: 14 },
-  likertLabel: { color: "#ddd", marginBottom: 4, fontWeight: "600" },
-  likertValue: { color: ACCENT, fontSize: 22, fontWeight: "800", marginBottom: 6 },
-  scaleRow: { flexDirection: "row", justifyContent: "space-between" },
-  scaleTick: { color: "#666", fontSize: 11 },
+  crisisBtnText: { color: "#fff", fontWeight: "800", fontSize: 15 },
+  crisisHint: {
+    color: "#8a6b6b",
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 8,
+    lineHeight: 15,
+  },
+  likertBlock: { marginBottom: 16 },
+  likertHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  likertLabel: { color: "#ddd", fontWeight: "600", fontSize: 15 },
+  likertValue: { color: T.accent, fontSize: 20, fontWeight: "800" },
+  scaleRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 2 },
+  scaleTick: { color: "#555", fontSize: 11 },
   keyboardRoot: {
     flex: 1,
     justifyContent: "flex-end",
@@ -234,7 +305,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: T.border,
     overflow: "hidden",
   },
   modalScrollContent: {
@@ -242,9 +313,10 @@ const styles = StyleSheet.create({
     paddingTop: 22,
     paddingBottom: Platform.OS === "ios" ? 36 : 24,
   },
-  modalTitle: { color: "#fff", fontSize: 21, fontWeight: "800", marginBottom: 14 },
-  switchRow: { flexDirection: "row", alignItems: "center", marginVertical: 14 },
-  switchLabel: { color: "#ccc", flex: 1, fontSize: 14, lineHeight: 20 },
+  modalTitle: { color: T.text, fontSize: 21, fontWeight: "800" },
+  modalHint: { color: "#666", fontSize: 13, marginBottom: 16, marginTop: 4 },
+  switchRow: { flexDirection: "row", alignItems: "center", marginVertical: 12, gap: 12 },
+  switchLabel: { color: "#bbb", flex: 1, fontSize: 14, lineHeight: 19 },
   modalActions: {
     flexDirection: "row",
     justifyContent: "space-between",

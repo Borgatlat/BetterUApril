@@ -113,7 +113,7 @@ export async function getUserContext(userId) {
  * - Higher `OFFTRACK_RECENT_DAYS` means you wait longer before acknowledging they fell off (can feel less helpful).
  */
 export function getUserState(context) {
-  const OFFTRACK_RECENT_DAYS = 2.5; // ~2–3 days
+  const OFFTRACK_RECENT_DAYS = 2.5; // ~2–3 daysn
   const OFFTRACK_LONG_DAYS = 7; // 7+ days
 
   const isAtRisk = context?.streakStatus?.isAtRisk === true;

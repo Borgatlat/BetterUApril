@@ -10,11 +10,17 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { navigateToAccountability, navigateToHome } from '../../utils/safeNavigation';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUser } from '../../context/UserContext';
 import { PremiumAvatar } from '../components/PremiumAvatar';
 import { supabase } from '../../lib/supabase';
-import { addAccountabilityPartner } from '../../utils/accountabilityService';
+import {
+  addAccountabilityPartner,
+  checkAccountabilityPartnersAvailable,
+} from '../../utils/accountabilityService';
+import { formatApiError } from '../../lib/formatApiError';
+import { syncPartnershipLocalReminder } from '../../lib/accountabilityReminders';
 
 export default function AddAccountabilityPartnerScreen() {
   const { userProfile } = useUser();
@@ -24,11 +30,15 @@ export default function AddAccountabilityPartnerScreen() {
   const [partnerIds, setPartnerIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState({});
+  const [setupError, setSetupError] = useState(null);
 
   useEffect(() => {
     if (!userProfile?.id) return;
     (async () => {
       try {
+        await checkAccountabilityPartnersAvailable();
+        setSetupError(null);
+
         const { data: friendRows } = await supabase
           .from('friends')
           .select('user_id, friend_id')
@@ -37,10 +47,11 @@ export default function AddAccountabilityPartnerScreen() {
         const ids = (friendRows || []).map((f) =>
           f.user_id === userProfile.id ? f.friend_id : f.user_id
         );
-        const { data: partnerRows } = await supabase
+        const { data: partnerRows, error: partnerListError } = await supabase
           .from('accountability_partners')
           .select('user_id, partner_id')
           .or(`user_id.eq.${userProfile.id},partner_id.eq.${userProfile.id}`);
+        if (partnerListError) throw partnerListError;
         const already = new Set(
           (partnerRows || []).map((p) =>
             p.user_id === userProfile.id ? p.partner_id : p.user_id
@@ -59,6 +70,7 @@ export default function AddAccountabilityPartnerScreen() {
         setFriends(profiles || []);
       } catch (e) {
         console.error(e);
+        setSetupError(formatApiError(e));
       } finally {
         setLoading(false);
       }
@@ -68,12 +80,26 @@ export default function AddAccountabilityPartnerScreen() {
   const onAdd = async (friendId) => {
     setRequesting((s) => ({ ...s, [friendId]: true }));
     try {
-      await addAccountabilityPartner(userProfile.id, friendId);
+      const row = await addAccountabilityPartner(userProfile.id, friendId);
+      const friend = friends.find((f) => f.id === friendId);
+      const name = friend?.full_name || friend?.username || 'your partner';
+      if (row?.id) {
+        await syncPartnershipLocalReminder({
+          partnershipId: row.id,
+          partnerName: name,
+          checkInDay: 'sunday',
+          reminderHourUtc: 18,
+          enabled: true,
+        }).catch(() => {});
+      }
       setPartnerIds((s) => new Set([...s, friendId]));
-      Alert.alert('Done', "Partner added. They'll get a notification.");
-      router.back();
+      Alert.alert(
+        'Done',
+        "Partner added. They'll get a notification. Set your weekly rhythm from the partners list.",
+      );
+      navigateToAccountability(router);
     } catch (e) {
-      Alert.alert('Error', e.message);
+      Alert.alert('Could not add partner', formatApiError(e));
     } finally {
       setRequesting((s) => ({ ...s, [friendId]: false }));
     }
@@ -90,7 +116,7 @@ export default function AddAccountabilityPartnerScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigateToHome(router)}>
           <Ionicons name="arrow-back" size={24} color="#00ffff" />
         </TouchableOpacity>
         <Text style={styles.title}>Add accountability partner</Text>
@@ -98,6 +124,12 @@ export default function AddAccountabilityPartnerScreen() {
       </View>
 
       <Text style={styles.subtitle}>Choose a friend for weekly check-ins</Text>
+
+      {setupError ? (
+        <View style={styles.setupBanner}>
+          <Text style={styles.setupBannerText}>{setupError}</Text>
+        </View>
+      ) : null}
 
       {friends.length === 0 ? (
         <View style={styles.empty}>
@@ -122,9 +154,9 @@ export default function AddAccountabilityPartnerScreen() {
                   <Text style={styles.badge}>Partners</Text>
                 ) : (
                   <TouchableOpacity
-                    style={styles.addBtn}
+                    style={[styles.addBtn, setupError && styles.addBtnOff]}
                     onPress={() => onAdd(item.id)}
-                    disabled={requesting[item.id]}
+                    disabled={requesting[item.id] || Boolean(setupError)}
                   >
                     <Text style={styles.addBtnText}>
                       {requesting[item.id] ? 'Adding…' : 'Add as partner'}
@@ -166,5 +198,15 @@ const styles = StyleSheet.create({
   name: { flex: 1, marginLeft: 12, fontSize: 16, color: '#fff' },
   badge: { color: '#00ffff', fontSize: 14 },
   addBtn: { backgroundColor: '#00ffff', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  addBtnOff: { opacity: 0.4 },
   addBtnText: { color: '#000', fontWeight: '600' },
+  setupBanner: {
+    backgroundColor: 'rgba(255,80,80,0.12)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,80,80,0.35)',
+  },
+  setupBannerText: { color: '#ff8a8a', fontSize: 13, lineHeight: 18 },
 });
