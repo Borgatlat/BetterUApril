@@ -94,6 +94,15 @@ const iosPlugins = [
   ],
   'expo-apple-authentication',
   [
+    'expo-speech-recognition',
+    {
+      microphonePermission:
+        'BetterU uses the microphone so you can speak your Future U questions.',
+      speechRecognitionPermission:
+        'BetterU converts your speech to text in Future U.',
+    },
+  ],
+  [
     'expo-splash-screen',
     {
       image: './assets/images/splash-icon.png',

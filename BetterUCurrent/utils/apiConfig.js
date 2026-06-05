@@ -4,15 +4,33 @@ import Constants from 'expo-constants';
 /**
  * Anthropic (Claude) for Future U and other Claude features.
  * Set EXPO_PUBLIC_ANTHROPIC_API_KEY in .env or `extra.anthropicApiKey` in app.config — never commit real keys.
+ * Future U calls Claude directly from the app using this key.
  */
+function normalizeApiKey(raw) {
+  if (!raw) return '';
+  return String(raw).trim().replace(/^['"]|['"]$/g, '');
+}
+
 export const getAnthropicApiKey = () => {
   const key =
     process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ||
     Constants.expoConfig?.extra?.anthropicApiKey ||
     Constants.expoConfig?.env?.EXPO_PUBLIC_ANTHROPIC_API_KEY ||
     '';
-  return String(key).trim();
+  return normalizeApiKey(key);
 };
+
+/** AsyncStorage fallback for dev (same pattern as OpenAI). */
+export async function getAnthropicApiKeyAsync() {
+  const fromEnv = getAnthropicApiKey();
+  if (fromEnv) return fromEnv;
+  try {
+    const cached = await AsyncStorage.getItem('anthropic_api_key');
+    return normalizeApiKey(cached);
+  } catch {
+    return '';
+  }
+}
 
 /**
  * OpenAI for meal / workout / trainer flows.

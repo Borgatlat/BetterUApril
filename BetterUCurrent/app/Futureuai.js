@@ -22,7 +22,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
-import { getAnthropicApiKey } from '../utils/apiConfig';
 import {
   checkAIGenerationLimit,
   incrementAIGenerationUsage,
@@ -43,39 +42,15 @@ import {
   buildUserContextPayload,
   extractGoalConstraints,
 } from '../lib/futureuPromptEngine';
-
-const CLAUDE_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
-/** Try newest first; fall back to dated snapshots if an alias is not enabled on your Anthropic account. */
-const CLAUDE_MODELS = [
-  'claude-sonnet-4-6',
-  'claude-sonnet-4-20250514',
-  'claude-3-5-sonnet-20241022',
-  'claude-3-5-haiku-20241022',
-];
+import { callFutureUClaude, isFutureUClaudeAvailable, formatFutureUClaudeError } from '../lib/futureuClaudeClient';
+import { useFutureUVoiceInput } from '../hooks/useFutureUVoiceInput';
 
 /** Keeps prompts under rough context limits and controls cost. */
 const MAX_MESSAGES_IN_CONTEXT = 44;
 const MAX_USER_MESSAGE_CHARS = 8000;
 
 function formatFutureuUserError(err) {
-  const raw = String(err?.message || err || '');
-  const msg = raw.toLowerCase();
-  if (msg.includes('abort') || msg.includes('aborted')) {
-    return 'The request timed out or was cancelled. Check your connection and try again.';
-  }
-  if (msg.includes('401') || msg.includes('invalid x-api-key') || msg.includes('authentication')) {
-    return 'API authentication failed. Set EXPO_PUBLIC_ANTHROPIC_API_KEY and rebuild.';
-  }
-  if (msg.includes('429') || msg.includes('rate_limit')) {
-    return 'Too many requests. Wait a minute and try again.';
-  }
-  if (msg.includes('529') || msg.includes('overloaded')) {
-    return 'The AI service is busy. Try again shortly.';
-  }
-  if (msg.includes('network request failed') || msg.includes('failed to fetch')) {
-    return 'Network error. Check your connection and try again.';
-  }
-  return raw || 'Something went wrong. Please try again.';
+  return formatFutureUClaudeError(err);
 }
 
 function buildSessionTitle(text) {
@@ -102,84 +77,6 @@ function isPersistedChatMessageId(id) {
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
   );
 }
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = 45000) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function fetchWithRetry(url, options = {}, maxRetries = 2) {
-  let lastError;
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    try {
-      const timeoutMs = 45000 + attempt * 15000;
-      const response = await fetchWithTimeout(url, options, timeoutMs);
-      if (response.status === 429 || response.status >= 500) {
-        throw new Error(`Retryable API status: ${response.status}`);
-      }
-      return response;
-    } catch (error) {
-      lastError = error;
-      if (attempt === maxRetries) break;
-      const delayMs = 1000 * Math.pow(2, attempt);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-  throw lastError;
-}
-
-async function callClaude(apiKey, systemPrompt, messages, maxTokens = 2500) {
-  let lastError;
-  const tried = [];
-  for (let i = 0; i < CLAUDE_MODELS.length; i += 1) {
-    const model = CLAUDE_MODELS[i];
-    tried.push(model);
-    try {
-      const response = await fetchWithRetry(CLAUDE_MESSAGES_URL, {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: maxTokens,
-          system: systemPrompt,
-          messages,
-        }),
-      });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message = data?.error?.message || data?.error?.type || `HTTP ${response.status}`;
-        throw new Error(message);
-      }
-
-      const block = data?.content?.[0];
-      if (block?.type === 'text' && typeof block.text === 'string') {
-        return block.text;
-      }
-      throw new Error('Unexpected response format from Claude');
-    } catch (err) {
-      lastError = err;
-      const msg = String(err?.message || '').toLowerCase();
-      if (!(msg.includes('model') || msg.includes('not_found'))) break;
-    }
-  }
-  const suffix = tried.length ? ` (tried: ${tried.join(', ')})` : '';
-  if (lastError) {
-    lastError.message = `${lastError.message}${suffix}`;
-    throw lastError;
-  }
-  throw new Error(`Claude request failed${suffix}`);
-}
-
 
 const PRESET_PROMPTS = [
   'I want to become a software engineer at a strong tech company',
@@ -227,6 +124,11 @@ const Futureuai = () => {
   const flatListRef = useRef(null);
   const currentSessionIdRef = useRef(null);
   const editingUserMessageIdRef = useRef(null);
+
+  const { listening: voiceListening, toggleListening: toggleVoiceInput } = useFutureUVoiceInput({
+    onTranscript: setInput,
+    disabled: loading,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -587,11 +489,11 @@ const Futureuai = () => {
       return;
     }
 
-    const apiKey = getAnthropicApiKey();
-    if (!apiKey) {
+    const claudeReady = await isFutureUClaudeAvailable();
+    if (!claudeReady) {
       Alert.alert(
-        'API key missing',
-        'Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env file, restart Expo, then try again.'
+        'Future U AI not configured',
+        'Add EXPO_PUBLIC_ANTHROPIC_API_KEY=sk-ant-... to BetterUCurrent/.env, then restart Expo with npx expo start -c.',
       );
       return;
     }
@@ -653,7 +555,11 @@ const Futureuai = () => {
       });
 
       const maxTokens = responseDepth === RESPONSE_DEPTH.QUICK ? 1400 : 2500;
-      const raw = await callClaude(apiKey, systemPrompt, historyForModel, maxTokens);
+      const raw = await callFutureUClaude({
+        systemPrompt,
+        messages: historyForModel,
+        maxTokens,
+      });
       const { displayText, tasks: suggestedTasks, plan } = extractPlanTasksAndDisplayText(raw);
 
       if (plan && typeof plan === 'object') {
@@ -1061,18 +967,39 @@ const Futureuai = () => {
               )}
             />
             <View style={styles.inputRow}>
+              <TouchableOpacity
+                style={[
+                  styles.micBtn,
+                  voiceListening && styles.micBtnActive,
+                  loading && styles.micBtnDisabled,
+                ]}
+                onPress={toggleVoiceInput}
+                disabled={loading}
+                accessibilityRole="button"
+                accessibilityLabel={voiceListening ? 'Stop voice input' : 'Voice to text'}
+              >
+                <Ionicons
+                  name={voiceListening ? 'mic' : 'mic-outline'}
+                  size={22}
+                  color={voiceListening ? '#f87171' : '#c4b5fd'}
+                />
+              </TouchableOpacity>
               <TextInput
                 style={styles.input}
                 placeholder={
-                  editingUserMessageId ? 'Edit your message…' : 'Who do you want to become?'
+                  voiceListening
+                    ? 'Listening…'
+                    : editingUserMessageId
+                      ? 'Edit your message…'
+                      : 'Who do you want to become?'
                 }
                 placeholderTextColor="#666"
                 value={input}
                 onChangeText={setInput}
                 multiline
                 maxLength={500}
-                editable={!loading}
-              /> 
+                editable={!loading && !voiceListening}
+              />
               <TouchableOpacity
                 style={[styles.sendBtn, (!input.trim() || loading) && styles.sendBtnDisabled]}
                 onPress={() => sendText(input)}
@@ -1406,9 +1333,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     maxHeight: 120,
     paddingVertical: 8,
+    marginHorizontal: 6,
   },
+  micBtn: {
+    padding: 10,
+    borderRadius: 20,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+  },
+  micBtnActive: {
+    backgroundColor: 'rgba(248, 113, 113, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(248, 113, 113, 0.45)',
+  },
+  micBtnDisabled: { opacity: 0.35 },
   sendBtn: {
-    marginLeft: 10,
+    marginLeft: 4,
     padding: 12,
     borderRadius: 22,
     backgroundColor: 'rgba(139, 92, 246, 0.35)',
