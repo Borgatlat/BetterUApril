@@ -37,6 +37,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WorkoutImpactMap from '../components/WorkoutImpactMap';
+import { promptResumeOrStartNew } from '../utils/pendingActiveWorkout';
 
 /**
  * Try to JSON.parse the `workout` route param. We wrap in try/catch
@@ -137,20 +138,38 @@ const WorkoutDetailScreen = () => {
       return;
     }
 
-    if (startMode === 'type') {
+    const navigateToActiveWorkout = () => {
+      if (startMode === 'type') {
+        router.replace({
+          pathname: '/active-workout',
+          params: { type: workout.name || workout.workout_name },
+        });
+        return;
+      }
+
+      const startParams = { custom: 'true' };
+      const routeWorkoutId = Array.isArray(params.workoutId)
+        ? params.workoutId[0]
+        : params.workoutId;
+      const resolvedId = workout?.id || routeWorkoutId;
+      if (resolvedId) {
+        startParams.workoutId = String(resolvedId);
+      } else if (workout) {
+        startParams.workout = JSON.stringify(workout);
+      } else {
+        Alert.alert('Error', 'Workout data is missing. Please go back and try again.');
+        return;
+      }
       router.replace({
         pathname: '/active-workout',
-        params: { type: workout.name || workout.workout_name },
+        params: startParams,
       });
-    } else {
-      router.replace({
-        pathname: '/active-workout',
-        params: {
-          custom: 'true',
-          workout: JSON.stringify(workout),
-        },
-      });
-    }
+    };
+
+    promptResumeOrStartNew({
+      onResume: () => router.replace({ pathname: '/active-workout', params: { resume: 'true' } }),
+      onStartNew: navigateToActiveWorkout,
+    });
   };
 
   // ---------------------------------------------------------------

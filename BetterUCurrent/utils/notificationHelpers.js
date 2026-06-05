@@ -497,17 +497,17 @@ export async function createLikeNotification(fromUserId, toUserId, fromUserName,
 }
 
 /**
- * Kudos on feed activities (workout / mental / run). Uses notification type `like` for DB compatibility.
+ * Likes on feed activities (workout / mental / run). Uses notification type `like` for DB compatibility.
  */
 export async function createKudosNotification(fromUserId, toUserId, fromUserName, itemType, itemId) {
   try {
     const displayName = await getUserDisplayName(fromUserId, fromUserName);
     const { label, title: activityTitle } = await getActivityDetails(itemType, itemId);
 
-    const title = `${displayName} gave you kudos`;
+    const title = `${displayName} liked your post`;
     const message = activityTitle
-      ? `Kudos on ${activityTitle}`
-      : `Kudos on your ${label}`;
+      ? `Liked ${activityTitle}`
+      : `Liked your ${label}`;
 
     const actionData =
       itemId && typeof itemId === 'string' && !itemId.startsWith('test-')
@@ -529,7 +529,7 @@ export async function createKudosNotification(fromUserId, toUserId, fromUserName
         item_id: itemId,
         activity_title: activityTitle,
         activity_label: label,
-        interaction: 'kudos',
+        interaction: 'like',
       },
       isActionable: !!actionData,
       actionType: actionData ? 'navigate' : null,

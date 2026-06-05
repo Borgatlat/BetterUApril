@@ -34,6 +34,11 @@ export function SchoolWellnessHubGrid({ children }) {
   return <View style={styles.grid}>{children}</View>;
 }
 
+/** Small label inside Explore sections */
+export function SchoolWellnessHubGroupLabel({ children }) {
+  return <Text style={styles.groupLabel}>{children}</Text>;
+}
+
 const styles = StyleSheet.create({
   grid: {
     flexDirection: "row",
@@ -41,39 +46,52 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   tile: {
-    width: "48%",
-    minHeight: 132,
-    backgroundColor: T.cardBg,
-    borderRadius: T.radiusXl,
-    padding: 14,
+    flexGrow: 1,
+    flexBasis: "47%",
+    maxWidth: "48%",
+    minHeight: 118,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRadius: T.radiusLg,
+    padding: 13,
     borderWidth: 1,
     borderColor: T.border,
     position: "relative",
   },
   iconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 10,
+    marginBottom: 9,
   },
   title: {
     color: T.text,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "800",
-    marginBottom: 4,
-    paddingRight: 20,
+    marginBottom: 3,
+    paddingRight: 18,
+    letterSpacing: -0.2,
   },
   hint: {
     color: T.sub,
-    fontSize: 12,
-    lineHeight: 17,
-    paddingRight: 16,
+    fontSize: 11,
+    lineHeight: 15,
+    paddingRight: 12,
   },
   chev: {
     position: "absolute",
-    top: 14,
-    right: 12,
+    top: 12,
+    right: 10,
+    opacity: 0.7,
+  },
+  groupLabel: {
+    color: T.subMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.7,
+    textTransform: "uppercase",
+    marginTop: 2,
+    marginBottom: 2,
   },
 });

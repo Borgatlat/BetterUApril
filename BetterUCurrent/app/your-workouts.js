@@ -102,6 +102,8 @@ const YourWorkoutsScreen = () => {
     router.push({
       pathname: '/workout-detail',
       params: {
+        // Short id survives URL limits even if the JSON below is truncated.
+        workoutId: workout.id ? String(workout.id) : undefined,
         workout: JSON.stringify({
           ...workout,
           name: workout.workout_name || workout.name,

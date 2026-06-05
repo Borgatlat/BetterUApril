@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Dimensions, Alert, Linking, Share } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Dimensions, Alert, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from '../../lib/MapView';
+import RunRouteMap from '../../components/RunRouteMap';
+import { hasDrawableRunPath } from '../../utils/runPathMap';
 import { Video } from 'expo-av'; // Import Video component for video playback
 import { supabase } from '../../lib/supabase';
 import { useNotifications } from '../../context/NotificationContext';
@@ -11,6 +12,7 @@ import { createKudosNotification } from '../../utils/notificationHelpers';
 import { useAuth } from '../../context/AuthContext';
 import { COMMUNITY_THEME } from '../../config/communityTheme';
 import { formatApiError } from '../../lib/formatApiError';
+import { shareActivityLink } from '../../lib/shareLinks';
 
 const KUDOS_ACCENT = COMMUNITY_THEME.communityAccent;
 import CommentsModal from '../(modals)/CommentsModal';
@@ -108,7 +110,7 @@ const FeedCard = ({
   // New props for run data
   runData, // { path, distance_meters, duration_seconds, start_time, end_time }
   showMapToOthers = true, // Whether to show the map to others
-  enableInlineMap = true, // false in scrollable feeds — MapView inside ScrollView crashes on device
+  enableInlineMap = true, // uses non-interactive RunRouteMap in feeds to avoid native scroll crashes
   borderColor, // Custom border color for workout posts (set with Sparks)
 }) => {
   const [commentCount, setCommentCount] = useState(initialCommentCount);
@@ -120,69 +122,8 @@ const FeedCard = ({
   const [showComments, setShowComments] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
 
-  // Map-related state
-  const [mapRegion, setMapRegion] = useState(null);
-  const [mapLoading, setMapLoading] = useState(false);
-  
   const router = useRouter();
   const { createNotification } = useNotifications();
-
-  // Map utility functions
-  const parseRunPath = (pathString) => {
-    console.log('[FeedCard] parseRunPath called with:', {
-      pathString,
-      type: typeof pathString,
-      isString: typeof pathString === 'string',
-      isArray: Array.isArray(pathString),
-      length: pathString ? pathString.length : 0
-    });
-    
-    try {
-      if (typeof pathString === 'string') {
-        const parsed = JSON.parse(pathString);
-        console.log('[FeedCard] Successfully parsed string path:', parsed);
-        return parsed;
-      }
-      const result = pathString || [];
-      console.log('[FeedCard] Returning non-string path:', result);
-      return result;
-    } catch (error) {
-      console.error('[FeedCard] Error parsing run path:', error, 'Input:', pathString);
-      return [];
-    }
-  };
-
-  const calculateMapRegion = (coordinates) => {
-    if (!coordinates || coordinates.length === 0) return null;
-
-    const valid = coordinates.filter(
-      (coord) =>
-        coord &&
-        Number.isFinite(coord.latitude) &&
-        Number.isFinite(coord.longitude)
-    );
-    if (valid.length === 0) return null;
-
-    const lats = valid.map((coord) => coord.latitude);
-    const lngs = valid.map((coord) => coord.longitude);
-    
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
-    
-    const centerLat = (minLat + maxLat) / 2;
-    const centerLng = (minLng + maxLng) / 2;
-    const latDelta = (maxLat - minLat) * 1.2; // Add 20% padding
-    const lngDelta = (maxLng - minLng) * 1.2;
-    
-    return {
-      latitude: centerLat,
-      longitude: centerLng,
-      latitudeDelta: Math.max(latDelta, 0.01), // Minimum zoom level
-      longitudeDelta: Math.max(lngDelta, 0.01),
-    };
-  };
 
 // Event card data shape. Use this structure when passing event data to the feed.
 // Event: { id, title, description, date, time, location, attendees, likes, comments, created_at, updated_at }
@@ -194,63 +135,36 @@ const FeedCard = ({
 
 
 
-  // Handle run data processing
-  useEffect(() => {
-    if (type === 'run' && runData) {
-      console.log('[FeedCard] Processing run data:', {
-        runData,
-        path: runData.path,
-        pathType: typeof runData.path,
-        pathLength: runData.path ? runData.path.length : 0
-      });
-      
-      setMapLoading(true);
-      
-      try {
-        const coordinates = parseRunPath(runData.path);
-        console.log('[FeedCard] Parsed coordinates:', {
-          coordinates,
-          coordinatesLength: coordinates.length,
-          firstCoord: coordinates[0],
-          lastCoord: coordinates[coordinates.length - 1]
-        });
-        
-        if (coordinates.length > 0) {
-          // Calculate map region for interactive map
-          const region = calculateMapRegion(coordinates);
-          console.log('[FeedCard] Calculated map region:', region);
-          setMapRegion(region);
-        } else {
-          console.log('[FeedCard] No coordinates found');
-        }
-      } catch (error) {
-        console.error('[FeedCard] Error processing run data:', error);
-      } finally {
-        setMapLoading(false);
-      }
-    }
-  }, [type, runData]);
-
-  // Update state when props change
   useEffect(() => {
     setCommentCount(initialCommentCount);
   }, [initialCommentCount]);
 
+  const initialKudosKey = useMemo(
+    () =>
+      (Array.isArray(initialKudos) ? initialKudos : [])
+        .map((k) => k.user_id)
+        .sort()
+        .join(','),
+    [initialKudos]
+  );
+
   useEffect(() => {
     setKudosList(Array.isArray(initialKudos) ? initialKudos : []);
-  }, [initialKudos, targetId]);
+  }, [targetId, initialKudosKey]);
 
   // Share post - defined at component level so it can be used by the share button in JSX
   const sharePost = useCallback(async () => {
+    if (!targetId || !type) return;
     try {
-      await Share.share({
-        message: 'Check out this post on BetterU',
-        url: `https://betteru.app/post/${targetId}`
+      await shareActivityLink({
+        id: targetId,
+        type,
+        title: title || undefined,
       });
     } catch (error) {
       console.error('Error sharing post:', error);
     }
-  }, [targetId]);
+  }, [targetId, type, title]);
 
   const showInteractRow = type === 'workout' || type === 'mental' || type === 'run';
   const hasKudosed = currentUserId
@@ -262,17 +176,17 @@ const FeedCard = ({
     if (kudosBusy) return;
 
     if (!supportsKudos(type)) {
-      Alert.alert('Kudos', 'Kudos are available on workouts, runs, and mental sessions.');
+      Alert.alert('Likes', 'Likes are available on workouts, runs, and mental sessions.');
       return;
     }
 
     if (!targetId) {
-      Alert.alert('Kudos', 'This post cannot receive kudos right now.');
+      Alert.alert('Likes', 'This post cannot be liked right now.');
       return;
     }
 
     if (!currentUserId) {
-      Alert.alert('Sign in required', 'Sign in to give kudos to your friends.');
+      Alert.alert('Sign in required', 'Sign in to like posts from your friends.');
       return;
     }
 
@@ -308,7 +222,7 @@ const FeedCard = ({
       } else {
         setKudosList((prev) => prev.filter((k) => k.user_id !== currentUserId));
       }
-      Alert.alert('Could not update kudos', formatApiError(error));
+      Alert.alert('Could not update like', formatApiError(error));
     } finally {
       setKudosBusy(false);
     }
@@ -339,6 +253,10 @@ const FeedCard = ({
         return 'fitness-outline';
       case 'event':
         return 'calendar-outline';
+      case 'bond':
+      case 'bond_purchased':
+      case 'bond_withdrawn':
+        return 'trending-up-outline';
       default:
         return 'fitness-outline';
         
@@ -398,7 +316,8 @@ const FeedCard = ({
       },
   ];
 
-  const canOpenActivity = type !== 'event' && Boolean(targetId);
+  const isBondActivity = type === 'bond' || type === 'bond_purchased' || type === 'bond_withdrawn';
+  const canOpenActivity = !isBondActivity && type !== 'event' && Boolean(targetId);
   const CardBody = canOpenActivity ? TouchableOpacity : View;
   const cardBodyProps = canOpenActivity
     ? {
@@ -631,69 +550,20 @@ const FeedCard = ({
           ) : null}
         </View>
       )}
-      {/* Run Map Component - Only show if path has coordinates */}
+      {/* Route preview — non-interactive map avoids ScrollView/FlatList native crashes */}
       {enableInlineMap &&
         type === 'run' &&
         runData &&
         showMapToOthers &&
-        mapRegion &&
-        parseRunPath(runData.path).length > 1 && (
+        hasDrawableRunPath(runData.path) && (
         <View style={styles.mapContainer}>
-          {mapLoading ? (
-            <View style={styles.mapLoadingContainer}>
-              <ActivityIndicator size="large" color="#00ffff" />
-              <Text style={styles.mapLoadingText}>Loading route...</Text>
-            </View>
-          ) : (
-            <View style={styles.interactiveMapContainer}>
-              {mapRegion && (
-                <MapView
-                  style={styles.interactiveMap}
-                  region={mapRegion}
-                  provider={PROVIDER_GOOGLE}
-                  showsUserLocation={false}
-                  showsMyLocationButton={false}
-                  showsCompass={true}
-                  showsScale={true}
-                  scrollEnabled={true}
-                  zoomEnabled={true}
-                  rotateEnabled={true}
-                  pitchEnabled={true}
-                >
-                  {parseRunPath(runData.path).length > 1 && (
-                    <Polyline
-                      coordinates={parseRunPath(runData.path)}
-                      strokeColor="#00ffff"
-                      strokeWidth={4}
-                      lineDashPattern={[1]}
-                      zIndex={1}
-                      lineCap="round"
-                      lineJoin="round"
-                      geodesic={true}
-                    />
-                  )}
-                  {parseRunPath(runData.path).length > 0 && (
-                    <>
-                      <Marker
-                        coordinate={parseRunPath(runData.path)[0]}
-                        title="Start"
-                      >
-                        <View style={styles.startMarker} />
-                      </Marker>
-                      {parseRunPath(runData.path).length > 1 && (
-                        <Marker
-                          coordinate={parseRunPath(runData.path)[parseRunPath(runData.path).length - 1]}
-                          title="End"
-                        >
-                          <View style={styles.endMarker} />
-                        </Marker>
-                      )}
-                    </>
-                  )}
-                </MapView>
-              )}
-            </View>
-          )}
+          <View style={styles.interactiveMapContainer}>
+            <RunRouteMap
+              path={runData.path}
+              style={styles.interactiveMap}
+              interactable={false}
+            />
+          </View>
         </View>
       )}
 
@@ -718,8 +588,8 @@ const FeedCard = ({
               disabled={kudosBusy}
               accessibilityLabel={
                 kudosCount > 0
-                  ? `Kudos, ${kudosCount} ${kudosCount === 1 ? 'person' : 'people'}`
-                  : 'Give kudos'
+                  ? `Liked, ${kudosCount} ${kudosCount === 1 ? 'like' : 'likes'}`
+                  : 'Like post'
               }
               accessibilityRole="button"
               accessibilityState={{ selected: hasKudosed }}

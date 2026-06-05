@@ -37,6 +37,8 @@ import {
 
   SchoolWellnessHubTile,
 
+  SchoolWellnessHubGroupLabel,
+
 } from "../../components/school/wellness/SchoolWellnessHubTile";
 
 import { PrivacyExpandable } from "../../components/school/wellness/PrivacyExpandable";
@@ -63,6 +65,7 @@ import {
 } from "../../lib/administrativeAssignmentsClient";
 import { GradAtGradPillarChart } from "../../components/school/GradAtGradPillarChart";
 import { ReflectiveAssignmentCard } from "../../components/school/wellness/ReflectiveAssignmentCard";
+import { useBottomChromeInsets } from "../../context/BottomChromeContext";
 
 
 
@@ -71,6 +74,8 @@ export default function SchoolWellnessHome() {
   const router = useRouter();
 
   const insets = useSafeAreaInsets();
+
+  const { scrollPaddingBottom } = useBottomChromeInsets();
 
   const { workspace, isPeerMentor, orgId } = useAuthSession();
 
@@ -309,7 +314,13 @@ export default function SchoolWellnessHome() {
 
         styles.content,
 
-        { paddingTop: Math.max(insets.top, 16) + 4, paddingBottom: insets.bottom + 96 },
+        {
+
+          paddingTop: Math.max(insets.top, 12),
+
+          paddingBottom: Math.max(scrollPaddingBottom, insets.bottom + 96),
+
+        },
 
       ]}
 
@@ -335,7 +346,10 @@ export default function SchoolWellnessHome() {
 
     >
 
-      <SchoolWellnessHeader schoolName={schoolName} />
+      <SchoolWellnessHeader
+        schoolName={schoolName}
+        onBackHome={() => router.replace("/(tabs)/home")}
+      />
 
       {loadErr ? (
 
@@ -351,9 +365,9 @@ export default function SchoolWellnessHome() {
 
 
 
-      <SchoolWellnessSection title="Today" subtitle="Check in · focus · support">
+      {pendingAssignment ? (
 
-        {pendingAssignment ? (
+        <SchoolWellnessSection title="Needs your attention" subtitle="From your dean or counselor" inCard>
 
           <ReflectiveAssignmentCard
 
@@ -363,12 +377,21 @@ export default function SchoolWellnessHome() {
 
           />
 
-        ) : null}
+        </SchoolWellnessSection>
 
-        <PulseStatusBanner todayPulse={todayPulse} loading={pulseLoading && !refreshing} />
+      ) : null}
+
+
+
+      <SchoolWellnessSection title="Daily check-in" subtitle="How you're doing today" inCard>
+
+        <PulseStatusBanner
+          todayPulse={todayPulse}
+          loading={pulseLoading && !refreshing}
+          onPress={() => setPulseModalOpen(true)}
+        />
 
         <SchoolWellnessQuickRow
-          onLogPulse={() => setPulseModalOpen(true)}
           onFocusLock={() => router.push("/focus-lock")}
           onCounselor={() => pulseRef.current?.requestCounselor?.()}
           onAccountability={() => router.push("/accountability")}
@@ -387,7 +410,7 @@ export default function SchoolWellnessHome() {
 
           onPulseSaved={onPulseSaved}
 
-          compact
+          surfaceHidden
 
         />
 
@@ -395,33 +418,11 @@ export default function SchoolWellnessHome() {
 
 
 
-      <SchoolWellnessSection title="Grad at Grad" subtitle="Profile of the Graduate · five pillars">
+      <SchoolWellnessSection title="Explore campus" subtitle="Wellness tools linked to your school" inCard>
 
-        <GradAtGradPillarChart summaryRows={gradSummary} loading={gradLoading && !refreshing} />
-
-      </SchoolWellnessSection>
-
-
-
-      <SchoolWellnessSection title={schoolName} subtitle="Fitness, faith, mind & service">
+        <SchoolWellnessHubGroupLabel>Mind & spirit</SchoolWellnessHubGroupLabel>
 
         <SchoolWellnessHubGrid>
-
-          <SchoolWellnessHubTile
-
-            icon="home-outline"
-
-            title="Fitness & community"
-
-            hint="Workouts & friends"
-
-            iconColor={T.accent}
-
-            iconBg={T.accentDim}
-
-            onPress={() => router.replace("/(tabs)/home")}
-
-          />
 
           <SchoolWellnessHubTile
 
@@ -455,19 +456,27 @@ export default function SchoolWellnessHome() {
 
           />
 
+        </SchoolWellnessHubGrid>
+
+
+
+        <SchoolWellnessHubGroupLabel>Body & community</SchoolWellnessHubGroupLabel>
+
+        <SchoolWellnessHubGrid>
+
           <SchoolWellnessHubTile
 
-            icon="heart-circle-outline"
+            icon="home-outline"
 
-            title="Volunteer"
+            title="Fitness home"
 
-            hint="Service hours"
+            hint="Workouts & schedule"
 
             iconColor={T.accent}
 
             iconBg={T.accentDim}
 
-            onPress={() => router.push("/volunteer-oppurtunities")}
+            onPress={() => router.replace("/(tabs)/home")}
 
           />
 
@@ -487,13 +496,37 @@ export default function SchoolWellnessHome() {
 
           />
 
+        </SchoolWellnessHubGrid>
+
+
+
+        <SchoolWellnessHubGroupLabel>Service & support</SchoolWellnessHubGroupLabel>
+
+        <SchoolWellnessHubGrid>
+
+          <SchoolWellnessHubTile
+
+            icon="heart-circle-outline"
+
+            title="Volunteer"
+
+            hint="Log service hours"
+
+            iconColor={T.accent}
+
+            iconBg={T.accentDim}
+
+            onPress={() => router.push("/volunteer-oppurtunities")}
+
+          />
+
           <SchoolWellnessHubTile
 
             icon="walk-outline"
 
             title="Emmaus Companion"
 
-            hint="Raise your hand · peer support"
+            hint="Peer pastoral support"
 
             iconColor="#8ab4ff"
 
@@ -509,7 +542,15 @@ export default function SchoolWellnessHome() {
 
 
 
-      <SchoolWellnessSection title="Companion care" subtitle="Peer mentors & pastoral connection">
+      <SchoolWellnessSection title="Grad at Grad" subtitle="Profile of the Graduate · five pillars" inCard>
+
+        <GradAtGradPillarChart summaryRows={gradSummary} loading={gradLoading && !refreshing} />
+
+      </SchoolWellnessSection>
+
+
+
+      <SchoolWellnessSection title="Companion care" subtitle="Active peer mentor conversations" inCard>
 
         <EmmausStudentRequests />
 
@@ -528,7 +569,7 @@ export default function SchoolWellnessHome() {
 
 
 
-      <SchoolWellnessSection title="Support" subtitle="Privacy & crisis resources" last>
+      <SchoolWellnessSection title="Support & privacy" subtitle="Crisis lines and how your data is used" last inCard>
 
         <PrivacyExpandable />
 

@@ -1,32 +1,89 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from '../../lib/MapView';
+import MapView, { Polyline, Marker, getMapProvider } from '../../lib/MapView';
 import { supabase } from '../../lib/supabase';
 import { useUser } from '../../context/UserContext';
-import { LinearGradient } from 'expo-linear-gradient';
+import {
+  loadPendingActivitySummary,
+  clearPendingActivitySummary,
+  parseActivityLocations,
+  normalizeLocationsForMap,
+  activityTypeForDatabase,
+  parseRouteNumber,
+} from '../../utils/pendingActivitySummary';
+
+const mapProvider = getMapProvider();
 
 const ActivitySummary = () => {
   const router = useRouter();
   const { user, isLoading: isUserLoading } = useUser();
   const params = useLocalSearchParams();
   const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState(null);
+  const [activityData, setActivityData] = useState(null);
   const mapRef = useRef(null);
-  
-  // Parse the data from params
-  const activityData = {
-    locations: JSON.parse(params.locations || '[]'),
-    distance: parseFloat(params.distance || 0),
-    duration: parseFloat(params.duration || 0),
-    pace: parseFloat(params.pace || 0),
-    unit: params.unit || 'km',
-    activityType: params.activityType || 'run', // 'run', 'walk', or 'bike'
-    startTime: params.startTime,
-    endTime: params.endTime
-  };
 
-  // Get activity-specific labels and icons
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSummary = async () => {
+      try {
+        const usePending = params.usePending === 'true' || params.usePending === true;
+
+        if (usePending) {
+          const stored = await loadPendingActivitySummary();
+          if (!stored) {
+            throw new Error('Activity data not found. Please finish your activity again.');
+          }
+          if (!cancelled) {
+            setActivityData({
+              locations: parseActivityLocations(stored.locations),
+              distance: parseRouteNumber(stored.distance, 0),
+              duration: parseRouteNumber(stored.duration, 0),
+              pace: parseRouteNumber(stored.pace, 0),
+              unit: stored.unit || 'km',
+              activityType: stored.activityType || 'run',
+              startTime: stored.startTime,
+              endTime: stored.endTime,
+            });
+          }
+          return;
+        }
+
+        // Legacy: small payloads may still arrive via URL params.
+        if (!cancelled) {
+          setActivityData({
+            locations: parseActivityLocations(params.locations),
+            distance: parseRouteNumber(params.distance, 0),
+            duration: parseRouteNumber(params.duration, 0),
+            pace: parseRouteNumber(params.pace, 0),
+            unit: params.unit || 'km',
+            activityType: params.activityType || 'run',
+            startTime: params.startTime,
+            endTime: params.endTime,
+          });
+        }
+      } catch (error) {
+        console.error('Error loading activity summary:', error);
+        if (!cancelled) {
+          setLoadError(error?.message || 'Could not load activity summary.');
+        }
+      }
+    };
+
+    loadSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [params.usePending, params.locations, params.distance, params.duration, params.pace, params.unit, params.activityType, params.startTime, params.endTime]);
+
+  const mapLocations = useMemo(
+    () => normalizeLocationsForMap(activityData?.locations),
+    [activityData?.locations]
+  );
+
   const getActivityInfo = (type) => {
     switch (type) {
       case 'walk':
@@ -35,7 +92,7 @@ const ActivitySummary = () => {
           icon: 'footsteps',
           color: '#4CAF50',
           verb: 'walked',
-          noun: 'walk'
+          noun: 'walk',
         };
       case 'bike':
         return {
@@ -43,7 +100,7 @@ const ActivitySummary = () => {
           icon: 'bicycle',
           color: '#FF9800',
           verb: 'biked',
-          noun: 'bike ride'
+          noun: 'bike ride',
         };
       case 'timed_distance':
         return {
@@ -51,7 +108,7 @@ const ActivitySummary = () => {
           icon: 'flash',
           color: '#ffd700',
           verb: 'completed',
-          noun: 'timed distance'
+          noun: 'timed distance',
         };
       case 'run':
       default:
@@ -60,26 +117,21 @@ const ActivitySummary = () => {
           icon: 'flash',
           color: '#00ffff',
           verb: 'ran',
-          noun: 'run'
+          noun: 'run',
         };
     }
   };
 
-  const activityInfo = getActivityInfo(activityData.activityType);
+  const activityInfo = getActivityInfo(activityData?.activityType);
 
   useEffect(() => {
-    // Debug user state
-    console.log('User state in ActivitySummary:', { isUserLoading, userId: user?.id });
-  }, [isUserLoading, user]);
-
-  useEffect(() => {
-    if (mapRef.current && activityData.locations.length > 1) {
-      mapRef.current.fitToCoordinates(activityData.locations, {
+    if (mapRef.current && mapLocations.length > 1) {
+      mapRef.current.fitToCoordinates(mapLocations, {
         edgePadding: { top: 100, right: 100, bottom: 100, left: 100 },
         animated: true,
       });
     }
-  }, [activityData.locations]);
+  }, [mapLocations]);
 
   const formatTime = (seconds) => {
     const hours = Math.floor(seconds / 3600);
@@ -90,74 +142,74 @@ const ActivitySummary = () => {
 
   const formatPace = (pace, activityType, unit) => {
     if (pace === 0) return '--:--';
-    
+
     if (activityType === 'bike') {
-      // For biking, show speed instead of pace
       const speed = unit === 'miles' ? pace * 0.621371 : pace;
       return `${speed.toFixed(1)} ${unit === 'miles' ? 'mph' : 'kph'}`;
-    } else {
-      // For running/walking, show pace
-      const minutes = Math.floor(pace);
-      const seconds = Math.floor((pace - minutes) * 60);
-      return `${minutes}:${seconds.toString().padStart(2, '0')}`;
     }
+
+    const minutes = Math.floor(pace);
+    const seconds = Math.floor((pace - minutes) * 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const getPaceLabel = (activityType) => {
-    return activityType === 'bike' ? 'Speed' : 'Avg Pace';
-  };
+  const getPaceLabel = (activityType) => (activityType === 'bike' ? 'Speed' : 'Avg Pace');
 
   const saveActivity = async () => {
-    if (isSaving) return;
+    if (isSaving || !activityData) return;
 
-    console.log('Save activity button pressed');
-    console.log('Current user:', user);
-    console.log('Activity data:', activityData);
-
-    // Get the current user from Supabase directly if context is not ready
     let currentUser = user;
     if (!currentUser?.id) {
-      console.log('No user in context, getting from Supabase');
       const { data: { user: supabaseUser } } = await supabase.auth.getUser();
       if (!supabaseUser) {
-        console.log('No user found in Supabase');
         Alert.alert('Error', 'Unable to save activity. Please try again.');
         return;
       }
       currentUser = supabaseUser;
-      console.log('Got user from Supabase:', currentUser);
     }
-  
+
+    const startMs = parseRouteNumber(activityData.startTime, Date.now() - activityData.duration * 1000);
+    const endMs = parseRouteNumber(activityData.endTime, Date.now());
+    const dbActivityType = activityTypeForDatabase(activityData.activityType);
+
     try {
       setIsSaving(true);
-    
+
       const activityDataToSave = {
         user_id: currentUser.id,
         name: `${activityInfo.noun.charAt(0).toUpperCase() + activityInfo.noun.slice(1)}`,
-        start_time: new Date(parseInt(activityData.startTime)).toISOString(),
-        end_time: new Date(parseInt(activityData.endTime)).toISOString(),
+        start_time: new Date(startMs).toISOString(),
+        end_time: new Date(endMs).toISOString(),
         duration_seconds: activityData.duration,
-        distance_meters: activityData.unit === 'miles' ? activityData.distance * 1609.34 : activityData.distance * 1000,
-        average_pace_minutes_per_km: activityData.activityType === 'bike' ? activityData.pace : (activityData.unit === 'miles' ? activityData.pace * 1.60934 : activityData.pace),
-        path: activityData.locations,
+        distance_meters:
+          activityData.unit === 'miles'
+            ? activityData.distance * 1609.34
+            : activityData.distance * 1000,
+        average_pace_minutes_per_km:
+          activityData.activityType === 'bike'
+            ? activityData.pace
+            : activityData.unit === 'miles'
+              ? activityData.pace * 1.60934
+              : activityData.pace,
+        path: mapLocations.length > 0 ? mapLocations : [],
         status: 'completed',
         notes: `Completed ${activityInfo.noun}`,
         show_map_to_others: true,
-        activity_type: activityData.activityType
+        activity_type: dbActivityType,
       };
-
-      console.log('Saving activity data:', activityDataToSave);
 
       const { error } = await supabase.from('runs').insert([activityDataToSave]);
 
       if (error) {
-        console.error('Supabase error:', error);
         throw error;
       }
-    
-      console.log('Activity saved successfully');
-      Alert.alert('Success', `${activityInfo.noun.charAt(0).toUpperCase() + activityInfo.noun.slice(1)} saved successfully!`);
-      router.back();
+
+      await clearPendingActivitySummary();
+      Alert.alert(
+        'Success',
+        `${activityInfo.noun.charAt(0).toUpperCase() + activityInfo.noun.slice(1)} saved successfully!`,
+        [{ text: 'OK', onPress: () => router.back() }]
+      );
     } catch (error) {
       console.error('Error saving activity:', error);
       Alert.alert('Error', `Failed to save ${activityInfo.noun}. Please try again.`);
@@ -166,63 +218,73 @@ const ActivitySummary = () => {
     }
   };
 
-  const discardActivity = () => {
+  const discardActivity = async () => {
+    await clearPendingActivitySummary();
     router.back();
   };
 
-  // Only show loading state for a brief moment
-  if (isUserLoading) {
+  if (isUserLoading || (!activityData && !loadError)) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={activityInfo.color} />
-          <Text style={styles.loadingText}>Loading...</Text>
+          <ActivityIndicator size="large" color="#00ffff" />
+          <Text style={styles.loadingText}>Loading summary...</Text>
         </View>
       </SafeAreaView>
     );
   }
 
+  if (loadError || !activityData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.errorText}>{loadError || 'Activity data is missing.'}</Text>
+          <TouchableOpacity style={styles.backLink} onPress={() => router.back()}>
+            <Text style={styles.backLinkText}>Go back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const initialLat = mapLocations[0]?.latitude ?? 37.78825;
+  const initialLng = mapLocations[0]?.longitude ?? -122.4324;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.closeButton}>
+        <TouchableOpacity onPress={discardActivity} style={styles.closeButton}>
           <Ionicons name="close" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{activityInfo.title}</Text>
       </View>
-    
+
       <ScrollView style={styles.scrollView}>
         <View style={styles.mapContainer}>
           <MapView
             ref={mapRef}
             style={styles.map}
-            provider={PROVIDER_GOOGLE}
+            provider={mapProvider}
             initialRegion={{
-              latitude: activityData.locations[0]?.latitude || 0,
-              longitude: activityData.locations[0]?.longitude || 0,
+              latitude: initialLat,
+              longitude: initialLng,
               latitudeDelta: 0.01,
               longitudeDelta: 0.01,
             }}
           >
-            {activityData.locations.length > 1 && (
+            {mapLocations.length > 1 && (
               <Polyline
-                coordinates={activityData.locations}
+                coordinates={mapLocations}
                 strokeColor={activityInfo.color}
                 strokeWidth={4}
               />
             )}
-            {activityData.locations.length > 0 && (
+            {mapLocations.length > 0 && (
               <>
-                <Marker
-                  coordinate={activityData.locations[0]}
-                  title="Start"
-                >
+                <Marker coordinate={mapLocations[0]} title="Start">
                   <View style={[styles.startMarker, { backgroundColor: activityInfo.color }]} />
                 </Marker>
-                <Marker
-                  coordinate={activityData.locations[activityData.locations.length - 1]}
-                  title="End"
-                >
+                <Marker coordinate={mapLocations[mapLocations.length - 1]} title="End">
                   <View style={[styles.endMarker, { backgroundColor: activityInfo.color }]} />
                 </Marker>
               </>
@@ -240,9 +302,7 @@ const ActivitySummary = () => {
             </View>
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>Duration</Text>
-              <Text style={styles.statValue}>
-                {formatTime(activityData.duration)}
-              </Text>
+              <Text style={styles.statValue}>{formatTime(activityData.duration)}</Text>
             </View>
           </View>
           <View style={styles.statRow}>
@@ -255,11 +315,16 @@ const ActivitySummary = () => {
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>Activity Type</Text>
               <Text style={styles.statValue}>
-                {activityData.activityType === 'timed_distance' ? 'Timed Distance' : 
-                 activityData.activityType === 'run' ? 'Run' :
-                 activityData.activityType === 'walk' ? 'Walk' :
-                 activityData.activityType === 'bike' ? 'Bike' :
-                 activityData.activityType.charAt(0).toUpperCase() + activityData.activityType.slice(1)}
+                {activityData.activityType === 'timed_distance'
+                  ? 'Timed Distance'
+                  : activityData.activityType === 'run'
+                    ? 'Run'
+                    : activityData.activityType === 'walk'
+                      ? 'Walk'
+                      : activityData.activityType === 'bike'
+                        ? 'Bike'
+                        : activityData.activityType.charAt(0).toUpperCase() +
+                          activityData.activityType.slice(1)}
               </Text>
             </View>
           </View>
@@ -280,11 +345,8 @@ const ActivitySummary = () => {
               </>
             )}
           </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.discardButton}
-            onPress={discardActivity}
-          >
+
+          <TouchableOpacity style={styles.discardButton} onPress={discardActivity}>
             <Ionicons name="close" size={20} color="#ff4444" />
             <Text style={styles.discardButtonText}>Discard</Text>
           </TouchableOpacity>
@@ -303,11 +365,27 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 24,
   },
   loadingText: {
     color: '#fff',
     fontSize: 16,
     marginTop: 10,
+  },
+  errorText: {
+    color: '#ff8888',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  backLink: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+  },
+  backLinkText: {
+    color: '#00ffff',
+    fontSize: 16,
+    fontWeight: '600',
   },
   header: {
     flexDirection: 'row',

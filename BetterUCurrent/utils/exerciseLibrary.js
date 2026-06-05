@@ -617,6 +617,36 @@ export const exerciseLibrary = {
       'Lower with control and repeat',
     ],
   },
+  'standing-calf-raise': {
+    name: 'Standing Calf Raise',
+    targetMuscles: 'Calves',
+    instructions: [
+      'Stand with the balls of your feet on a step or platform edge',
+      'Lower heels for a full stretch at the bottom',
+      'Drive up through the balls of your feet and squeeze calves at the top',
+      'Lower with control and repeat',
+    ],
+  },
+  'seated-calf-raise': {
+    name: 'Seated Calf Raise',
+    targetMuscles: 'Calves',
+    instructions: [
+      'Sit on a calf raise machine with pads on your lower thighs',
+      'Place the balls of your feet on the platform',
+      'Lower heels for a stretch, then press up and squeeze the calves',
+      'Control the descent on every rep',
+    ],
+  },
+  'leg-press-calf-raise': {
+    name: 'Leg Press Calf Raise',
+    targetMuscles: 'Calves',
+    instructions: [
+      'Sit on the leg press with only the balls of your feet on the bottom edge of the platform',
+      'Keep knees slightly bent and legs mostly straight — quads should not drive the rep',
+      'Press through your toes to raise the platform and squeeze your calves',
+      'Lower slowly until you feel a calf stretch, then repeat',
+    ],
+  },
   'face-pull': {
     name: 'Face Pull',
     targetMuscles: 'Rear Shoulders, Upper Back, Traps',
@@ -946,6 +976,9 @@ export const exerciseGifSearchFallbacks = {
   'Cable Kickbacks': ['Cable Kickback', 'Cable Hip Extension', 'Kickback', 'Glute Kickback'],
   'Calf Raise': ['Calf Raise', 'Standing Calf Raise', 'Calf Raises'],
   'Calf Raises': ['Calf Raise', 'Standing Calf Raise', 'Seated Calf Raise'],
+  'Standing Calf Raise': ['Standing Calf Raise', 'Calf Raise', 'Calf Raises'],
+  'Seated Calf Raise': ['Seated Calf Raise', 'Calf Raise', 'Calf Raises'],
+  'Leg Press Calf Raise': ['Leg Press Calf Raise', 'Calf Raise', 'Seated Calf Raise', 'Leg Press'],
   'Chest Fly': ['Chest Fly', 'Dumbbell Fly', 'Pec Fly', 'Cable Fly'],
   'Chin-Ups': ['Chin-Up', 'Chin Up', 'Chin Ups', 'Underhand Pull-Up'],
   'Close-Grip Bench Press': ['Close Grip Bench Press', 'Close Grip Press', 'Narrow Grip Bench Press', 'Tricep Bench Press'],

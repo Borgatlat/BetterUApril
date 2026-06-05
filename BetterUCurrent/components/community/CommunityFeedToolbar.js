@@ -74,7 +74,7 @@ export function CommunityFeedToolbar({
         })}
       </ScrollView>
 
-      <Text style={styles.hint}>Thumbs up on a post to send kudos</Text>
+      <Text style={styles.hint}>Tap the thumbs up on a post to like it</Text>
     </View>
   );
 }

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
 import { useUser } from "../../../context/UserContext";
 import { PremiumAvatar } from "../../../app/components/PremiumAvatar";
 import NotificationBadge from "../../NotificationBadge";
@@ -12,7 +13,7 @@ import { hexToRgba } from "../../../utils/homePageCustomization";
 /**
  * Top bar: greeting + your school's name (not generic “whole you” marketing copy).
  */
-export function SchoolWellnessHeader({ schoolName = "Your school" }) {
+export function SchoolWellnessHeader({ schoolName = "Your school", onBackHome }) {
   const router = useRouter();
   const { userProfile } = useUser();
   const [showNotifications, setShowNotifications] = useState(false);
@@ -24,9 +25,24 @@ export function SchoolWellnessHeader({ schoolName = "Your school" }) {
   return (
     <>
       <LinearGradient colors={T.heroGradient} style={styles.gradient}>
-        <View style={styles.badgeRow}>
+        <View style={styles.topBar}>
+          {typeof onBackHome === "function" ? (
+            <TouchableOpacity
+              style={styles.backBtn}
+              onPress={onBackHome}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Back to fitness home"
+            >
+              <Ionicons name="chevron-back" size={20} color={T.accent} />
+              <Text style={styles.backTxt}>Fitness home</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.backSpacer} />
+          )}
           <View style={styles.institutionalBadge}>
-            <Text style={styles.badgeTxt}>SCHOOL WELLNESS</Text>
+            <Ionicons name="school" size={11} color={T.goldMuted} style={styles.badgeIcon} />
+            <Text style={styles.badgeTxt}>CAMPUS WELLNESS</Text>
           </View>
         </View>
         <View style={styles.row}>
@@ -35,7 +51,7 @@ export function SchoolWellnessHeader({ schoolName = "Your school" }) {
             <Text style={styles.h1} accessibilityRole="header" numberOfLines={2}>
               {displaySchool}
             </Text>
-            <Text style={styles.tagline}>Wellness hub on BetterU</Text>
+            <Text style={styles.tagline}>Daily check-ins · formation · campus support</Text>
           </View>
           <View style={styles.actions}>
             <NotificationBadge
@@ -83,25 +99,52 @@ export function SchoolWellnessHeader({ schoolName = "Your school" }) {
 const styles = StyleSheet.create({
   gradient: {
     marginHorizontal: -20,
+    marginBottom: 8,
     paddingHorizontal: 20,
-    paddingBottom: 14,
-    marginBottom: 4,
+    paddingTop: 4,
+    paddingBottom: 18,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: T.border,
   },
-  badgeRow: { marginBottom: 10 },
-  institutionalBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 10,
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+    gap: 8,
+  },
+  backBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
     paddingVertical: 4,
-    borderRadius: 6,
+    paddingRight: 8,
+  },
+  backTxt: {
+    color: T.accent,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  backSpacer: { width: 1 },
+  institutionalBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
     backgroundColor: T.goldDim,
     borderWidth: 1,
     borderColor: "rgba(212,175,55,0.35)",
   },
+  badgeIcon: { marginRight: 5 },
   badgeTxt: {
     color: T.goldMuted,
     fontSize: 9,
     fontWeight: "800",
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   row: {
     flexDirection: "row",

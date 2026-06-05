@@ -75,7 +75,7 @@ async function toggleOnConfig(config, activityId, userId) {
 export async function toggleKudos(activityType, activityId, userId) {
   const configs = configsForType(activityType);
   if (!configs.length) {
-    throw new Error(`Kudos not supported for type: ${activityType}`);
+    throw new Error(`Likes not supported for type: ${activityType}`);
   }
 
   let resolvedUserId = userId;
@@ -85,7 +85,7 @@ export async function toggleKudos(activityType, activityId, userId) {
       error: userError,
     } = await supabase.auth.getUser();
     if (userError || !user?.id) {
-      throw new Error('Sign in to give kudos');
+      throw new Error('Sign in to like posts');
     }
     resolvedUserId = user.id;
   }
@@ -106,7 +106,7 @@ export async function toggleKudos(activityType, activityId, userId) {
     }
   }
 
-  throw new Error(formatApiError(lastError) || 'Kudos table not found. Run the kudos migration in Supabase.');
+  throw new Error(formatApiError(lastError) || 'Likes are not available yet. Run the likes migration in Supabase.');
 }
 
 export async function fetchKudosForIds(activityType, ids) {

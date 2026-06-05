@@ -2414,7 +2414,7 @@ DEPENDENCIES:
   - React-logger (from `../node_modules/react-native/ReactCommon/logger`)
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
-  - react-native-google-maps (from `/Users/enriqueortiz/Apps/BetterUApril/BetterUCurrent/node_modules/react-native-maps`)
+  - react-native-google-maps (from `/Users/enriqueortiz/Apps/BetterUApril-1/BetterUCurrent/node_modules/react-native-maps`)
   - react-native-maps (from `../node_modules/react-native-maps`)
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
   - "react-native-slider (from `../node_modules/@react-native-community/slider`)"
@@ -2625,7 +2625,7 @@ EXTERNAL SOURCES:
   React-microtasksnativemodule:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
   react-native-google-maps:
-    :path: "/Users/enriqueortiz/Apps/BetterUApril/BetterUCurrent/node_modules/react-native-maps"
+    :path: "/Users/enriqueortiz/Apps/BetterUApril-1/BetterUCurrent/node_modules/react-native-maps"
   react-native-maps:
     :path: "../node_modules/react-native-maps"
   react-native-safe-area-context:

@@ -8,7 +8,7 @@ import { TrackingProvider } from '../context/TrackingContext';
 import { NotificationProvider } from '../context/NotificationContext';
 import { LanguageProvider } from '../context/LanguageContext';
 import { StyleSheet, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { preloadImages } from '../utils/imageUtils';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SettingsProvider } from '../context/SettingsContext';
@@ -20,6 +20,7 @@ import { runStartupStep } from '../lib/startupUtils';
 import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { parseActivityShareLink, getActivityRoute } from '../lib/shareLinks';
 
 const MainContent = () => {
   const { banStatus, user } = useAuth();
@@ -38,14 +39,43 @@ export default function RootLayout() {
   const [loadingStep, setLoadingStep] = useState('Starting...');
   const [loadingProgress, setLoadingProgress] = useState(0);
   const router = useRouter();
+  const pendingActivityLink = useRef(null);
+  const isReadyRef = useRef(false);
 
-  // Handle deep links for OAuth callbacks
+  const navigateActivityShare = useCallback(
+    (target) => {
+      if (!target?.id) return;
+      router.push(getActivityRoute(target));
+    },
+    [router]
+  );
+
+  useEffect(() => {
+    isReadyRef.current = isReady;
+    if (isReady && pendingActivityLink.current) {
+      navigateActivityShare(pendingActivityLink.current);
+      pendingActivityLink.current = null;
+    }
+  }, [isReady, navigateActivityShare]);
+
+  // Handle deep links for OAuth callbacks, shared sessions, password reset
   useEffect(() => {
     const handleDeepLink = async (url) => {
       console.log('🔗 Deep link received:', url);
       
       if (url.includes('auth.expo.io') || url.includes('google-auth')) {
         console.log('✅ Google OAuth callback received');
+      }
+
+      const activityTarget = parseActivityShareLink(url);
+      if (activityTarget?.id) {
+        console.log('📍 Activity share link:', activityTarget);
+        if (!isReadyRef.current) {
+          pendingActivityLink.current = activityTarget;
+          return;
+        }
+        navigateActivityShare(activityTarget);
+        return;
       }
       
       // Handle password reset deep link
@@ -150,7 +180,7 @@ export default function RootLayout() {
     });
 
     return () => subscription?.remove();
-  }, [router]);
+  }, [router, navigateActivityShare]);
 
   useEffect(() => {
     let isMounted = true;
@@ -161,7 +191,7 @@ export default function RootLayout() {
 
       await Promise.all([
         runStartupStep(() => preloadImages(), 4000, 'preloadImages'),
-        runStartupStep(() => initializeAdMob(), 3500, 'initializeAdMob'),
+        runStartupStep(() => initializeAdMob(), 12000, 'initializeAdMob'),
       ]);
 
       if (!isMounted) return;

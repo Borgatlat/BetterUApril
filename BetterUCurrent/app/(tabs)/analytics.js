@@ -41,6 +41,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useHomePageCustomization } from '../../hooks/useHomePageCustomization';
 import { hexToRgba } from '../../utils/homePageCustomization';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
+import { navigateToHome } from '../../utils/safeNavigation';
 
 const cardSurfaceStyle = {
   backgroundColor: ANALYTICS_CARD.backgroundColor,
@@ -597,21 +598,23 @@ const AnalyticsScreen = () => {
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: homeBg }]}>
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: hexToRgba(accent, 0.12) }]}>
-        <TouchableOpacity
-          style={[styles.headerBackBtn, { backgroundColor: hexToRgba(accent, 0.12) }]}
-          onPress={() => navigateToHome(router)}
-          accessibilityRole="button"
-          accessibilityLabel="Back to home"
-        >
-          <Ionicons name="arrow-back" size={22} color={accent} />
-        </TouchableOpacity>
-        <View style={styles.headerLeft}>
+        <View style={styles.headerTopRow}>
+          <TouchableOpacity
+            style={[styles.headerBackBtn, { backgroundColor: hexToRgba(accent, 0.12) }]}
+            onPress={() => navigateToHome(router)}
+            accessibilityRole="button"
+            accessibilityLabel="Back to home"
+          >
+            <Ionicons name="arrow-back" size={22} color={accent} />
+          </TouchableOpacity>
           <View style={[styles.headerIconWrap, { backgroundColor: hexToRgba(accent, 0.12) }]}>
             <Ionicons name="analytics" size={22} color={accent} />
           </View>
-          <Text style={styles.headerTitle}>Analytics</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            Analytics
+          </Text>
         </View>
-        <View style={[styles.periodSelector, cardSurfaceStyle, { padding: 4 }]}>
+        <View style={[styles.periodSelector, cardSurfaceStyle]}>
           <TouchableOpacity
             style={[
               styles.periodButton,
@@ -1137,13 +1140,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingTop: 10,
+    paddingBottom: 16,
     borderBottomWidth: 1,
-    gap: 10,
+    gap: 14,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   headerBackBtn: {
     width: 44,
@@ -1151,12 +1157,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  headerLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    flexShrink: 0,
   },
   sectionTitleRow: {
     flexDirection: 'row',
@@ -1180,20 +1181,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
+    flex: 1,
     fontSize: 24,
     fontWeight: 'bold',
     color: '#fff',
+    minWidth: 0,
   },
   periodSelector: {
     flexDirection: 'row',
     borderRadius: 12,
     padding: 4,
-    gap: 4,
+    gap: 6,
+    alignSelf: 'stretch',
   },
   periodButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     borderRadius: 8,
+    minWidth: 0,
   },
   periodButtonText: {
     color: '#666',

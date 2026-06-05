@@ -15,16 +15,43 @@ const DEFAULT_TASKS = [
 
 /**
  * Finds PLAN_JSON: { ... } using brace counting so nested objects parse reliably.
+ * Also tries ```json code fences when the model ignores PLAN_JSON: prefix.
  * @param {string} text
  * @returns {{ plan: (Record<string, unknown>|null), stripped: string }}
  */
 function extractPlanObject(text) {
   const key = 'PLAN_JSON:';
   const idx = text.indexOf(key);
-  if (idx === -1) return { plan: null, stripped: text };
-  let start = idx + key.length;
-  while (start < text.length && /\s/.test(text[start])) start += 1;
-  if (text[start] !== '{') return { plan: null, stripped: text };
+  if (idx !== -1) {
+    let start = idx + key.length;
+    while (start < text.length && /\s/.test(text[start])) start += 1;
+    if (text[start] === '{') {
+      const parsed = parseBalancedJsonObject(text, start);
+      if (parsed) {
+        const stripped = `${text.slice(0, idx)}${text.slice(parsed.end)}`.trim();
+        return { plan: parsed.value, stripped };
+      }
+    }
+  }
+
+  // Fallback: fenced ```json { "plan_title": ... } ```
+  const fenceMatch = text.match(/```(?:json)?\s*(\{[\s\S]*?"plan_title"[\s\S]*?\})\s*```/i);
+  if (fenceMatch) {
+    try {
+      const plan = JSON.parse(fenceMatch[1]);
+      const stripped = text.replace(fenceMatch[0], '').trim();
+      return { plan, stripped };
+    } catch {
+      /* continue */
+    }
+  }
+
+  return { plan: null, stripped: text };
+}
+
+/** @returns {{ value: Record<string, unknown>, end: number } | null} */
+function parseBalancedJsonObject(text, start) {
+  if (text[start] !== '{') return null;
   let depth = 0;
   for (let i = start; i < text.length; i += 1) {
     const ch = text[i];
@@ -33,16 +60,151 @@ function extractPlanObject(text) {
       depth -= 1;
       if (depth === 0) {
         try {
-          const plan = JSON.parse(text.slice(start, i + 1));
-          const stripped = `${text.slice(0, idx)}${text.slice(i + 1)}`.trim();
-          return { plan, stripped };
+          const value = JSON.parse(text.slice(start, i + 1));
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            return { value, end: i + 1 };
+          }
         } catch {
-          return { plan: null, stripped: text };
+          return null;
         }
       }
     }
   }
-  return { plan: null, stripped: text };
+  return null;
+}
+
+function extractTasksArray(text) {
+  const tasks = [];
+  const regex = /TASKS_JSON:\s*(\[[\s\S]*?\])/gi;
+  let match = regex.exec(text);
+  while (match) {
+    try {
+      const arr = JSON.parse(match[1]);
+      if (Array.isArray(arr)) {
+        arr.forEach((s) => {
+          const t = String(s).trim();
+          if (t) tasks.push(t);
+        });
+      }
+    } catch {
+      /* skip bad block */
+    }
+    match = regex.exec(text);
+  }
+  return [...new Set(tasks)].slice(0, 8);
+}
+
+/** Removes machine blocks and tidies Markdown for chat display. */
+export function formatAssistantDisplayText(text) {
+  let out = String(text || '').trim();
+  out = out.replace(/```(?:json)?\s*\{[\s\S]*?"plan_title"[\s\S]*?\}\s*```/gi, '');
+  out = out.replace(/PLAN_JSON:\s*\{[\s\S]*?\}(?=\s*(TASKS_JSON:|$))/gi, '');
+  out = out.replace(/TASKS_JSON:\s*\[[\s\S]*?\]/gi, '');
+  out = out.replace(/USER_CONTEXT_JSON:\s*\{[\s\S]*?\}/gi, '');
+  out = out.replace(/\n{3,}/g, '\n\n');
+  return out.trim();
+}
+
+/**
+ * Short intro when the interactive plan card is shown — strips duplicate bullet/checklist sections
+ * so users read the summary once and use the tappable plan card for steps.
+ * @param {string} text
+ */
+export function formatPlanMessageIntro(text) {
+  let out = formatAssistantDisplayText(text);
+  const lines = out.split('\n');
+  const kept = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (/^#{1,3}\s/.test(trimmed) && /checklist|action plan|action items|steps|this week|to-?dos?|milestones|your plan|week 1/i.test(trimmed)) {
+      i += 1;
+      while (i < lines.length && !/^#{1,3}\s/.test(lines[i].trim())) i += 1;
+      continue;
+    }
+
+    const isBullet = /^\s*[-*•]\s+/.test(line) || /^\s*\d+\.\s+/.test(line);
+    if (isBullet) {
+      let j = i;
+      while (
+        j < lines.length &&
+        (/^\s*[-*•]\s+/.test(lines[j]) ||
+          /^\s*\d+\.\s+/.test(lines[j]) ||
+          lines[j].trim() === '')
+      ) {
+        j += 1;
+      }
+      if (j - i >= 2) {
+        i = j;
+        continue;
+      }
+    }
+
+    kept.push(line);
+    i += 1;
+  }
+
+  out = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (out.length > 900) {
+    out = `${out.slice(0, 900).trim()}…`;
+  }
+  return out;
+}
+
+/**
+ * When the model fails PLAN_JSON, build a minimal plan from tasks + goal so UI still works.
+ * @param {{ goal?: string, timeframeDays?: number, tasks?: string[], displayText?: string }} params
+ */
+export function buildFallbackPlan({ goal, timeframeDays = 90, tasks = [], displayText = '' }) {
+  const checklist = (tasks.length > 0 ? tasks : extractBulletActions(displayText))
+    .slice(0, 8)
+    .map((text, i) => ({
+      id: `c${i + 1}`,
+      text: String(text).trim(),
+      due_day: Math.min(Math.max(1, i + 1), 14),
+      priority: i < 2 ? 'high' : 'medium',
+      completed: false,
+    }))
+    .filter((c) => c.text);
+
+  if (checklist.length === 0) return null;
+
+  return normalizePlan({
+    plan_title: String(goal || 'Your path').slice(0, 72),
+    goal: goal || '',
+    timeframe_days: timeframeDays,
+    milestones: [
+      {
+        id: 'm1',
+        title: 'Week 1 — start',
+        start_day: 1,
+        end_day: 7,
+        success_criteria: 'Complete first checklist items',
+      },
+      {
+        id: 'm2',
+        title: 'Build momentum',
+        start_day: 8,
+        end_day: Math.min(30, timeframeDays),
+        success_criteria: 'Stay consistent with weekly hours',
+      },
+    ],
+    checklist,
+    final_thoughts: 'Tap checklist items as you finish. Add steps to Daily Tasks to track today.',
+  });
+}
+
+function extractBulletActions(markdown) {
+  const lines = String(markdown || '').split('\n');
+  const bullets = [];
+  for (const line of lines) {
+    const m = line.match(/^\s*[-*•]\s+(.+)/);
+    if (m && m[1].length > 8 && m[1].length < 140) bullets.push(m[1].trim());
+  }
+  return bullets.slice(0, 6);
 }
 
 /**
@@ -105,24 +267,26 @@ function normalizePlan(plan) {
  */
 export function extractPlanTasksAndDisplayText(fullText) {
   let working = String(fullText || '').trim();
-  let tasks = [];
-
-  const tasksMatch = working.match(/TASKS_JSON:\s*(\[[\s\S]*?\])\s*$/);
-  if (tasksMatch) {
-    try {
-      const arr = JSON.parse(tasksMatch[1]);
-      if (Array.isArray(arr)) {
-        tasks = arr.map((s) => String(s).trim()).filter(Boolean).slice(0, 8);
-      }
-    } catch {
-      tasks = [];
-    }
-    working = working.slice(0, tasksMatch.index).trim();
-  }
+  let tasks = extractTasksArray(working);
+  working = working.replace(/TASKS_JSON:\s*\[[\s\S]*?\]/gi, '').trim();
 
   const { plan: rawPlan, stripped } = extractPlanObject(working);
-  const plan = normalizePlan(rawPlan);
-  return { displayText: stripped.trim(), tasks, plan };
+  let plan = normalizePlan(rawPlan);
+
+  let displayText = formatAssistantDisplayText(stripped);
+
+  if (plan && tasks.length === 0 && Array.isArray(plan.checklist)) {
+    tasks = plan.checklist
+      .map((c) => String(c.text || '').trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
+  if (!plan && tasks.length > 0) {
+    plan = buildFallbackPlan({ tasks, displayText });
+  }
+
+  return { displayText, tasks, plan };
 }
 
 /**

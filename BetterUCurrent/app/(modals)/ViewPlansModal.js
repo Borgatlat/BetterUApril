@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   loadFutureuPlansHistory,
+  loadFutureuPlanArtifact,
   setActiveFutureuPlanFromHistory,
   removeFutureuPlanHistoryEntry,
 } from '../../utils/futureuPlanStorage';
@@ -33,8 +34,14 @@ function planRowTitle(entry) {
   const t = p.plan_title && String(p.plan_title).trim();
   if (t) return t;
   const g = p.goal && String(p.goal).trim();
-  if (g) return g.length > 48 ? `${g.slice(0, 48)}…` : g;
+  if (g) return g.length > 56 ? `${g.slice(0, 56)}…` : g;
   return 'Untitled plan';
+}
+
+function planProgress(entry) {
+  const list = Array.isArray(entry?.plan?.checklist) ? entry.plan.checklist : [];
+  const done = list.filter((c) => c.completed).length;
+  return { done, total: list.length };
 }
 
 export default function ViewPlansModal() {
@@ -42,12 +49,18 @@ export default function ViewPlansModal() {
   const insets = useSafeAreaInsets();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState(null);
+  const [activeSavedAt, setActiveSavedAt] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await loadFutureuPlansHistory();
+      const [list, active] = await Promise.all([
+        loadFutureuPlansHistory(),
+        loadFutureuPlanArtifact(),
+      ]);
       setRows(list);
+      setActiveSavedAt(active?.savedAt || null);
     } catch (e) {
       console.error('[ViewPlansModal]', e);
       setRows([]);
@@ -64,17 +77,17 @@ export default function ViewPlansModal() {
 
   const confirmSetActive = (entry) => {
     Alert.alert(
-      'Set active plan',
-      `Use "${planRowTitle(entry)}" as your main plan on Home and in Future U?`,
+      'Use this plan',
+      `Make "${planRowTitle(entry)}" your active plan on Home and in Future U?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Set active',
+          text: 'Use this plan',
           onPress: async () => {
             const ok = await setActiveFutureuPlanFromHistory(entry);
             if (ok) {
-              Alert.alert('Done', 'This plan is now your active plan.');
-              router.back();
+              await refresh();
+              Alert.alert('Updated', 'This is now your active plan.');
             } else {
               Alert.alert('Error', 'Could not update the active plan.');
             }
@@ -85,21 +98,22 @@ export default function ViewPlansModal() {
   };
 
   const confirmDelete = (entry) => {
-    Alert.alert(
-      'Remove plan',
-      `Remove "${planRowTitle(entry)}" from this list? Your active plan will not change unless it was the only copy.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            await removeFutureuPlanHistoryEntry(entry.id);
-            await refresh();
-          },
+    Alert.alert('Remove plan', `Remove "${planRowTitle(entry)}" from your library?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          await removeFutureuPlanHistoryEntry(entry.id);
+          if (expandedId === entry.id) setExpandedId(null);
+          await refresh();
         },
-      ]
-    );
+      },
+    ]);
+  };
+
+  const toggleExpanded = (id) => {
+    setExpandedId((cur) => (cur === id ? null : id));
   };
 
   return (
@@ -110,12 +124,10 @@ export default function ViewPlansModal() {
             <Ionicons name="close" size={26} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Your plans</Text>
-          <View style={styles.headerBtn} />
+          <TouchableOpacity style={styles.headerBtn} onPress={() => router.push('/Futureuai')} hitSlop={12}>
+            <Ionicons name="add-circle-outline" size={26} color="#22d3ee" />
+          </TouchableOpacity>
         </View>
-        <Text style={styles.hint}>
-          Full Future U plans below. Use the icons to set active or remove. Checklist changes sync when
-          you leave a row.
-        </Text>
 
         {loading ? (
           <View style={styles.centered}>
@@ -126,9 +138,15 @@ export default function ViewPlansModal() {
             <Ionicons name="document-text-outline" size={48} color="#475569" />
             <Text style={styles.emptyTitle}>No saved plans yet</Text>
             <Text style={styles.emptyBody}>
-              Open Future U and send a message. Each new AI plan is saved here. If you already had one
-              active plan, it appears after you open this screen once.
+              Chat with Future U to generate a plan. Each new plan is saved here automatically.
             </Text>
+            <TouchableOpacity
+              style={styles.emptyBtn}
+              onPress={() => router.push('/Futureuai')}
+              activeOpacity={0.88}
+            >
+              <Text style={styles.emptyBtnText}>Open Future U</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <ScrollView
@@ -137,40 +155,90 @@ export default function ViewPlansModal() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {rows.map((entry) => (
-              <View key={entry.id} style={styles.planCard}>
-                <View style={styles.planActions}>
-                  <Text style={styles.planDate}>{formatPlanDate(entry.savedAt) || 'Saved plan'}</Text>
-                  <View style={styles.planActionsRight}>
+            <Text style={styles.hint}>Tap a plan to expand steps. Check items off directly in the list.</Text>
+            {rows.map((entry) => {
+              const { done, total } = planProgress(entry);
+              const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+              const isActive =
+                !!activeSavedAt &&
+                !!entry.savedAt &&
+                String(entry.savedAt) === String(activeSavedAt);
+              const expanded = expandedId === entry.id;
+
+              return (
+                <View key={entry.id} style={styles.planShell}>
+                  <TouchableOpacity
+                    style={[styles.planHeader, expanded && styles.planHeaderExpanded]}
+                    onPress={() => toggleExpanded(entry.id)}
+                    activeOpacity={0.88}
+                  >
+                    <View style={styles.planHeaderMain}>
+                      <Text style={styles.planTitle} numberOfLines={2}>
+                        {planRowTitle(entry)}
+                      </Text>
+                      <Text style={styles.planDate}>{formatPlanDate(entry.savedAt) || 'Saved plan'}</Text>
+                      {total > 0 ? (
+                        <View style={styles.progressRow}>
+                          <View style={styles.progressTrack}>
+                            <View style={[styles.progressFill, { width: `${pct}%` }]} />
+                          </View>
+                          <Text style={styles.progressText}>
+                            {done}/{total}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={styles.planHeaderRight}>
+                      {isActive ? (
+                        <View style={styles.activeBadge}>
+                          <Text style={styles.activeBadgeText}>Active</Text>
+                        </View>
+                      ) : null}
+                      <Ionicons
+                        name={expanded ? 'chevron-up' : 'chevron-down'}
+                        size={20}
+                        color="#94a3b8"
+                      />
+                    </View>
+                  </TouchableOpacity>
+
+                  {expanded ? (
+                    <UserPlan
+                      externalPlan={entry.plan}
+                      variant="library"
+                      hideOpenButton
+                      showPlansLibrary={false}
+                      onPlanChange={() => refresh()}
+                    />
+                  ) : null}
+
+                  <View style={styles.planActions}>
+                    {!isActive ? (
+                      <TouchableOpacity
+                        style={styles.useBtn}
+                        onPress={() => confirmSetActive(entry)}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons name="checkmark-circle-outline" size={18} color="#0f172a" />
+                        <Text style={styles.useBtnText}>Use this plan</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.activeLabel}>
+                        <Ionicons name="checkmark-circle" size={18} color="#34d399" />
+                        <Text style={styles.activeLabelText}>Active on Home</Text>
+                      </View>
+                    )}
                     <TouchableOpacity
-                      onPress={() => confirmSetActive(entry)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={styles.iconBtn}
-                      accessibilityLabel="Set as active plan"
-                    >
-                      <Ionicons name="checkmark-circle-outline" size={22} color="#22d3ee" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
+                      style={styles.removeBtn}
                       onPress={() => confirmDelete(entry)}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                      style={styles.iconBtn}
-                      accessibilityLabel="Remove plan from list"
+                      activeOpacity={0.85}
                     >
-                      <Ionicons name="trash-outline" size={22} color="#94a3b8" />
+                      <Text style={styles.removeBtnText}>Remove</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
-                <UserPlan
-                  externalPlan={entry.plan}
-                  hideOpenButton
-                  showPlansLibrary={false}
-                  chatEmbed
-                  textColor="#f8fafc"
-                  subtextColor="#94a3b8"
-                  onPlanChange={() => refresh()}
-                />
-              </View>
-            ))}
+              );
+            })}
           </ScrollView>
         )}
       </SafeAreaView>
@@ -195,39 +263,104 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: '800', color: '#fff' },
   hint: {
     color: '#94a3b8',
-    fontSize: 12,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 6,
-    lineHeight: 17,
+    fontSize: 13,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    lineHeight: 18,
   },
   listContent: {
-    paddingHorizontal: 0,
+    paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 32,
   },
-  planCard: {
-    marginBottom: 20,
+  planShell: {
+    marginBottom: 14,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.25)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
   },
+  planHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 16,
+    gap: 12,
+  },
+  planHeaderExpanded: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(139, 92, 246, 0.2)',
+  },
+  planHeaderMain: { flex: 1, minWidth: 0 },
+  planHeaderRight: { alignItems: 'flex-end', gap: 8 },
+  planTitle: { color: '#f8fafc', fontSize: 16, fontWeight: '800', lineHeight: 22 },
+  planDate: { color: '#64748b', fontSize: 12, marginTop: 4, fontWeight: '600' },
+  progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  progressTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(148, 163, 184, 0.2)',
+    overflow: 'hidden',
+  },
+  progressFill: { height: '100%', borderRadius: 3, backgroundColor: '#22d3ee' },
+  progressText: { color: '#94a3b8', fontSize: 12, fontWeight: '700', minWidth: 36, textAlign: 'right' },
+  activeBadge: {
+    backgroundColor: 'rgba(52, 211, 153, 0.15)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(52, 211, 153, 0.35)',
+  },
+  activeBadgeText: { color: '#6ee7b7', fontSize: 10, fontWeight: '800', letterSpacing: 0.4 },
   planActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-    paddingHorizontal: 20,
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(139, 92, 246, 0.15)',
   },
-  planDate: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
-  planActionsRight: { flexDirection: 'row', alignItems: 'center' },
-  iconBtn: { padding: 6, marginLeft: 4 },
+  useBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#22d3ee',
+    borderRadius: 10,
+    paddingVertical: 11,
+  },
+  useBtnText: { color: '#0f172a', fontWeight: '800', fontSize: 13 },
+  activeLabel: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+  },
+  activeLabelText: { color: '#6ee7b7', fontWeight: '700', fontSize: 13 },
+  removeBtn: {
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.35)',
+    backgroundColor: 'rgba(244, 63, 94, 0.08)',
+  },
+  removeBtnText: { color: '#fda4af', fontWeight: '700', fontSize: 13 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyWrap: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 48,
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
   },
-  emptyTitle: { color: '#e2e8f0', fontSize: 17, fontWeight: '700', marginTop: 16 },
+  emptyTitle: { color: '#e2e8f0', fontSize: 18, fontWeight: '800', marginTop: 16 },
   emptyBody: {
     color: '#94a3b8',
     fontSize: 14,
@@ -235,4 +368,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 10,
   },
+  emptyBtn: {
+    marginTop: 20,
+    backgroundColor: '#22d3ee',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  emptyBtnText: { color: '#0f172a', fontWeight: '800', fontSize: 15 },
 });

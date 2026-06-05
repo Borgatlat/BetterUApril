@@ -14,7 +14,22 @@ import TrainerModal from '../(modals)/trainer-modal';
 import Svg, { Circle } from 'react-native-svg';
 import { Video } from 'expo-av';
 import { getExerciseInfo, hasExerciseInfo, fetchExerciseGifUrl } from '../../utils/exerciseLibrary';
+import { formatTargetMusclesForExercise } from '../../utils/workoutMuscleMap';
 import { generateExerciseInstructions, suggestWeightForExercise } from '../../utils/aiUtils';
+import {
+  buildActiveWorkoutFromSource,
+  parseRouteWorkoutJson,
+} from '../../utils/normalizeWorkoutForActive';
+import {
+  buildTemplateExercisesFromActiveWorkout,
+  saveFreeformWorkoutTemplate,
+} from '../../utils/saveFreeformWorkoutTemplate';
+import {
+  savePendingActiveWorkout,
+  loadPendingActiveWorkout,
+  clearPendingActiveWorkout,
+  workoutHasProgress,
+} from '../../utils/pendingActiveWorkout';
 
 // Organized exercise categories for searching and adding exercises
 const exerciseCategories = {
@@ -2081,6 +2096,13 @@ const ActiveWorkoutScreen = () => {
   const [activeExerciseCategory, setActiveExerciseCategory] = useState('Chest');
   const [workoutId, setWorkoutId] = useState(null); // Track workout ID if it's from database
   const [isPredefinedWorkout, setIsPredefinedWorkout] = useState(false); // Track if it's a starter/predefined workout
+  const [isFreeformWorkout, setIsFreeformWorkout] = useState(false);
+  const [showSaveFreeformAskModal, setShowSaveFreeformAskModal] = useState(false);
+  const [showSaveFreeformNameModal, setShowSaveFreeformNameModal] = useState(false);
+  const [freeformSaveName, setFreeformSaveName] = useState('');
+  const [savingFreeformTemplate, setSavingFreeformTemplate] = useState(false);
+  const pendingSummaryNavigationRef = useRef(null);
+  const freeformTemplateExercisesRef = useRef([]);
   const [loadingInstructions, setLoadingInstructions] = useState(false);
   const [showEditRestTimeModal, setShowEditRestTimeModal] = useState(false);
   const { userProfile, personalRecords, fetchPersonalRecords, isPremium } = useUser();
@@ -2159,6 +2181,12 @@ const ActiveWorkoutScreen = () => {
   // Track if workout has been loaded to prevent infinite loops
   const workoutLoadedRef = useRef(false);
   const lastParamsRef = useRef(null);
+  const sessionTimerInitializedRef = useRef(false);
+  const persistDebounceRef = useRef(null);
+  const persistableStateRef = useRef({});
+  const restoredSessionIdRef = useRef(null);
+  /** When true, discard/finish cleared storage — block unmount/debounce from re-saving. */
+  const skipWorkoutPersistRef = useRef(false);
 
   // Helper: keep our Spotify polling interval under control
   function stopSpotifyPolling() {
@@ -2268,30 +2296,14 @@ const ActiveWorkoutScreen = () => {
     return () => {
       isMountedRef.current = false;
       stopSpotifyPolling();
-      const sessionId = workoutSessionIdRef.current;
-      if (sessionId) {
-        // Supabase queries need .then() to execute before .catch() works
-        // The query returns a builder object until you call .then() or await it
-        supabase
-          .from('workout_sessions')
-          .update({
-            ended_at: new Date().toISOString(),
-            status: 'abandoned'
-          })
-          .eq('id', sessionId)
-          .then(({ error }) => {
-            if (error) console.error('Failed to clean up workout session on unmount:', error);
-          });
-      }
-      // Clean up Live Activity on component unmount
-      // If user leaves the screen while workout is active, dismiss the Live Activity
+      // Do not mark the session abandoned on unmount — progress is saved for resume.
       if (liveActivityId) {
-        dismissLiveActivity(liveActivityId).catch(error => 
+        dismissLiveActivity(liveActivityId).catch((error) =>
           console.error('Failed to dismiss Live Activity on unmount:', error)
         );
       }
     };
-  }, [liveActivityId]); // Clean up when liveActivityId changes or component unmounts
+  }, [liveActivityId]);
 
   // Helper to format rest time as "M:SS"
   const formatRestTime = (seconds) => {
@@ -2299,6 +2311,105 @@ const ActiveWorkoutScreen = () => {
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const buildRouteParamsSnapshot = () => ({
+    custom: params.custom === 'true' ? 'true' : undefined,
+    workoutId: Array.isArray(params.workoutId) ? params.workoutId[0] : params.workoutId,
+    type: Array.isArray(params.type) ? params.type[0] : params.type,
+    freeform: params.freeform === 'true' ? 'true' : undefined,
+  });
+
+  const abandonWorkoutPersistence = () => {
+    skipWorkoutPersistRef.current = true;
+    if (persistDebounceRef.current) {
+      clearTimeout(persistDebounceRef.current);
+      persistDebounceRef.current = null;
+    }
+    persistableStateRef.current = {
+      workout: null,
+      elapsedTime: 0,
+      calories: 0,
+      workoutSessionId: null,
+      workoutId: null,
+      isPredefinedWorkout: false,
+      isFreeformWorkout: false,
+      routeParams: {},
+    };
+  };
+
+  const persistWorkoutProgress = async () => {
+    if (skipWorkoutPersistRef.current) {
+      return;
+    }
+    const state = persistableStateRef.current;
+    if (!state.workout || !workoutHasProgress(state.workout, state.elapsedTime)) {
+      return;
+    }
+
+    const startedAtMs =
+      workoutStartTimeRef.current ||
+      Date.now() - (Number(state.elapsedTime) || 0) * 1000;
+
+    await savePendingActiveWorkout({
+      workout: state.workout,
+      elapsedTime: state.elapsedTime,
+      calories: state.calories,
+      workoutSessionId: workoutSessionIdRef.current || state.workoutSessionId || null,
+      workoutId: state.workoutId,
+      isPredefinedWorkout: state.isPredefinedWorkout,
+      isFreeformWorkout: state.isFreeformWorkout,
+      workoutStartedAtMs: startedAtMs,
+      sessionStartedAtMs: sessionStartTimeRef.current,
+      routeParams: state.routeParams,
+    });
+  };
+
+  const schedulePersistWorkoutProgress = () => {
+    if (skipWorkoutPersistRef.current) {
+      return;
+    }
+    if (persistDebounceRef.current) {
+      clearTimeout(persistDebounceRef.current);
+    }
+    persistDebounceRef.current = setTimeout(() => {
+      persistWorkoutProgress().catch((error) =>
+        console.error('Failed to persist workout progress:', error)
+      );
+    }, 400);
+  };
+
+  useEffect(() => {
+    persistableStateRef.current = {
+      workout,
+      elapsedTime,
+      calories,
+      workoutSessionId,
+      workoutId,
+      isPredefinedWorkout,
+      isFreeformWorkout,
+      routeParams: buildRouteParamsSnapshot(),
+    };
+    if (workout) {
+      schedulePersistWorkoutProgress();
+    }
+    return () => {
+      if (persistDebounceRef.current) {
+        clearTimeout(persistDebounceRef.current);
+      }
+    };
+  }, [
+    workout,
+    elapsedTime,
+    calories,
+    workoutSessionId,
+    workoutId,
+    isPredefinedWorkout,
+    isFreeformWorkout,
+    params.custom,
+    params.workoutId,
+    params.type,
+    params.freeform,
+  ]);
 
   // Handler to update rest time with settings persistence
   const handleRestTimeChange = async (seconds) => {
@@ -2334,11 +2445,63 @@ const ActiveWorkoutScreen = () => {
       return;
     }
     
+    const applyPendingSnapshot = async (pending) => {
+      sessionTimerInitializedRef.current = false;
+      restoredSessionIdRef.current = pending.workoutSessionId || null;
+
+      setWorkout(pending.workout);
+      setElapsedTime(Number(pending.elapsedTime) || 0);
+      setCalories(Number(pending.calories) || 0);
+      setWorkoutId(pending.workoutId || null);
+      setIsPredefinedWorkout(Boolean(pending.isPredefinedWorkout));
+      setIsFreeformWorkout(Boolean(pending.isFreeformWorkout));
+
+      if (pending.workoutSessionId) {
+        workoutSessionIdRef.current = pending.workoutSessionId;
+        setWorkoutSessionId(pending.workoutSessionId);
+      }
+
+      if (pending.sessionStartedAtMs) {
+        sessionStartTimeRef.current = pending.sessionStartedAtMs;
+      }
+
+      if (pending.workoutStartedAtMs) {
+        workoutStartTimeRef.current = pending.workoutStartedAtMs;
+        sessionTimerInitializedRef.current = true;
+        await AsyncStorage.setItem(
+          'workoutTimerData',
+          JSON.stringify({
+            startTime: pending.workoutStartedAtMs,
+            startElapsed: Number(pending.elapsedTime) || 0,
+            isActive: true,
+          })
+        );
+      }
+
+      workoutLoadedRef.current = true;
+    };
+
     const loadWorkout = async () => {
       try {
+        skipWorkoutPersistRef.current = false;
+
+        if (params.resume === 'true') {
+          const pending = await loadPendingActiveWorkout();
+          if (!pending?.workout) {
+            Alert.alert(
+              'No saved workout',
+              'We could not find a workout to resume. Start a new one from the Workouts tab.',
+              [{ text: 'OK', onPress: () => router.replace('/(tabs)/workout') }]
+            );
+            return;
+          }
+          await applyPendingSnapshot(pending);
+          return;
+        }
+
         // Clear old stored workout if we have new params
-        if (params.custom === 'true' && params.workout) {
-          await AsyncStorage.removeItem('currentWorkout');
+        if (params.custom === 'true' && (params.workout || params.workoutId)) {
+          await clearPendingActiveWorkout();
         }
 
         // ---------------------------------------------------------------
@@ -2358,7 +2521,9 @@ const ActiveWorkoutScreen = () => {
         // the freeform session starts truly empty instead of resurrecting
         // a half-finished workout from last time.
         if (params.freeform === 'true') {
-          await AsyncStorage.removeItem('currentWorkout');
+          await clearPendingActiveWorkout();
+          sessionTimerInitializedRef.current = false;
+          restoredSessionIdRef.current = null;
 
           const freeformWorkout = {
             name: 'Freeform Workout',
@@ -2372,119 +2537,67 @@ const ActiveWorkoutScreen = () => {
           // Freeform workouts are user-authored, never predefined templates,
           // so modifications must be saveable.
           setIsPredefinedWorkout(false);
+          setIsFreeformWorkout(true);
           setWorkout(freeformWorkout);
-          await AsyncStorage.setItem('currentWorkout', JSON.stringify(freeformWorkout));
 
           workoutLoadedRef.current = true;
           return; // Skip the other branches below.
         }
 
         // First try to get workout from params
-        if (params.custom === 'true' && params.workout) {
-          const parsed = JSON.parse(params.workout);
-          console.log('Custom workout parsed:', parsed);
-          
-          // Store workout ID if it exists (for saving back to database)
-          // Only custom and AI-generated workouts have IDs, not predefined workouts
-          if (parsed.id) {
-            setWorkoutId(parsed.id);
-            setIsPredefinedWorkout(false); // Custom/AI workouts are not predefined
-          } else {
-            setIsPredefinedWorkout(false); // Still not predefined even without ID
+        if (params.custom === 'true') {
+          let source = null;
+          const routeWorkoutId = Array.isArray(params.workoutId)
+            ? params.workoutId[0]
+            : params.workoutId;
+
+          // Prefer ID lookup — avoids huge JSON in the URL (can truncate and crash on Start).
+          if (routeWorkoutId) {
+            const { data: row, error: fetchError } = await supabase
+              .from('workouts')
+              .select('*')
+              .eq('id', routeWorkoutId)
+              .single();
+
+            if (fetchError || !row) {
+              throw new Error('Workout not found');
+            }
+            source = row;
+          } else if (params.workout) {
+            source = parseRouteWorkoutJson(params.workout);
           }
-          
-          const processedWorkout = {
-            name: parsed.name,
-            exercises: parsed.exercises.map((ex, index) => {
-              console.log(`Processing exercise ${index}:`, ex);
-              
-              // If ex is a string, it's just the exercise name
-              if (typeof ex === 'string') {
-                // Try to find matching exercise in workoutData
-                let found = null;
-                for (const workout of Object.values(workoutData)) {
-                  if (workout.exercises) {
-                  found = workout.exercises.find(e => e.name && e.name.toLowerCase() === ex.toLowerCase());
-                  if (found) break;
-                  }
-                }
-                // If found, use that exercise's data
-                if (found) {
-                  return {
-                    ...found,
-                    sets: Array.from({ length: 3 }, () => ({
-                      weight: '',
-                      reps: found.sets[0].reps,
-                      completed: false
-                    }))
-                  };
-                }
-                // If not found, use default info or create basic exercise
-                return {
-                  name: ex,
-                  targetMuscles: getExerciseInfo(ex)?.targetMuscles || 'Full Body',
-                  instructions: ['No specific instructions available.'],
-                  sets: Array.from({ length: 3 }, () => ({
-                    weight: '',
-                    reps: '8',
-                    completed: false
-                  }))
-                };
-              }
-              // If ex is an object, use its data
-              return {
-                name: ex.name,
-                targetMuscles:
-                  ex.targetMuscles ||
-                  getExerciseInfo(ex.name)?.targetMuscles ||
-                  'Full Body',
-                instructions: ex.instructions || ['No specific instructions available.'],
-                sets: Array.from({ length: parseInt(ex.sets) || 3 }, () => ({
-                  weight: '',
-                  reps: ex.reps || '8',
-                  completed: false
-                }))
-              };
-            })
-          };
-          
-          console.log('Processed workout:', processedWorkout);
-          
-          // Validate workout structure
-          if (!processedWorkout.exercises || processedWorkout.exercises.length === 0) {
-            throw new Error('Invalid workout structure: no exercises found');
+
+          if (!source) {
+            throw new Error('No workout data available');
           }
-          
-          // Create a clean workout object to prevent any reference issues
-          const cleanWorkout = {
-            name: processedWorkout.name,
-            exercises: processedWorkout.exercises.map(exercise => ({
-              name: exercise.name,
-              targetMuscles: exercise.targetMuscles,
-              instructions: exercise.instructions,
-              sets: exercise.sets.map(set => ({
-                weight: set.weight || '',
-                reps: set.reps || '8',
-                completed: set.completed || false
-              }))
-            }))
-          };
-          
-          console.log('Clean workout:', cleanWorkout);
+
+          const cleanWorkout = buildActiveWorkoutFromSource(source, {
+            workoutData,
+            getExerciseInfo,
+          });
+
+          if (source.id) {
+            setWorkoutId(source.id);
+          }
+          setIsPredefinedWorkout(false);
+          setIsFreeformWorkout(false);
+
+          await clearPendingActiveWorkout();
+          sessionTimerInitializedRef.current = false;
+          restoredSessionIdRef.current = null;
           setWorkout(cleanWorkout);
-          // Store workout in AsyncStorage for backup
-          await AsyncStorage.setItem('currentWorkout', JSON.stringify(cleanWorkout));
           workoutLoadedRef.current = true;
         } else if (params.type) {
           // Handle predefined workouts (starter workouts that come with the app)
           setIsPredefinedWorkout(true); // Mark as predefined so we don't save modifications
-          await AsyncStorage.removeItem('currentWorkout'); // Clear old workout first
+          setIsFreeformWorkout(false);
+          await clearPendingActiveWorkout();
+          sessionTimerInitializedRef.current = false;
+          restoredSessionIdRef.current = null;
           // Expo Router can pass repeated query keys as an array — normalize to a single string.
           const workoutName = Array.isArray(params.type) ? params.type[0] : params.type;
           if (workoutData[workoutName]) {
             setWorkout(workoutData[workoutName]);
-            // Store workout in AsyncStorage for backup
-            await AsyncStorage.setItem('currentWorkout', JSON.stringify(workoutData[workoutName]));
             workoutLoadedRef.current = true;
           } else {
             console.error('Workout not found:', workoutName);
@@ -2495,16 +2608,9 @@ const ActiveWorkoutScreen = () => {
             );
           }
         } else {
-          // Try to load from AsyncStorage if params are missing
-          const storedWorkout = await AsyncStorage.getItem('currentWorkout');
-          if (storedWorkout) {
-            const parsed = JSON.parse(storedWorkout);
-            // Check if this is a predefined workout by checking if the name matches workoutData keys
-            // Object.keys(workoutData) returns an array of predefined workout names
-            const isPredefined = Object.keys(workoutData).includes(parsed.name);
-            setIsPredefinedWorkout(isPredefined);
-            setWorkout(parsed);
-            workoutLoadedRef.current = true;
+          const pending = await loadPendingActiveWorkout();
+          if (pending?.workout && workoutHasProgress(pending.workout, pending.elapsedTime)) {
+            await applyPendingSnapshot(pending);
           } else {
             console.error('No workout data available');
             Alert.alert(
@@ -2527,10 +2633,12 @@ const ActiveWorkoutScreen = () => {
     loadWorkout();
   }, [params]); // Re-run when params change
 
-  // Cleanup stored workout when component unmounts
+  // Save in-progress workout when leaving the screen (accidental exit, reload, tab switch)
   useEffect(() => {
     return () => {
-      clearStoredWorkout();
+      persistWorkoutProgress().catch((error) =>
+        console.error('Failed to save workout on unmount:', error)
+      );
     };
   }, []);
 
@@ -2753,6 +2861,13 @@ const ActiveWorkoutScreen = () => {
         return;
       }
 
+      if (restoredSessionIdRef.current) {
+        workoutSessionIdRef.current = restoredSessionIdRef.current;
+        setWorkoutSessionId(restoredSessionIdRef.current);
+        restoredSessionIdRef.current = null;
+        return;
+      }
+
       try {
         const { data, error } = await supabase
           .from('workout_sessions')
@@ -2869,6 +2984,12 @@ const ActiveWorkoutScreen = () => {
   // Handle app state changes for background timer
   useEffect(() => {
     const handleAppStateChange = async (nextAppState) => {
+      if (nextAppState === 'background' || nextAppState === 'inactive') {
+        persistWorkoutProgress().catch((error) =>
+          console.error('Failed to persist workout on background:', error)
+        );
+      }
+
       if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
         // App came to foreground - check for background timer data
         try {
@@ -3116,33 +3237,35 @@ const ActiveWorkoutScreen = () => {
     };
   }, [workoutSessionId, user?.id]);
 
-  // Timer and calories tracking
+  // Timer and calories tracking (wall-clock based so resume after reload stays accurate)
   useEffect(() => {
     let timer;
-    
+
     if (workout) {
-      // Store workout timer data for background processing
-      workoutStartTimeRef.current = Date.now();
-      const initialElapsedTime = 0;
-      storeWorkoutTimerData(workoutStartTimeRef.current, initialElapsedTime);
-      
-      timer = setInterval(() => {
-        setElapsedTime(prev => {
-          const newTime = prev + 1;
-          // Calculate calories burned (rough estimate: 5 calories per minute)
-          const newCalories = Math.floor(newTime / 60 * 5);
-          setCalories(newCalories);
-          return newTime;
-        });
-      }, 1000);
+      if (!sessionTimerInitializedRef.current) {
+        workoutStartTimeRef.current = Date.now();
+        storeWorkoutTimerData(workoutStartTimeRef.current, 0);
+        sessionTimerInitializedRef.current = true;
+      }
+
+      const tick = () => {
+        if (!workoutStartTimeRef.current) return;
+        const newTime = Math.max(
+          0,
+          Math.floor((Date.now() - workoutStartTimeRef.current) / 1000)
+        );
+        setElapsedTime(newTime);
+        setCalories(Math.floor(newTime / 60 * 5));
+      };
+
+      tick();
+      timer = setInterval(tick, 1000);
     }
 
     return () => {
       if (timer) clearInterval(timer);
-      // Clear workout timer data when workout ends
-      clearWorkoutTimerData();
     };
-  }, [workout?.name]); // Only depend on workout name, not the entire workout object
+  }, [workout?.name]);
 
   // Update Live Activity whenever timer, calories, or workout progress changes
   // This useEffect runs whenever the timer, calories, or workout state changes
@@ -3298,6 +3421,54 @@ const ActiveWorkoutScreen = () => {
     setShowFinishConfirmation(true);
   };
 
+  const navigateToWorkoutSummary = () => {
+    const pending = pendingSummaryNavigationRef.current;
+    pendingSummaryNavigationRef.current = null;
+    if (pending) {
+      router.push(pending);
+    }
+  };
+
+  const dismissSaveFreeformFlow = () => {
+    setShowSaveFreeformAskModal(false);
+    setShowSaveFreeformNameModal(false);
+    setFreeformSaveName('');
+    freeformTemplateExercisesRef.current = [];
+    navigateToWorkoutSummary();
+  };
+
+  const promptSaveFreeformAfterFinish = (summaryParams, templateExercises) => {
+    pendingSummaryNavigationRef.current = {
+      pathname: '/(tabs)/workout-summary',
+      params: summaryParams,
+    };
+    freeformTemplateExercisesRef.current = templateExercises;
+    setFreeformSaveName('');
+    setShowFinishConfirmation(false);
+    setShowSaveFreeformAskModal(true);
+  };
+
+  const handleSaveFreeformTemplate = async () => {
+    if (savingFreeformTemplate || !user?.id) return;
+
+    try {
+      setSavingFreeformTemplate(true);
+      await saveFreeformWorkoutTemplate({
+        userId: user.id,
+        workoutName: freeformSaveName,
+        exercises: freeformTemplateExercisesRef.current,
+      });
+      setShowSaveFreeformNameModal(false);
+      Alert.alert('Saved', 'Workout added to Your Workouts.', [
+        { text: 'OK', onPress: dismissSaveFreeformFlow },
+      ]);
+    } catch (err) {
+      Alert.alert('Error', err?.message || 'Failed to save workout.');
+    } finally {
+      setSavingFreeformTemplate(false);
+    }
+  };
+
   const confirmFinish = async () => {
     // Prevent double-save if user taps finish button multiple times
     if (isSavingWorkout) {
@@ -3349,7 +3520,7 @@ const ActiveWorkoutScreen = () => {
         targetMuscles:
           (typeof exercise.targetMuscles === 'string' && exercise.targetMuscles.trim()) ||
           getExerciseInfo(exercise.name)?.targetMuscles ||
-          '',
+          formatTargetMusclesForExercise(exercise.name),
         sets: exercise.sets.map(set => {
           const weight = getWeight(set);
           const reps = getReps(set);
@@ -3533,11 +3704,15 @@ const ActiveWorkoutScreen = () => {
         setLiveActivityId(null); // Clear the activity ID
       }
 
-      // Reset workout and hide confirmation
+      abandonWorkoutPersistence();
+      await clearPendingActiveWorkout();
+      sessionTimerInitializedRef.current = false;
+      workoutStartTimeRef.current = null;
+      await clearWorkoutTimerData();
+
+      // Reset workout (keeps exercise list; clears completed flags)
       resetWorkout();
-      setShowFinishConfirmation(false);
-      
-      // Navigate to summary with stats (pass workout log id so summary can add photo/video)
+
       const summaryParams = {
         duration: String(elapsedTime),
         exerciseCount: String(workout.exercises.length),
@@ -3545,10 +3720,6 @@ const ActiveWorkoutScreen = () => {
         totalWeight: String(Math.round(totalWeight)),
         workoutName: workout.workout_name || workout.name,
         justCompleted: 'true',
-        // JSON.stringify because Expo Router serializes params as URL
-        // strings — objects/arrays would otherwise be coerced to "[object Object]".
-        // Always send a string (even "[]") so the summary screen has a
-        // consistent param to JSON.parse.
         newPRs: JSON.stringify(newPRs || []),
       };
       if (insertedRow?.id) {
@@ -3558,10 +3729,16 @@ const ActiveWorkoutScreen = () => {
         summaryParams.workoutSessionId = sessionIdForSummary;
       }
 
-      router.push({
-        pathname: '/(tabs)/workout-summary',
-        params: summaryParams
-      });
+      const templateExercises = buildTemplateExercisesFromActiveWorkout(workout.exercises);
+      if (isFreeformWorkout && templateExercises.length > 0) {
+        promptSaveFreeformAfterFinish(summaryParams, templateExercises);
+      } else {
+        setShowFinishConfirmation(false);
+        router.push({
+          pathname: '/(tabs)/workout-summary',
+          params: summaryParams,
+        });
+      }
     } catch (error) {
       console.error('Error finishing workout:', error);
       Alert.alert(
@@ -3579,10 +3756,12 @@ const ActiveWorkoutScreen = () => {
     setShowExitConfirmation(true);
   };
 
-  // Cleanup function to clear stored workout data
   const clearStoredWorkout = async () => {
     try {
-      await AsyncStorage.removeItem('currentWorkout');
+      abandonWorkoutPersistence();
+      await clearPendingActiveWorkout();
+      sessionTimerInitializedRef.current = false;
+      workoutStartTimeRef.current = null;
     } catch (error) {
       console.error('Error clearing stored workout:', error);
     }
@@ -3899,7 +4078,9 @@ const ActiveWorkoutScreen = () => {
     // want a different goal. Three sets is the standard hypertrophy default.
     const newExercise = {
       name: exerciseName,
-      targetMuscles: exerciseInfo?.targetMuscles || 'Various',
+      targetMuscles:
+        (exerciseInfo?.targetMuscles && exerciseInfo.targetMuscles.trim()) ||
+        formatTargetMusclesForExercise(exerciseName),
       instructions: exerciseInfo?.instructions || [],
       sets: [
         { weight: '', reps: '8', completed: false },
@@ -4267,17 +4448,25 @@ const ActiveWorkoutScreen = () => {
           restTimerActive && { shadowOpacity: 0.6 } // Brighter shadow when active
         ]}>
           <View style={styles.restTimerHeader}>
-            <Text style={styles.restTimerTitle}>Rest</Text>
+            <Text style={styles.restTimerTitle}>Rest Timer</Text>
             <View style={styles.restTimerHeaderActions}>
-              <TouchableOpacity 
-                onPress={() => setShowEditRestTimeModal(true)} 
-                style={styles.editRestTimeButton}
-                accessibilityLabel="Customize rest time"
+              {isPremium ? (
+                <TouchableOpacity
+                  onPress={() => setShowEditRestTimeModal(true)}
+                  style={styles.editRestTimerLink}
+                  accessibilityLabel={`Edit rest timer, currently ${formatRestTime(restTime)}`}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="create-outline" size={13} color="#666" />
+                  <Text style={styles.editRestTimerLinkText}>{formatRestTime(restTime)}</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                onPress={skipRest}
+                style={styles.skipRestButton}
+                accessibilityLabel="Skip rest"
               >
-                <Ionicons name="time-outline" size={16} color="#00ffff" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={skipRest} style={styles.skipRestButton}>
-                <Ionicons name="close" size={16} color="#666" />
+                <Ionicons name="close" size={18} color="#888" />
               </TouchableOpacity>
             </View>
           </View>
@@ -4561,51 +4750,184 @@ const ActiveWorkoutScreen = () => {
           </TouchableOpacity>
         </ScrollView>
 
-        {/* Exit Confirmation Modal */}
+        {/* Leave workout modal — stacked actions + saved progress summary */}
         <Modal
           visible={showExitConfirmation}
-          transparent={true}
+          transparent
           animationType="fade"
+          onRequestClose={() => setShowExitConfirmation(false)}
+        >
+          <View style={styles.leaveWorkoutOverlay}>
+            <View style={styles.leaveWorkoutCard}>
+              <View style={styles.leaveWorkoutIconWrap}>
+                <Ionicons name="save-outline" size={28} color="#00ffff" />
+              </View>
+
+              <Text style={styles.leaveWorkoutTitle}>Leave workout?</Text>
+              <Text style={styles.leaveWorkoutSubtitle}>
+                Your progress is saved automatically. You can pick up where you left off from the Workouts tab.
+              </Text>
+
+              <View style={styles.leaveWorkoutSummary}>
+                <View style={styles.leaveWorkoutSummaryRow}>
+                  <Ionicons name="barbell-outline" size={18} color="#00ffff" />
+                  <Text style={styles.leaveWorkoutSummaryName} numberOfLines={1}>
+                    {workout?.name || 'Workout'}
+                  </Text>
+                </View>
+                <View style={styles.leaveWorkoutSummaryMeta}>
+                  <View style={styles.leaveWorkoutMetaChip}>
+                    <Ionicons name="time-outline" size={14} color="#9aa0a6" />
+                    <Text style={styles.leaveWorkoutMetaText}>{formatTime(elapsedTime)}</Text>
+                  </View>
+                  <View style={styles.leaveWorkoutMetaChip}>
+                    <Ionicons name="checkmark-done-outline" size={14} color="#9aa0a6" />
+                    <Text style={styles.leaveWorkoutMetaText}>
+                      {(workout?.exercises || []).reduce(
+                        (count, exercise) =>
+                          count + (exercise.sets?.filter((set) => set.completed).length || 0),
+                        0
+                      )}{' '}
+                      sets done
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={styles.leaveWorkoutPrimaryButton}
+                onPress={() => setShowExitConfirmation(false)}
+              >
+                <Ionicons name="play-outline" size={18} color="#000" />
+                <Text style={styles.leaveWorkoutPrimaryButtonText}>Keep Training</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.leaveWorkoutSecondaryButton}
+                onPress={async () => {
+                  setShowExitConfirmation(false);
+                  await persistWorkoutProgress();
+                  if (liveActivityId) {
+                    await dismissLiveActivity(liveActivityId);
+                    setLiveActivityId(null);
+                  }
+                  router.replace('/(tabs)/workout');
+                }}
+              >
+                <Ionicons name="bookmark-outline" size={18} color="#00ffff" />
+                <Text style={styles.leaveWorkoutSecondaryButtonText}>Resume Later</Text>
+              </TouchableOpacity>
+
+              <View style={styles.leaveWorkoutDivider} />
+
+              <TouchableOpacity
+                style={styles.leaveWorkoutDiscardButton}
+                onPress={async () => {
+                  setShowExitConfirmation(false);
+                  abandonWorkoutPersistence();
+                  stopSpotifyPolling();
+                  if (workoutSessionIdRef.current) {
+                    await closeWorkoutSession('abandoned');
+                  }
+                  if (liveActivityId) {
+                    await dismissLiveActivity(liveActivityId);
+                    setLiveActivityId(null);
+                  }
+                  await clearStoredWorkout();
+                  setWorkout(null);
+                  router.replace('/(tabs)/workout');
+                }}
+              >
+                <Ionicons name="trash-outline" size={16} color="#ff6666" />
+                <Text style={styles.leaveWorkoutDiscardButtonText}>Discard workout</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Save freeform workout — ask */}
+        <Modal
+          visible={showSaveFreeformAskModal}
+          transparent
+          animationType="fade"
+          onRequestClose={dismissSaveFreeformFlow}
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <View style={styles.modalIconContainer}>
-                <Ionicons name="warning-outline" size={40} color="#ff4444" />
+                <Ionicons name="bookmark-outline" size={40} color="#00ffff" />
               </View>
-              <Text style={styles.modalTitle}>Exit Workout?</Text>
+              <Text style={styles.modalTitle}>Save this workout?</Text>
               <Text style={styles.modalText}>
-                Your progress will be lost if you exit now.{'\n'}
-                Are you sure you want to leave?
+                Save it as a reusable workout in Your Workouts so you can run it again later.
               </Text>
               <View style={styles.modalButtons}>
-                <TouchableOpacity 
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={dismissSaveFreeformFlow}
+                >
+                  <Text style={styles.cancelButtonText}>Not now</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.confirmButton]}
+                  onPress={() => {
+                    setShowSaveFreeformAskModal(false);
+                    setShowSaveFreeformNameModal(true);
+                  }}
+                >
+                  <Text style={styles.confirmButtonText}>Yes, save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Save freeform workout — name */}
+        <Modal
+          visible={showSaveFreeformNameModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setShowSaveFreeformNameModal(false);
+            setShowSaveFreeformAskModal(true);
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Name your workout</Text>
+              <Text style={styles.modalText}>
+                Choose a name for this workout template.
+              </Text>
+              <TextInput
+                style={styles.freeformNameInput}
+                placeholder="e.g. Push Day A"
+                placeholderTextColor="#666"
+                value={freeformSaveName}
+                onChangeText={setFreeformSaveName}
+                autoFocus
+                maxLength={80}
+              />
+              <View style={styles.modalButtons}>
+                <TouchableOpacity
                   style={[styles.modalButton, styles.cancelButton]}
                   onPress={() => {
-                    setShowExitConfirmation(false);
+                    setShowSaveFreeformNameModal(false);
+                    setShowSaveFreeformAskModal(true);
                   }}
+                  disabled={savingFreeformTemplate}
                 >
-                  <Text style={styles.cancelButtonText}>Stay</Text>
+                  <Text style={styles.cancelButtonText}>Back</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={[styles.modalButton, styles.confirmButton]}
-                  onPress={async () => {
-                    setShowExitConfirmation(false);
-                    stopSpotifyPolling();
-                    if (workoutSessionIdRef.current) {
-                      await closeWorkoutSession('abandoned');
-                    }
-                    // Dismiss Live Activity when user abandons workout
-                    // This immediately removes it from the lock screen
-                    if (liveActivityId) {
-                      await dismissLiveActivity(liveActivityId);
-                      setLiveActivityId(null);
-                    }
-                    await clearStoredWorkout();
-                    resetWorkout();
-                    router.replace('/(tabs)/workout');
-                  }}
+                  onPress={handleSaveFreeformTemplate}
+                  disabled={savingFreeformTemplate}
                 >
-                  <Text style={styles.confirmButtonText}>Exit</Text>
+                  {savingFreeformTemplate ? (
+                    <ActivityIndicator size="small" color="#000" />
+                  ) : (
+                    <Text style={styles.confirmButtonText}>Save</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             </View>
@@ -5246,13 +5568,13 @@ const styles = StyleSheet.create({
   restTimerWidget: {
     position: 'absolute',
     top: 120,
-    right: 20,
+    right: 16,
     backgroundColor: 'rgba(0, 0, 0, 0.95)',
     borderRadius: 16,
-    padding: 16,
-    width: 140,
+    padding: 14,
+    width: 168,
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 255, 0.3)',
+    borderColor: 'rgba(0, 255, 255, 0.35)',
     shadowColor: '#00ffff',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
@@ -5281,23 +5603,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    width: '100%',
     marginBottom: 8,
+  },
+  restTimerTitle: {
+    color: '#00ffff',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   restTimerHeaderActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-  },
-  editRestTimeButton: {
-    padding: 2,
-  },
-  restTimerTitle: {
-    color: '#00ffff',
-    fontSize: 12,
-    fontWeight: 'bold',
+    gap: 6,
   },
   skipRestButton: {
-    padding: 2,
+    padding: 4,
+  },
+  editRestTimerLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
+  editRestTimerLinkText: {
+    color: '#666',
+    fontSize: 11,
+    fontWeight: '500',
   },
   restTimerText: {
     color: '#fff',
@@ -5382,11 +5715,154 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0, 255, 255, 0.3)',
   },
+  freeformNameInput: {
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.35)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 16,
+    marginBottom: 16,
+  },
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
     gap: 15,
+  },
+  leaveWorkoutOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  leaveWorkoutCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#141414',
+    borderRadius: 20,
+    paddingHorizontal: 22,
+    paddingTop: 24,
+    paddingBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.18)',
+    alignItems: 'stretch',
+  },
+  leaveWorkoutIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(0, 255, 255, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  leaveWorkoutTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  leaveWorkoutSubtitle: {
+    fontSize: 14,
+    color: '#9aa0a6',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 18,
+    paddingHorizontal: 4,
+  },
+  leaveWorkoutSummary: {
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 14,
+    marginBottom: 20,
+    gap: 10,
+  },
+  leaveWorkoutSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  leaveWorkoutSummaryName: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  leaveWorkoutSummaryMeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  leaveWorkoutMetaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  leaveWorkoutMetaText: {
+    color: '#b0b5bb',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  leaveWorkoutPrimaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#00ffff',
+    borderRadius: 12,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  leaveWorkoutPrimaryButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  leaveWorkoutSecondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.35)',
+    paddingVertical: 14,
+  },
+  leaveWorkoutSecondaryButtonText: {
+    color: '#00ffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  leaveWorkoutDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    marginVertical: 16,
+  },
+  leaveWorkoutDiscardButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 6,
+  },
+  leaveWorkoutDiscardButtonText: {
+    color: '#ff6666',
+    fontSize: 14,
+    fontWeight: '600',
   },
   modalButton: {
     flex: 1,

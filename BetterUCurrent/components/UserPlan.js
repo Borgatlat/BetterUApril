@@ -28,7 +28,9 @@ function getPriorityTheme(priority) {
  * @param {boolean} [props.compact] — tighter padding when embedded under Future U header.
  * @param {string} [props.textColor] — optional theme from home.
  * @param {string} [props.subtextColor]
- * @param {boolean} [props.chatEmbed] — Future U: bubble-like card + scrollable checklist (max height).
+ * @param {boolean} [props.chatEmbed] — Future U chat bubble style (legacy; use variant="chatEmbed").
+ * @param {'full'|'home'|'library'|'chatEmbed'} [props.variant] — layout preset (home = compact on Home screen).
+ * @param {string} [props.accentColor] — progress / accents on home variant.
  * @param {boolean} [props.hideOpenButton] — hide "Future U" link (e.g. already on that screen).
  * @param {boolean} [props.showPlansLibrary] — show "All plans" link (home only; off when chatEmbed).
  */
@@ -39,11 +41,21 @@ const UserPlan = ({
   textColor = '#f8fafc',
   subtextColor = '#94a3b8',
   chatEmbed = false,
+  variant = 'full',
+  accentColor = '#22d3ee',
   hideOpenButton = false,
   showPlansLibrary = true,
 }) => {
   const router = useRouter();
   const [plan, setPlan] = useState(null);
+  const resolvedVariant = chatEmbed ? 'chatEmbed' : variant;
+  const isHome = resolvedVariant === 'home';
+  const isLibrary = resolvedVariant === 'library';
+  const isChatEmbed = resolvedVariant === 'chatEmbed';
+  const showImplementation = !isHome && !isLibrary && !isChatEmbed;
+  const showMilestones = !isHome && !isChatEmbed;
+  // Nested scroll inside chat FlatList feels cramped — let the chat list scroll instead.
+  const checklistScroll = false;
 
   const refreshFromStorage = useCallback(async () => {
     const loaded = await loadFutureuPlanArtifact();
@@ -116,45 +128,66 @@ const UserPlan = ({
   const total = checklist.length;
   const progressPct = total > 0 ? Math.round((done / total) * 100) : 0;
 
+  const visibleChecklist = (() => {
+    if (isHome) {
+      // Keep completed steps visible so a mis-tap can be undone (tap again to uncheck).
+      const sorted = [...checklist].sort((a, b) => {
+        const aDone = !!a.completed;
+        const bDone = !!b.completed;
+        if (aDone !== bDone) return aDone ? 1 : -1;
+        return (Number(a.due_day) || 0) - (Number(b.due_day) || 0);
+      });
+      return sorted.slice(0, 5);
+    }
+    return checklist;
+  })();
+
   const cardStyles = [
     styles.card,
     compact && styles.cardCompact,
-    chatEmbed && styles.cardChatEmbed,
+    isChatEmbed && styles.cardChatEmbed,
+    isHome && styles.cardHome,
+    isLibrary && styles.cardLibrary,
   ];
 
-  const renderChecklistRows = () =>
-    checklist.map((item) => {
+  const renderChecklistRows = (items) =>
+    items.map((item) => {
       const pri = getPriorityTheme(item.priority);
       return (
         <TouchableOpacity
           key={String(item.id)}
-          style={[styles.checkRow, chatEmbed && styles.checkRowEmbed]}
+          style={[
+            styles.checkRow,
+            isChatEmbed && styles.checkRowEmbed,
+            (isHome || isLibrary) && styles.checkRowLarge,
+          ]}
           onPress={() => toggleItem(item.id, item.completed)}
           activeOpacity={0.75}
         >
           <View style={[styles.priorityStripe, { backgroundColor: pri.stripe }]} />
           <Ionicons
             name={item.completed ? 'checkmark-circle' : 'ellipse-outline'}
-            size={chatEmbed ? 20 : 22}
+            size={isHome || isLibrary ? 24 : isChatEmbed ? 22 : 22}
             color={item.completed ? '#34d399' : '#64748b'}
           />
           <View style={styles.checkTextWrap}>
             <Text
               style={[
                 styles.checkText,
-                chatEmbed && styles.checkTextEmbed,
+                isChatEmbed && styles.checkTextEmbed,
+                (isHome || isLibrary) && styles.checkTextLarge,
                 { color: textColor },
                 item.completed && styles.checkTextDone,
               ]}
             >
               {item.text || 'Untitled step'}
             </Text>
-            {(item.due_day > 0 || item.priority) && (
+            {!isHome && (item.due_day > 0 || item.priority) ? (
               <View style={styles.checkMetaRow}>
                 {item.due_day > 0 ? (
                   <Text style={[styles.checkMeta, { color: subtextColor }]}>Day {item.due_day}</Text>
                 ) : null}
-                {item.priority ? (
+                {item.priority && !isLibrary ? (
                   <View style={[styles.priorityPill, { backgroundColor: pri.pillBg }]}>
                     <Text style={[styles.priorityPillText, { color: pri.label }]}>
                       {String(item.priority).toLowerCase()}
@@ -162,44 +195,60 @@ const UserPlan = ({
                   </View>
                 ) : null}
               </View>
-            )}
+            ) : isHome && item.due_day > 0 ? (
+              <Text style={[styles.checkMeta, { color: subtextColor }]}>Day {item.due_day}</Text>
+            ) : null}
+            {(isHome || isLibrary || isChatEmbed) && item.completed ? (
+              <Text style={[styles.undoHint, { color: subtextColor }]}>Tap to undo</Text>
+            ) : null}
           </View>
         </TouchableOpacity>
       );
     });
 
   return (
-    <View style={chatEmbed ? styles.chatEmbedOuter : undefined}>
-      {chatEmbed ? (
+    <View style={isChatEmbed ? styles.chatEmbedOuter : undefined}>
+      {isChatEmbed ? (
         <Text style={styles.chatEmbedCaption} numberOfLines={1}>
           Your plan
         </Text>
       ) : null}
       <View style={cardStyles}>
-        <View style={[styles.cardHeader, chatEmbed && styles.cardHeaderEmbed]}>
-          <View style={[styles.iconWrap, chatEmbed && styles.iconWrapEmbed]}>
-            <Ionicons name="map" size={chatEmbed ? 18 : 22} color="#22d3ee" />
+        <View style={[styles.cardHeader, isChatEmbed && styles.cardHeaderEmbed]}>
+          <View
+            style={[
+              styles.iconWrap,
+              isChatEmbed && styles.iconWrapEmbed,
+              isHome && { backgroundColor: `${accentColor}22` },
+            ]}
+          >
+            <Ionicons name="map" size={isChatEmbed ? 18 : isHome ? 20 : 22} color={accentColor} />
           </View>
           <View style={styles.headerText}>
             <Text
-              style={[styles.title, chatEmbed && styles.titleEmbed, { color: textColor }]}
-              numberOfLines={2}
+              style={[
+                styles.title,
+                isChatEmbed && styles.titleEmbed,
+                isHome && styles.titleHome,
+                { color: textColor },
+              ]}
+              numberOfLines={isHome ? 2 : 2}
             >
               {title}
             </Text>
-            {goal ? (
+            {!isHome && goal ? (
               <Text
-                style={[styles.subtitle, chatEmbed && styles.subtitleEmbed, { color: subtextColor }]}
+                style={[styles.subtitle, isChatEmbed && styles.subtitleEmbed, { color: subtextColor }]}
                 numberOfLines={2}
               >
                 {goal}
                 {tf != null && !Number.isNaN(tf) ? ` · ${tf} days` : ''}
               </Text>
-            ) : tf != null && !Number.isNaN(tf) ? (
-              <Text style={[styles.subtitle, { color: subtextColor }]}>{tf} day horizon</Text>
+            ) : isHome && tf != null && !Number.isNaN(tf) ? (
+              <Text style={[styles.subtitle, { color: subtextColor }]}>{tf}-day plan</Text>
             ) : null}
           </View>
-          {!hideOpenButton ? (
+          {!hideOpenButton && !isHome && !isLibrary ? (
             <TouchableOpacity
               onPress={() => router.push('/Futureuai')}
               style={styles.openBtn}
@@ -214,25 +263,30 @@ const UserPlan = ({
         </View>
 
         {total > 0 && (
-          <View style={[styles.progressRow, chatEmbed && styles.progressRowEmbed]}>
+          <View style={[styles.progressRow, isChatEmbed && styles.progressRowEmbed]}>
             <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
+              <View
+                style={[styles.progressFill, { width: `${progressPct}%`, backgroundColor: accentColor }]}
+              />
             </View>
             <Text style={[styles.progressLabel, { color: subtextColor }]}>
-              {done}/{total}
+              {isHome ? `${progressPct}%` : `${done}/${total}`}
             </Text>
           </View>
         )}
 
-        {milestones.length > 0 && (
+        {showMilestones && milestones.length > 0 && !isLibrary ? (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            style={[styles.milestoneScroll, chatEmbed && styles.milestoneScrollEmbed]}
+            style={[styles.milestoneScroll, isChatEmbed && styles.milestoneScrollEmbed]}
             nestedScrollEnabled
           >
             {milestones.slice(0, 8).map((m, i) => (
-              <View key={m.id || `m-${i}`} style={[styles.milestoneChip, chatEmbed && styles.milestoneChipEmbed]}>
+              <View
+                key={m.id || `m-${i}`}
+                style={[styles.milestoneChip, isChatEmbed && styles.milestoneChipEmbed]}
+              >
                 <Text style={styles.milestoneTitle} numberOfLines={2}>
                   {m.title || `Phase ${i + 1}`}
                 </Text>
@@ -244,10 +298,17 @@ const UserPlan = ({
               </View>
             ))}
           </ScrollView>
-        )}
+        ) : null}
 
-        {hasImplementationBlock ? (
-          <View style={[styles.iiBlock, chatEmbed && styles.iiBlockEmbed]}>
+        {isLibrary && milestones.length > 0 ? (
+          <Text style={[styles.libraryMeta, { color: subtextColor }]}>
+            {milestones.length} milestone{milestones.length === 1 ? '' : 's'} · {total} step
+            {total === 1 ? '' : 's'}
+          </Text>
+        ) : null}
+
+        {showImplementation && hasImplementationBlock ? (
+          <View style={[styles.iiBlock, isChatEmbed && styles.iiBlockEmbed]}>
             <View style={styles.iiHeaderRow}>
               <Ionicons name="flash-outline" size={16} color="#a78bfa" />
               <Text style={[styles.iiTitle, { color: textColor }]}>Implementation intentions</Text>
@@ -289,8 +350,8 @@ const UserPlan = ({
           </View>
         ) : null}
 
-        {checklist.length > 0 ? (
-          chatEmbed ? (
+        {visibleChecklist.length > 0 ? (
+          checklistScroll ? (
             <ScrollView
               style={styles.checklistScroll}
               contentContainerStyle={styles.checklistScrollContent}
@@ -298,14 +359,22 @@ const UserPlan = ({
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator
             >
-              {renderChecklistRows()}
+              {renderChecklistRows(visibleChecklist)}
             </ScrollView>
           ) : (
-            <View style={styles.checklist}>{renderChecklistRows()}</View>
+            <View style={[styles.checklist, isHome && styles.checklistHome, isChatEmbed && styles.checklistChatEmbed]}>
+              {renderChecklistRows(visibleChecklist)}
+            </View>
           )
         ) : null}
 
-        {!chatEmbed && showPlansLibrary ? (
+        {isHome && total > visibleChecklist.length ? (
+          <Text style={[styles.moreStepsHint, { color: subtextColor }]}>
+            +{total - visibleChecklist.length} more in Future U
+          </Text>
+        ) : null}
+
+        {!isChatEmbed && !isHome && !isLibrary && showPlansLibrary ? (
           <TouchableOpacity
             style={styles.plansLibraryRow}
             onPress={() => router.push('/(modals)/ViewPlansModal')}
@@ -337,24 +406,44 @@ const styles = StyleSheet.create({
     marginHorizontal: 0,
     marginBottom: 10,
   },
+  cardHome: {
+    marginHorizontal: 0,
+    marginBottom: 0,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: 'rgba(139, 92, 246, 0.22)',
+  },
+  cardLibrary: {
+    marginHorizontal: 16,
+    marginBottom: 0,
+    marginTop: 0,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderTopWidth: 0,
+  },
   chatEmbedOuter: {
-    marginBottom: 6,
+    marginBottom: 0,
+    width: '100%',
   },
   chatEmbedCaption: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '800',
     color: '#64748b',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   cardChatEmbed: {
-    marginBottom: 4,
-    padding: 11,
-    borderRadius: 20,
-    borderTopLeftRadius: 6,
-    maxWidth: '100%',
-    alignSelf: 'flex-start',
+    marginHorizontal: 0,
+    marginBottom: 0,
+    padding: 16,
+    borderRadius: 18,
+    borderTopLeftRadius: 18,
+    width: '100%',
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(18, 18, 28, 0.98)',
+    borderColor: 'rgba(34, 211, 238, 0.28)',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -371,19 +460,20 @@ const styles = StyleSheet.create({
   },
   headerText: { flex: 1, minWidth: 0 },
   title: { fontSize: 16, fontWeight: '800' },
+  titleHome: { fontSize: 17, lineHeight: 22 },
   subtitle: { fontSize: 12, marginTop: 2 },
   openBtn: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   openBtnPlaceholder: { width: 8 },
   openBtnText: { color: '#c4b5fd', fontSize: 12, fontWeight: '700' },
   cardHeaderEmbed: { alignItems: 'flex-start' },
   iconWrapEmbed: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 11,
   },
-  titleEmbed: { fontSize: 15 },
-  subtitleEmbed: { fontSize: 11, marginTop: 1 },
-  progressRowEmbed: { marginTop: 8 },
+  titleEmbed: { fontSize: 17, lineHeight: 23 },
+  subtitleEmbed: { fontSize: 13, marginTop: 4, lineHeight: 18 },
+  progressRowEmbed: { marginTop: 12, marginBottom: 4 },
   milestoneScrollEmbed: { marginTop: 8, maxHeight: 64 },
   milestoneChipEmbed: {
     paddingVertical: 6,
@@ -392,19 +482,23 @@ const styles = StyleSheet.create({
   },
   checklistScroll: {
     marginTop: 8,
-    maxHeight: 200,
+    maxHeight: 320,
   },
   checklistScrollContent: {
     paddingBottom: 4,
     gap: 4,
   },
   checkRowEmbed: {
-    paddingVertical: 3,
-    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    gap: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    marginBottom: 6,
   },
   checkTextEmbed: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 15,
+    lineHeight: 22,
   },
   progressRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 10 },
   progressTrack: {
@@ -512,7 +606,15 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   checklist: { marginTop: 12, gap: 8 },
+  checklistHome: { marginTop: 14, gap: 6 },
+  checklistChatEmbed: { marginTop: 14, gap: 4 },
   checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 4 },
+  checkRowLarge: {
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
   priorityStripe: {
     width: 4,
     borderRadius: 2,
@@ -522,8 +624,12 @@ const styles = StyleSheet.create({
   },
   checkTextWrap: { flex: 1 },
   checkText: { fontSize: 14, lineHeight: 20, fontWeight: '500' },
+  checkTextLarge: { fontSize: 15, lineHeight: 22 },
   checkTextDone: { opacity: 0.55, textDecorationLine: 'line-through' },
+  moreStepsHint: { fontSize: 12, marginTop: 8, fontWeight: '600' },
+  libraryMeta: { fontSize: 12, marginTop: 10, fontWeight: '600' },
   checkMeta: { fontSize: 11, marginTop: 2 },
+  undoHint: { fontSize: 11, marginTop: 4, fontStyle: 'italic' },
   checkMetaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

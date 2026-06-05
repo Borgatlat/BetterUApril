@@ -274,7 +274,7 @@ export default function EditRunScreen() {
   const handleColorSelect = async (color) => {
     if (borderColor === color) return;
 
-    const sparksBalance = userProfile?.sparks_balance || 0;
+    const sparksBalance = userProfile?.neuros_balance || 0;
     const colorName = COLOR_OPTIONS.find(c => c.value === color)?.name || 'this color';
     
     if (sparksBalance < 1) {
@@ -315,14 +315,14 @@ export default function EditRunScreen() {
               const newSparksBalance = sparksBalance - 1;
               const { error: sparksError } = await supabase
                 .from('profiles')
-                .update({ sparks_balance: newSparksBalance })
+                .update({ neuros_balance: newSparksBalance })
                 .eq('id', user.id);
 
               if (sparksError) throw sparksError;
 
               setBorderColor(color);
               if (updateProfile) {
-                updateProfile({ sparks_balance: newSparksBalance });
+                updateProfile({ neuros_balance: newSparksBalance });
               }
 
               Alert.alert('Success!', `Border color applied! Your activity will stand out in the feed.`);

@@ -14,7 +14,7 @@ import { hexToRgba } from '../utils/homePageCustomization';
 /**
  * Home "Plan Your Week" — shared week strip + day planner (same data as Workout tab).
  */
-const WeeklyWellnessCalendar = ({ accentColor = '#00ffff' }) => {
+const WeeklyWellnessCalendar = ({ accentColor = '#00ffff', compact = false, hideHeader = false }) => {
   const { userProfile } = useUser();
   const { refreshKey, notifyScheduleUpdated } = useScheduleRefresh();
 
@@ -60,13 +60,17 @@ const WeeklyWellnessCalendar = ({ accentColor = '#00ffff' }) => {
 
   if (loading) {
     return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Ionicons name="calendar-outline" size={22} color={accentColor} />
-            <Text style={[styles.headerText, { color: accentColor }]}>Plan Your Week</Text>
+      <View style={[styles.container, compact && styles.containerCompact]}>
+        {!hideHeader ? (
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <Ionicons name="calendar-outline" size={compact ? 18 : 22} color={accentColor} />
+              <Text style={[styles.headerText, compact && styles.headerTextCompact, { color: accentColor }]}>
+                Week schedule
+              </Text>
+            </View>
           </View>
-        </View>
+        ) : null}
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="small" color={accentColor} />
         </View>
@@ -75,13 +79,17 @@ const WeeklyWellnessCalendar = ({ accentColor = '#00ffff' }) => {
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Ionicons name="calendar-outline" size={22} color={accentColor} />
-          <Text style={[styles.headerText, { color: accentColor }]}>Plan Your Week</Text>
+    <View style={[styles.container, compact && styles.containerCompact]}>
+      {!hideHeader ? (
+        <View style={[styles.header, compact && styles.headerCompact]}>
+          <View style={styles.headerLeft}>
+            <Ionicons name="calendar-outline" size={compact ? 18 : 22} color={accentColor} />
+            <Text style={[styles.headerText, compact && styles.headerTextCompact, { color: accentColor }]}>
+              Week schedule
+            </Text>
+          </View>
         </View>
-      </View>
+      ) : null}
 
       <WeekScheduleStrip
         days={days}
@@ -94,6 +102,7 @@ const WeeklyWellnessCalendar = ({ accentColor = '#00ffff' }) => {
         onThisWeek={goToThisWeek}
         accentColor={accentColor}
         showFutureDots
+        compact={compact}
       />
 
       <DayScheduleModal
@@ -121,11 +130,18 @@ const styles = StyleSheet.create({
     borderColor: T.cardBorder,
     ...T.glowCard,
   },
+  containerCompact: {
+    padding: 10,
+    marginBottom: 8,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 14,
+  },
+  headerCompact: {
+    marginBottom: 8,
   },
   headerLeft: {
     flexDirection: 'row',
@@ -135,6 +151,10 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '600',
     marginLeft: 10,
+  },
+  headerTextCompact: {
+    fontSize: 14,
+    marginLeft: 8,
   },
   loadingWrap: {
     paddingVertical: 28,

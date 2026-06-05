@@ -20,6 +20,7 @@ import {
   COMMUNITY_FEED_INVALIDATE_EVENT,
   consumeCommunityFeedNeedsRefresh,
 } from '../../utils/feedPreloader';
+import { fetchCommunityFeedFirstPage } from '../../utils/communityFeedLoader';
 import GroupList from '../../components/GroupList';
 import AddEventModal from '../(modals)/AddEventModal';
 import { COMMUNITY_THEME } from '../../config/communityTheme';
@@ -27,9 +28,12 @@ import { useAuthSession } from '../../hooks/useAuthSession';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 import { CommunityTabBar } from '../../components/community/CommunityTabBar';
 import { CommunityFeedToolbar } from '../../components/community/CommunityFeedToolbar';
+import { shareActivityLink } from '../../lib/shareLinks';
 
 /** Design tokens for Community styles — same object everywhere so the screen matches Feed/League. */
 const T = COMMUNITY_THEME;
+/** Reused empty kudos list — avoids new `[]` every render (FeedCard effect loop). */
+const EMPTY_KUDOS = [];
 const toNumeric = (value) => {
   if (value === null || value === undefined) return null;
   const numeric = typeof value === 'string' ? parseFloat(value) : value;
@@ -423,12 +427,9 @@ const CommunityScreen = () => {
     }
   };
 
-  const sharePost = async (postId) => {
+  const sharePost = async (postId, postType = 'workout', postTitle) => {
     try {
-      await Share.share({
-        message: 'Check out this post on BetterU',
-        url: `https://betteru.app/post/${postId}`,
-      });
+      await shareActivityLink({ id: postId, type: postType, title: postTitle });
     } catch (error) {
       console.error('Error sharing post:', error);
       Alert.alert('Error', 'Failed to share post. Please try again.');
@@ -876,7 +877,7 @@ const CommunityScreen = () => {
 
       // Filter out activities from blocked users
       const filteredItems = (cacheData.allFeedItems || []).filter(item => {
-        const userId = item.user_id || item.profile_id;
+        const userId = item.user_id || item.profile_id || item.creator_id;
         const isBlocked = blockedIds.has(userId);
         if (isBlocked) {
           console.log(`❌ Removing cached activity from blocked user: ${userId}`);
@@ -914,7 +915,25 @@ const CommunityScreen = () => {
     
     try {
       const startTime = Date.now();
-      
+
+      // Initial load / pull-to-refresh — shared loader (workouts, runs, PRs, mental, events)
+      if (!isLoadMore) {
+        const pageResult = await fetchCommunityFeedFirstPage(userProfile.id);
+        setProfileMap(pageResult.profileMap);
+        setAllFeedItems(pageResult.feedItems);
+        setFeed(pageResult.feedItems.slice(0, ITEMS_PER_PAGE));
+        setHasMoreFeed(pageResult.hasMoreFeed);
+        if (pageResult.oldestFeedDate) {
+          oldestFeedDateRef.current = pageResult.oldestFeedDate;
+        }
+        setFeedPage(0);
+        const eventCount = pageResult.feedItems.filter((i) => i.type === 'event').length;
+        console.log(
+          `⚡ Feed loaded in ${Date.now() - startTime}ms - ${pageResult.feedItems.length} items (${eventCount} events)`
+        );
+        return;
+      }
+
       // OPTIMIZATION: Run all initial queries in parallel for faster loading
       // Get friends, blocked users, and profiles all at once
       const [friendsResult, blockedByMeResult, blockedMeResult] = await Promise.all([
@@ -980,7 +999,7 @@ const CommunityScreen = () => {
         ? oldestFeedDateRef.current 
         : null;
 
-      const [profilesResult, workoutsResult, mentalsResult, prsResult, runsResult, eventsResult] = await Promise.all([
+      const [profilesResult, workoutsResult, mentalsResult, prsResult, runsResult, eventsResult, bondsPurchasesResult, bondsWithdrawalsResult] = await Promise.all([
         // Fetch all profiles (including current user)
         supabase
           .from('profiles')
@@ -1065,6 +1084,42 @@ const CommunityScreen = () => {
               .select('*')
               .in('creator_id', allUserIds)
               .order('created_at', { ascending: false })
+              .limit(ITEMS_PER_BATCH),
+
+        oldestDate
+          ? supabase
+              .from('user_bonds')
+              .select('*')
+              .in('user_id', allUserIds)
+              .eq('status', 'active')
+              .lt('purchased_at', oldestDate.toISOString())
+              .order('purchased_at', { ascending: false })
+              .limit(ITEMS_PER_BATCH)
+          : supabase
+              .from('user_bonds')
+              .select('*')
+              .in('user_id', allUserIds)
+              .eq('status', 'active')
+              .order('purchased_at', { ascending: false })
+              .limit(ITEMS_PER_BATCH),
+
+        oldestDate
+          ? supabase
+              .from('user_bonds')
+              .select('*')
+              .in('user_id', allUserIds)
+              .eq('status', 'withdrawn')
+              .not('withdrawn_at', 'is', null)
+              .lt('withdrawn_at', oldestDate.toISOString())
+              .order('withdrawn_at', { ascending: false })
+              .limit(ITEMS_PER_BATCH)
+          : supabase
+              .from('user_bonds')
+              .select('*')
+              .in('user_id', allUserIds)
+              .eq('status', 'withdrawn')
+              .not('withdrawn_at', 'is', null)
+              .order('withdrawn_at', { ascending: false })
               .limit(ITEMS_PER_BATCH)
       ]);
 
@@ -1076,6 +1131,8 @@ const CommunityScreen = () => {
       const prs = prsResult.data || [];
       const runs = runsResult.data || [];
       const events = eventsResult?.data || [];
+      const bondPurchases = bondsPurchasesResult?.data || [];
+      const bondWithdrawals = bondsWithdrawalsResult?.data || [];
       
       // Track if we got the full batch (indicating there might be more data)
       // This helps us know if there are likely more items to load
@@ -1084,7 +1141,9 @@ const CommunityScreen = () => {
                           mentals.length === ITEMS_PER_BATCH || 
                           prs.length === Math.floor(ITEMS_PER_BATCH / 2) ||
                           runs.length === ITEMS_PER_BATCH ||
-                          events.length === ITEMS_PER_BATCH;
+                          events.length === ITEMS_PER_BATCH ||
+                          bondPurchases.length === ITEMS_PER_BATCH ||
+                          bondWithdrawals.length === ITEMS_PER_BATCH;
       
       // Build profile map and filter out banned users
       const newProfileMap = {};
@@ -1104,6 +1163,8 @@ const CommunityScreen = () => {
       const filteredPRs = (prs || []).filter(p => !blockedIds.has(p.user_id));
       const filteredRuns = (runs || []).filter(r => !blockedIds.has(r.user_id));
       const filteredEvents = (events || []).filter(e => !blockedIds.has(e.creator_id));
+      const filteredBondPurchases = (bondPurchases || []).filter(b => !blockedIds.has(b.user_id));
+      const filteredBondWithdrawals = (bondWithdrawals || []).filter(b => !blockedIds.has(b.user_id));
       
       // OPTIMIZATION: First, combine and sort all activities to find the top 10
       // Then fetch comments/Spotify ONLY for those 10 (much faster!)
@@ -1152,6 +1213,24 @@ const CommunityScreen = () => {
           // Feed order = when posted (same as workouts/runs), not scheduled event date
           date: item.created_at,
           user_id: item.creator_id,
+        });
+      });
+
+      filteredBondPurchases.forEach(item => {
+        allActivities.push({
+          ...item,
+          type: 'bond_purchased',
+          date: item.purchased_at,
+          user_id: item.user_id,
+        });
+      });
+
+      filteredBondWithdrawals.forEach(item => {
+        allActivities.push({
+          ...item,
+          type: 'bond_withdrawn',
+          date: item.withdrawn_at,
+          user_id: item.user_id,
         });
       });
       
@@ -1391,6 +1470,12 @@ const CommunityScreen = () => {
             isEventJoined: eventIdsUserJoined.has(activity.id),
             attendeesWhoAreFriends: eventAttendeesByEvent[activity.id] || [],
           };
+        } else if (activity.type === 'bond_purchased' || activity.type === 'bond_withdrawn') {
+          return {
+            ...activity,
+            kudos: [],
+            comments: [],
+          };
         } else {
           return {
             ...activity,
@@ -1427,6 +1512,8 @@ const CommunityScreen = () => {
             if (item.type === 'pr') return `pr_${item.id}`;
             if (item.type === 'run') return `run_${item.id}`;
             if (item.type === 'event') return `event_${item.id}`;
+            if (item.type === 'bond_purchased') return `bond_purchased_${item.id}`;
+            if (item.type === 'bond_withdrawn') return `bond_withdrawn_${item.id}`;
             return null;
           }).filter(Boolean));
           
@@ -1436,7 +1523,9 @@ const CommunityScreen = () => {
                           item.type === 'mental' ? `mental_${item.id}` :
                           item.type === 'pr' ? `pr_${item.id}` :
                           item.type === 'run' ? `run_${item.id}` :
-                          item.type === 'event' ? `event_${item.id}` : null;
+                          item.type === 'event' ? `event_${item.id}` :
+                          item.type === 'bond_purchased' ? `bond_purchased_${item.id}` :
+                          item.type === 'bond_withdrawn' ? `bond_withdrawn_${item.id}` : null;
             return itemId && !existingIds.has(itemId);
           });
           
@@ -2293,7 +2382,7 @@ const CommunityScreen = () => {
                   const profile = profileMap[item.user_id] || profileMap[item.creator_id] || {};
                   const isOwnActivity = item.user_id === userProfile?.id;
                   const commentCount = Array.isArray(item.comments) ? item.comments.length : 0;
-                  const kudos = Array.isArray(item.kudos) ? item.kudos : [];
+                  const kudos = Array.isArray(item.kudos) ? item.kudos : EMPTY_KUDOS;
 
                   if (item.type === 'workout') {
                     const durationSeconds = resolveDurationSeconds(item.duration_seconds, item.duration, 'seconds');
@@ -2514,7 +2603,7 @@ const CommunityScreen = () => {
                            end_time: item.end_time
                          }}
                          showMapToOthers={item.show_map_to_others !== false}
-                         enableInlineMap={false}
+                         enableInlineMap={true}
                          borderColor={item.border_color || undefined}
                        />
                      );
@@ -2554,6 +2643,50 @@ const CommunityScreen = () => {
                         onJoinEvent={() => handleJoinEvent(item.id)}
                         onLeaveEvent={() => handleLeaveEvent(item.id)}
                         stats={[]}
+                      />
+                    );
+                  } else if (item.type === 'bond_purchased') {
+                    return (
+                      <FeedCard
+                        key={`${item.type}_${item.id}`}
+                        avatarUrl={profile.avatar_url}
+                        name={profile.full_name || profile.username || 'User'}
+                        date={item.purchased_at ? new Date(item.purchased_at).toLocaleDateString() : '-'}
+                        title="Purchased a Bond"
+                        description={`Invested ${item.bond_amount.toLocaleString()} Neuros in a bond`}
+                        stats={[
+                          { value: `${item.bond_amount.toLocaleString()}`, label: 'Amount', highlight: true },
+                          { value: `Week ${item.current_week}/4`, label: 'Progress' },
+                        ]}
+                        type="bond"
+                        targetId={item.id}
+                        isOwner={isOwnActivity}
+                        userId={item.user_id}
+                        initialKudosCount={0}
+                        initialHasKudoed={false}
+                        initialCommentCount={0}
+                      />
+                    );
+                  } else if (item.type === 'bond_withdrawn') {
+                    return (
+                      <FeedCard
+                        key={`${item.type}_${item.id}`}
+                        avatarUrl={profile.avatar_url}
+                        name={profile.full_name || profile.username || 'User'}
+                        date={item.withdrawn_at ? new Date(item.withdrawn_at).toLocaleDateString() : '-'}
+                        title="Withdrew Bond"
+                        description={`Withdrew ${item.final_payout?.toLocaleString() || item.bond_amount.toLocaleString()} Neuros from bond`}
+                        stats={[
+                          { value: `${item.final_payout?.toLocaleString() || item.bond_amount.toLocaleString()}`, label: 'Payout', highlight: true },
+                          { value: `Week ${item.current_week}/4`, label: 'Withdrawn At' },
+                        ]}
+                        type="bond"
+                        targetId={item.id}
+                        isOwner={isOwnActivity}
+                        userId={item.user_id}
+                        initialKudosCount={0}
+                        initialHasKudoed={false}
+                        initialCommentCount={0}
                       />
                     );
                   }

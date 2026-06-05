@@ -109,6 +109,13 @@ const ADJUST_MODAL_ACCENT = {
   fat: T.fat,
 };
 
+/** Bright accent buttons (cyan, green) need dark label text to stay readable. */
+function adjustModalPrimaryTextColor(accentColor) {
+  const c = String(accentColor || '').toLowerCase();
+  if (c === T.calorie.toLowerCase()) return '#fff';
+  return '#000';
+}
+
 function defaultAmountForMetric(metricType) {
   switch (metricType) {
     case 'calories':
@@ -156,15 +163,22 @@ function NutritionAdjustModal({ visible, metricType, accentColor, applying, onCl
 
   if (!metricType) return null;
 
+  const primaryTextColor = adjustModalPrimaryTextColor(accentColor);
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        {/* Full-screen tap target behind the card — closes the modal (common overlay pattern). */}
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={() => { Keyboard.dismiss(); onClose(); }} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.adjustModalKbWrap}
-        >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.adjustModalOverlay}
+      >
+        <Pressable
+          style={StyleSheet.absoluteFillObject}
+          onPress={() => {
+            Keyboard.dismiss();
+            onClose();
+          }}
+        />
+        <Pressable style={styles.adjustModalKbWrap} onPress={() => {}}>
           <View style={styles.adjustModalCard}>
             <Text style={styles.adjustModalTitle}>{meta.title}</Text>
             <Text style={styles.adjustModalHint}>{meta.hint}</Text>
@@ -210,12 +224,14 @@ function NutritionAdjustModal({ visible, metricType, accentColor, applying, onCl
                 onPress={submit}
                 disabled={applying}
               >
-                <Text style={styles.modalBtnText}>{applying ? 'Saving…' : 'Apply'}</Text>
+                <Text style={[styles.modalBtnText, { color: primaryTextColor }]}>
+                  {applying ? 'Saving…' : 'Apply'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
-      </View>
+        </Pressable>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -227,48 +243,54 @@ function NutritionAdjustModal({ visible, metricType, accentColor, applying, onCl
  * - `minusDisabled`: extra guard so we do not spam “subtract” when the value is already zero.
  */
 function TrackerStepper({ accentColor, stepLabel, onMinus, onPlus, disabled, minusDisabled, compact, onCustomPress }) {
-  const minusSize = compact ? 18 : 20;
-  const plusSize = compact ? 20 : 22;
+  const btnSize = compact ? 28 : 34;
+
   return (
-    <View style={stepperStyles.wrap}>
+    <View style={[stepperStyles.wrap, compact && stepperStyles.wrapCompact]}>
       <View style={[stepperStyles.row, compact && stepperStyles.rowCompact]}>
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel="Decrease amount"
           style={[
             stepperStyles.btn,
-            compact && stepperStyles.btnCompact,
+            { width: btnSize, height: btnSize, borderColor: `${accentColor}40` },
             (disabled || minusDisabled) && stepperStyles.btnMuted,
           ]}
           onPress={onMinus}
           disabled={disabled || minusDisabled}
           activeOpacity={0.7}
         >
-          <Ionicons name="remove" size={minusSize} color={accentColor} />
+          <Text style={[stepperStyles.btnSymbol, { color: disabled || minusDisabled ? T.textDim : accentColor }]}>−</Text>
         </TouchableOpacity>
-        <Text style={[stepperStyles.hint, compact && stepperStyles.hintCompact]} numberOfLines={1}>
+
+        <Text style={[stepperStyles.label, compact && stepperStyles.labelCompact]} numberOfLines={1}>
           {stepLabel}
         </Text>
+
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel="Increase amount"
-          style={[stepperStyles.btn, compact && stepperStyles.btnCompact, disabled && stepperStyles.btnMuted]}
+          style={[
+            stepperStyles.btn,
+            { width: btnSize, height: btnSize, borderColor: `${accentColor}40` },
+            disabled && stepperStyles.btnMuted,
+          ]}
           onPress={onPlus}
           disabled={disabled}
           activeOpacity={0.7}
         >
-          <Ionicons name="add" size={plusSize} color={accentColor} />
+          <Text style={[stepperStyles.btnSymbol, { color: disabled ? T.textDim : accentColor }]}>+</Text>
         </TouchableOpacity>
       </View>
+
       {onCustomPress ? (
         <TouchableOpacity
           onPress={onCustomPress}
           disabled={disabled}
-          style={[stepperStyles.customLink, compact && stepperStyles.customLinkCompact]}
-          hitSlop={{ top: 6, bottom: 6, left: 12, right: 12 }}
+          style={stepperStyles.customTap}
+          hitSlop={{ top: 4, bottom: 4, left: 8, right: 8 }}
         >
-          <Ionicons name="options-outline" size={compact ? 12 : 14} color={T.primary} style={{ marginRight: 4 }} />
-          <Text style={[stepperStyles.customLinkText, compact && stepperStyles.customLinkTextCompact]}>Custom amount</Text>
+          <Text style={[stepperStyles.customText, compact && stepperStyles.customTextCompact]}>Custom</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -276,46 +298,36 @@ function TrackerStepper({ accentColor, stepLabel, onMinus, onPlus, disabled, min
 }
 
 const stepperStyles = StyleSheet.create({
-  wrap: { alignSelf: 'stretch', width: '100%' },
+  wrap: { alignSelf: 'stretch', width: '100%', marginTop: 10 },
+  wrapCompact: { marginTop: 8 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    alignSelf: 'stretch',
-    width: '100%',
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
-    gap: 6,
+    justifyContent: 'center',
+    gap: 10,
   },
-  /** Narrow columns (macro cards): slightly smaller tap targets so three columns fit on small phones. */
-  rowCompact: { marginTop: 8, paddingTop: 8, gap: 4 },
+  rowCompact: { gap: 6 },
   btn: {
-    flex: 1,
-    maxWidth: 48,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
-  btnCompact: { maxWidth: 40, height: 30 },
   btnMuted: { opacity: 0.35 },
-  hint: { flex: 1, minWidth: 0, fontSize: 11, fontWeight: '600', color: T.textMuted, textAlign: 'center' },
-  hintCompact: { fontSize: 10 },
-  customLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-    paddingVertical: 4,
+  btnSymbol: { fontSize: 20, fontWeight: '500', lineHeight: 22 },
+  label: {
+    flex: 1,
+    minWidth: 0,
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+    color: T.textMuted,
   },
-  customLinkCompact: { marginTop: 4 },
-  customLinkText: { fontSize: 12, fontWeight: '600', color: T.primary },
-  customLinkTextCompact: { fontSize: 10 },
+  labelCompact: { fontSize: 10 },
+  customTap: { alignSelf: 'center', marginTop: 6 },
+  customText: { fontSize: 12, fontWeight: '600', color: T.primary },
+  customTextCompact: { fontSize: 10, marginTop: 4 },
 });
 
 function calculateDayScore(cal, prot, carbs, fat, wat, dailyNutr) {
@@ -955,65 +967,64 @@ export default function NutritionDashboard() {
           </TouchableOpacity>
         </View>
 
-        <NutritionAdjustModal
-          visible={!!adjustModalType}
-          metricType={adjustModalType}
-          accentColor={adjustModalType ? ADJUST_MODAL_ACCENT[adjustModalType] : T.primary}
-          applying={nutritionAdjusting}
-          onClose={() => {
-            Keyboard.dismiss();
-            setAdjustModalType(null);
-          }}
-          onApply={applyAdjustModal}
-        />
-
-        <Modal visible={showAIMealModal} transparent animationType="slide">
-          <View style={styles.modalOverlay}>
-            <View style={styles.aiModalContent}>
-              <AIMealGenerator
-                isInModal
-                isPremium={isPremium}
-                skipSuccessAlert
-                onMealGenerated={async (savedMeal) => {
-                  setShowAIMealModal(false);
-                  await loadData();
-                  try {
-                    const info = await getAIGenerationUsageInfo(FEATURE_TYPES.MEAL, isPremium);
-                    setMealUsage(info || { currentUsage: 0, limit: 1, remaining: 1 });
-                  } catch (e) {}
-                  // Show the generated meal in the recipe modal so user can view and add to today
-                  if (savedMeal) {
-                    setRecipeModalShowAddToToday(true);
-                    setRecipeModalMeal(savedMeal);
-                  }
-                }}
-                onClose={() => setShowAIMealModal(false)}
-              />
-            </View>
-          </View>
-        </Modal>
-
-        <MealRecipeModal
-          meal={recipeModalMeal}
-          visible={!!recipeModalMeal}
-          onClose={() => {
-            setRecipeModalMeal(null);
-            setRecipeModalShowAddToToday(false);
-          }}
-          onAddToToday={
-            recipeModalShowAddToToday
-              ? async (meal) => {
-                  await handleMealConsumed(meal, 1);
-                  setRecipeModalMeal(null);
-                  setRecipeModalShowAddToToday(false);
-                  await loadData();
-                }
-              : undefined
-          }
-        />
-
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      <NutritionAdjustModal
+        visible={!!adjustModalType}
+        metricType={adjustModalType}
+        accentColor={adjustModalType ? ADJUST_MODAL_ACCENT[adjustModalType] : T.primary}
+        applying={nutritionAdjusting}
+        onClose={() => {
+          Keyboard.dismiss();
+          setAdjustModalType(null);
+        }}
+        onApply={applyAdjustModal}
+      />
+
+      <Modal visible={showAIMealModal} transparent animationType="slide">
+        <View style={styles.aiModalOverlay}>
+          <View style={styles.aiModalContent}>
+            <AIMealGenerator
+              isInModal
+              isPremium={isPremium}
+              skipSuccessAlert
+              onMealGenerated={async (savedMeal) => {
+                setShowAIMealModal(false);
+                await loadData();
+                try {
+                  const info = await getAIGenerationUsageInfo(FEATURE_TYPES.MEAL, isPremium);
+                  setMealUsage(info || { currentUsage: 0, limit: 1, remaining: 1 });
+                } catch (e) {}
+                if (savedMeal) {
+                  setRecipeModalShowAddToToday(true);
+                  setRecipeModalMeal(savedMeal);
+                }
+              }}
+              onClose={() => setShowAIMealModal(false)}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <MealRecipeModal
+        meal={recipeModalMeal}
+        visible={!!recipeModalMeal}
+        onClose={() => {
+          setRecipeModalMeal(null);
+          setRecipeModalShowAddToToday(false);
+        }}
+        onAddToToday={
+          recipeModalShowAddToToday
+            ? async (meal) => {
+                await handleMealConsumed(meal, 1);
+                setRecipeModalMeal(null);
+                setRecipeModalShowAddToToday(false);
+                await loadData();
+              }
+            : undefined
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -1126,6 +1137,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  adjustModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+  },
   modalContent: {
     backgroundColor: T.surface,
     borderRadius: 20,
@@ -1145,26 +1164,33 @@ const styles = StyleSheet.create({
   },
   modalBtnPrimary: { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: T.primary, alignItems: 'center' },
   modalBtnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  aiModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'flex-end',
+  },
   aiModalContent: {
     backgroundColor: T.background,
-    borderRadius: 24,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     width: '100%',
     height: '92%',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
+    borderBottomWidth: 0,
   },
   adjustModalKbWrap: {
     width: '100%',
     maxWidth: 340,
-    paddingHorizontal: 8,
     zIndex: 2,
   },
   adjustModalCard: {
-    backgroundColor: T.cardBg,
+    width: '100%',
+    backgroundColor: T.surface,
     borderRadius: 20,
     padding: 22,
     borderWidth: 1,
-    borderColor: T.cardBorder,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   adjustModalTitle: { fontSize: 20, fontWeight: '700', color: T.text, marginBottom: 6 },
   adjustModalHint: { fontSize: 13, color: T.textMuted, marginBottom: 16 },

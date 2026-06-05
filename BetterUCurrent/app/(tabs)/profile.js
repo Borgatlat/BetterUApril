@@ -1,10 +1,10 @@
 "use client";
 
 
-import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, TextInput, Alert, Linking, Modal, ScrollView, Platform, Switch, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, TextInput, Alert, Linking, Modal, ScrollView, Platform, Switch, Dimensions, ImageBackground } from 'react-native';
 import { useUser } from '../../context/UserContext';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useUnits } from '../../context/UnitsContext';
 import { useTracking } from '../../context/TrackingContext';
@@ -12,34 +12,30 @@ import { supabase } from '../../lib/supabase';
 import PremiumFeature from '../components/PremiumFeature';
 import { useAuth } from '../../context/AuthContext';
 import * as ImagePicker from 'expo-image-picker';
-import { PremiumAvatar } from '../../app/components/PremiumAvatar';
+import { PremiumAvatar } from '../components/PremiumAvatar';
 import SpotifyConnectButton from '../components/SpotifyConnectButton';
 import { Share } from 'react-native';
 import { useSettings } from '../../context/SettingsContext';
-import { useLanguage } from '../../context/LanguageContext';
-import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 import BadgeDisplay from '../../components/BadgeDisplay';
 import BadgeModal from '../../components/BadgeModal';
 import BadgeCollection from '../../components/BadgeCollection';
 import TrophyCase from '../../components/TrophyCase';
+import VerifiedBadge from '../components/VerifiedBadge';
+import { normalizeImageUrl } from '../../utils/imageUrlHelpers';
+import { getUserBonds } from '../../lib/bonds';
+import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 // HealthKit imports - using imperative API to avoid subscription bugs
 let useHealthkitAuthorization, getMostRecentQuantitySample, queryStatisticsForQuantity, queryWorkoutSamples, saveWorkoutSample, queryQuantitySamples, HKQuantityTypeIdentifier;
 try {
   const healthKit = require('@kingstinct/react-native-healthkit');
   useHealthkitAuthorization = healthKit.useHealthkitAuthorization;
   getMostRecentQuantitySample = healthKit.getMostRecentQuantitySample;
-  // queryStatisticsForQuantity gets DAILY TOTALS (sums all samples)
   queryStatisticsForQuantity = healthKit.queryStatisticsForQuantity;
-  // queryWorkoutSamples gets workout activities (runs, walks, strength training, etc.)
   queryWorkoutSamples = healthKit.queryWorkoutSamples;
-  // saveWorkoutSample saves a workout TO Apple Health
   saveWorkoutSample = healthKit.saveWorkoutSample;
-  // queryQuantitySamples - query raw samples (can be used to get calories for a time range)
   queryQuantitySamples = healthKit.queryQuantitySamples;
-  // Constants for quantity types
   HKQuantityTypeIdentifier = healthKit.HKQuantityTypeIdentifier;
   console.log('HealthKit library loaded successfully');
-  console.log('HKQuantityTypeIdentifier available:', !!HKQuantityTypeIdentifier);
 } catch (error) {
   console.log('HealthKit library not available:', error);
   useHealthkitAuthorization = () => ['notDetermined', () => {}];
@@ -51,6 +47,8 @@ try {
   HKQuantityTypeIdentifier = {};
 }
 
+
+const PROFILE_SCROLL_EXTRA_BOTTOM = 40;
 
 const ProfileScreen = () => {
   const { userProfile, isLoading, updateProfile } = useUser();
@@ -67,11 +65,11 @@ const ProfileScreen = () => {
   } = useUnits();
   const { calories, water, updateGoal } = useTracking();
   const { settings, updateSettings } = useSettings();
-  const { t } = useLanguage();
   const router = useRouter();
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [showUnitsModal, setShowUnitsModal] = useState(false);
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
   const { user, signOut } = useAuth();
   const [uploading, setUploading] = useState(false);
   const [spotifyStatusMessage, setSpotifyStatusMessage] = useState('');
@@ -91,116 +89,131 @@ const ProfileScreen = () => {
   const [healthKitRequested, setHealthKitRequested] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [selectedTheme, setSelectedTheme] = useState('default');
+  const [themeCosts, setThemeCosts] = useState({}); // Store theme costs from database
+  const [themeCostsLoading, setThemeCostsLoading] = useState(true);
   
-  // Profile theme options - background colors with Sparks costs
+  // Custom background state (only for display, upload is in store)
+  const [activeCustomBackground, setActiveCustomBackground] = useState(null);
+  // Background upload cost is hardcoded to 10,000 Neuros
+  const backgroundUploadCost = 10000;
+  
+  // Rotating themes state
+  const [rotatingThemes, setRotatingThemes] = useState([]);
+  const [currentRotationId, setCurrentRotationId] = useState(null);
+  const [currentRotatingTheme, setCurrentRotatingTheme] = useState(null); // Store details of active rotating theme
+  
+  // Forfeited bonds state (for portfolio overview adjustment)
+  const [forfeitedBondsTotal, setForfeitedBondsTotal] = useState(0);
+  
+  // Profile theme options - background colors (costs are fetched from database)
   const PROFILE_THEMES = {
     // Free themes
     default: {
       name: 'Default',
-      backgroundColor: '#000000',
-      gradientColors: ['#000000', '#0a0a0a'],
+      backgroundColor: '#1a1a1a', // Lightened from #000000
+      gradientColors: ['#1a1a1a', '#2a2a2a'], // Lightened from #000000, #0a0a0a
       cost: 0,
       unlocked: true,
     },
     light_blue: {
       name: 'Ocean Blue',
-      backgroundColor: '#1e3a5f',
-      gradientColors: ['#1e3a5f', '#0d1b2a'],
+      backgroundColor: '#2a4f7f', // Lightened from #1e3a5f
+      gradientColors: ['#2a4f7f', '#1a2f4f'], // Lightened from #1e3a5f, #0d1b2a
       cost: 0,
       unlocked: true,
     },
     pink: {
       name: 'Sunset Pink',
-      backgroundColor: '#4a1942',
-      gradientColors: ['#4a1942', '#2d132c'],
+      backgroundColor: '#6a295a', // Lightened from #4a1942
+      gradientColors: ['#6a295a', '#4a2942'], // Lightened from #4a1942, #2d132c
       cost: 0,
       unlocked: true,
     },
     green: {
       name: 'Forest Green',
-      backgroundColor: '#1a3a2a',
-      gradientColors: ['#1a3a2a', '#0d1f15'],
+      backgroundColor: '#2a5a3a', // Lightened from #1a3a2a
+      gradientColors: ['#2a5a3a', '#1a3f2a'], // Lightened from #1a3a2a, #0d1f15
       cost: 0,
       unlocked: true,
     },
-    // 1 Referral (3 Sparks) - Starter Themes
+    // 1 Referral (3 Neuros) - Starter Themes
     midnight_blue: {
       name: 'Midnight Blue',
-      backgroundColor: '#0a1628',
-      gradientColors: ['#0a1628', '#050a14'],
+      backgroundColor: '#1a2640', // Lightened from #0a1628
+      gradientColors: ['#1a2640', '#0f1a28'], // Lightened from #0a1628, #050a14
       cost: 1,
       unlocked: false,
     },
     charcoal: {
       name: 'Charcoal',
-      backgroundColor: '#1a1a1a',
-      gradientColors: ['#1a1a1a', '#0f0f0f'],
+      backgroundColor: '#2a2a2a', // Lightened from #1a1a1a
+      gradientColors: ['#2a2a2a', '#1f1f1f'], // Lightened from #1a1a1a, #0f0f0f
       cost: 1,
       unlocked: false,
     },
-    // 3 Referrals (9 Sparks) - Bronze Tier
+    // 3 Referrals (9 Neuros) - Bronze Tier
     crimson_night: {
       name: 'Crimson Night',
-      backgroundColor: '#2d0a0a',
-      gradientColors: ['#2d0a0a', '#1a0505'],
+      backgroundColor: '#4d1a1a', // Lightened from #2d0a0a
+      gradientColors: ['#4d1a1a', '#2a0f0f'], // Lightened from #2d0a0a, #1a0505
       cost: 5,
       unlocked: false,
     },
     royal_purple: {
       name: 'Royal Purple',
-      backgroundColor: '#1a0a2e',
-      gradientColors: ['#1a0a2e', '#0f051a'],
+      backgroundColor: '#2a1a4e', // Lightened from #1a0a2e
+      gradientColors: ['#2a1a4e', '#1a0f2a'], // Lightened from #1a0a2e, #0f051a
       cost: 5,
       unlocked: false,
     },
     emerald_dark: {
       name: 'Emerald Dark',
-      backgroundColor: '#0a1f1a',
-      gradientColors: ['#0a1f1a', '#050f0d'],
+      backgroundColor: '#1a3f2a', // Lightened from #0a1f1a
+      gradientColors: ['#1a3f2a', '#0f2f1a'], // Lightened from #0a1f1a, #050f0d
       cost: 5,
       unlocked: false,
     },
-    // 5 Referrals (15 Sparks) - Silver Tier
+    // 5 Referrals (15 Neuros) - Silver Tier
     golden_hour: {
       name: 'Golden Hour',
-      backgroundColor: '#2a1f0a',
-      gradientColors: ['#2a1f0a', '#1a1206'],
+      backgroundColor: '#4a3f1a', // Lightened from #2a1f0a
+      gradientColors: ['#4a3f1a', '#2a2f0f'], // Lightened from #2a1f0a, #1a1206
       cost: 10,
       unlocked: false,
     },
     aurora: {
       name: 'Aurora',
-      backgroundColor: '#0a1a2a',
-      gradientColors: ['#0a1a2a', '#050d15'],
+      backgroundColor: '#1a2a4a', // Lightened from #0a1a2a
+      gradientColors: ['#1a2a4a', '#0f1a2a'], // Lightened from #0a1a2a, #050d15
       cost: 10,
       unlocked: false,
     },
     volcanic: {
       name: 'Volcanic',
-      backgroundColor: '#1f0a0a',
-      gradientColors: ['#1f0a0a', '#120505'],
+      backgroundColor: '#3f1a1a', // Lightened from #1f0a0a
+      gradientColors: ['#3f1a1a', '#2a0f0f'], // Lightened from #1f0a0a, #120505
       cost: 10,
       unlocked: false,
     },
-    // 10 Referrals (30 Sparks) - Gold Tier
+    // 10 Referrals (30 Neuros) - Gold Tier
     platinum: {
       name: 'Platinum',
-      backgroundColor: '#1a1a1f',
-      gradientColors: ['#1a1a1f', '#0f0f12'],
+      backgroundColor: '#2a2a3f', // Lightened from #1a1a1f
+      gradientColors: ['#2a2a3f', '#1f1f2a'], // Lightened from #1a1a1f, #0f0f12
       cost: 15,
       unlocked: false,
     },
     neon_cyber: {
       name: 'Neon Cyber',
-      backgroundColor: '#0f0a1a',
-      gradientColors: ['#0f0a1a', '#08050d'],
+      backgroundColor: '#1f1a2a', // Lightened from #0f0a1a
+      gradientColors: ['#1f1a2a', '#0f0f1a'], // Lightened from #0f0a1a, #08050d
       cost: 15,
       unlocked: false,
     },
     obsidian: {
       name: 'Obsidian',
-      backgroundColor: '#050505',
-      gradientColors: ['#050505', '#000000'],
+      backgroundColor: '#151515', // Lightened from #050505
+      gradientColors: ['#151515', '#0a0a0a'], // Lightened from #050505, #000000
       cost: 15,
       unlocked: false,
     },
@@ -219,30 +232,35 @@ const ProfileScreen = () => {
   
   // HealthKit Authorization - always call hooks (React rule)
   // Hooks are always called, but return safe defaults if library not available
+  // Temporarily disabled for TestFlight
   const [authorizationStatus, requestAuthorization] = useHealthkitAuthorization({
-    toRead: Platform.OS === 'ios' ? [
-      'HKQuantityTypeIdentifierStepCount',
-      'HKQuantityTypeIdentifierActiveEnergyBurned',
-      'HKQuantityTypeIdentifierHeartRate',
-      'HKQuantityTypeIdentifierBodyMass',
-      'HKQuantityTypeIdentifierHeight',
-      'HKQuantityTypeIdentifierAppleExerciseTime',
-      'HKQuantityTypeIdentifierDistanceWalkingRunning', // Distance for runs/walks
-      'HKQuantityTypeIdentifierDistanceCycling', // Distance for cycling
-      'HKWorkoutTypeIdentifier', // Access to workout activities (runs, walks, strength, etc.)
-    ] : [],
-    toWrite: Platform.OS === 'ios' ? [
-      'HKWorkoutTypeIdentifier', // Write workouts TO Apple Health
-      'HKQuantityTypeIdentifierActiveEnergyBurned', // Write calories
-      'HKQuantityTypeIdentifierDistanceWalkingRunning', // Write distance for runs/walks
-      'HKQuantityTypeIdentifierDistanceCycling', // Write distance for cycling
-    ] : [],
+    toRead: [],
+    toWrite: [],
   });
+  // const [authorizationStatus, requestAuthorization] = useHealthkitAuthorization({
+  //   toRead: Platform.OS === 'ios' ? [
+  //     'HKQuantityTypeIdentifierStepCount',
+  //     'HKQuantityTypeIdentifierActiveEnergyBurned',
+  //     'HKQuantityTypeIdentifierHeartRate',
+  //     'HKQuantityTypeIdentifierBodyMass',
+  //     'HKQuantityTypeIdentifierHeight',
+  //     'HKQuantityTypeIdentifierAppleExerciseTime',
+  //     'HKQuantityTypeIdentifierDistanceWalkingRunning', // Distance for runs/walks
+  //     'HKQuantityTypeIdentifierDistanceCycling', // Distance for cycling
+  //     'HKWorkoutTypeIdentifier', // Access to workout activities (runs, walks, strength, etc.)
+  //   ] : [],
+  //   toWrite: Platform.OS === 'ios' ? [
+  //     'HKWorkoutTypeIdentifier', // Write workouts TO Apple Health
+  //     'HKQuantityTypeIdentifierActiveEnergyBurned', // Write calories
+  //     'HKQuantityTypeIdentifierDistanceWalkingRunning', // Write distance for runs/walks
+  //     'HKQuantityTypeIdentifierDistanceCycling', // Write distance for cycling
+  //   ] : [],
+  // });
 
   // Debug: log HealthKit status to see what we're getting
-  useEffect(() => {
-    console.log('HealthKit authorization status:', authorizationStatus);
-  }, [authorizationStatus]);
+  // useEffect(() => {
+  //   console.log('HealthKit authorization status:', authorizationStatus);
+  // }, [authorizationStatus]);
 
   // Load profile theme from userProfile when it changes
   useEffect(() => {
@@ -250,6 +268,102 @@ const ProfileScreen = () => {
       setSelectedTheme(userProfile.profile_theme);
     }
   }, [userProfile?.profile_theme]);
+
+  // Fetch forfeited bonds (for portfolio/other use; balance display uses neuros_balance only)
+  useEffect(() => {
+    const fetchForfeitedBonds = async () => {
+      if (!user?.id) {
+        setForfeitedBondsTotal(0);
+        return;
+      }
+
+      try {
+        const result = await getUserBonds(user.id, 'forfeited');
+        if (result.success && result.bonds) {
+          const total = result.bonds.reduce((sum, bond) => sum + (bond.bond_amount || 0), 0);
+          setForfeitedBondsTotal(total);
+        } else {
+          setForfeitedBondsTotal(0);
+        }
+      } catch (error) {
+        console.error('Error fetching forfeited bonds:', error);
+        setForfeitedBondsTotal(0);
+      }
+    };
+
+    fetchForfeitedBonds();
+  }, [user?.id]);
+
+  // Refetch neuros_balance when Profile tab is focused so it always shows the true amount (no flash)
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return;
+      let cancelled = false;
+      (async () => {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('neuros_balance')
+            .eq('id', user.id)
+            .single();
+          if (!cancelled && !error && data != null) {
+            updateProfile({ neuros_balance: data.neuros_balance });
+          }
+        } catch (e) {
+          if (!cancelled) console.warn('Profile: failed to refetch neuros_balance', e);
+        }
+      })();
+      return () => { cancelled = true; };
+    }, [user?.id, updateProfile])
+  );
+
+  // Fetch purchased rotating themes for display in theme modal
+  useEffect(() => {
+    const fetchPurchasedRotatingThemes = async () => {
+      if (!user?.id || !userProfile?.purchased_themes) return;
+      
+      try {
+        // Get current rotation
+        const { data: rotationData } = await supabase
+          .rpc('get_current_rotation');
+        
+        if (!rotationData) return;
+        
+        // Fetch all purchased rotating themes from theme_bank
+        const purchasedThemeKeys = userProfile.purchased_themes || [];
+        if (purchasedThemeKeys.length === 0) return;
+        
+        const { data: themesData, error } = await supabase
+          .from('theme_bank')
+          .select('id, name, theme_key, image_url, background_color, gradient_colors, description, rarity')
+          .in('theme_key', purchasedThemeKeys)
+          .eq('is_active', true)
+          .eq('is_rotating', true);
+        
+        if (error) {
+          console.error('Error fetching purchased rotating themes:', error);
+          return;
+        }
+        
+        // Format as slots for display (similar to store structure)
+        // Use theme_bank.rarity as source of truth (always up to date)
+        const formattedThemes = (themesData || []).map((theme, index) => ({
+          id: `purchased-${theme.id}`,
+          slot_number: index + 1,
+          theme_id: theme.id,
+          theme: theme,
+          slot_rarity: theme.rarity || 'common', // Use rarity from theme_bank (always current)
+          neuros_cost: 0, // Already purchased
+        }));
+        
+        setRotatingThemes(formattedThemes);
+      } catch (error) {
+        console.error('Error in fetchPurchasedRotatingThemes:', error);
+      }
+    };
+    
+    fetchPurchasedRotatingThemes();
+  }, [user?.id, userProfile?.purchased_themes]);
 
   // Check if HealthKit is authorized - handle both string and object status
   // The status could be 'sharingAuthorized' or an object with status property
@@ -465,12 +579,13 @@ const ProfileScreen = () => {
   };
 
   // Fetch workouts when modal opens and user is authorized
-  useEffect(() => {
-    if (healthKitModalVisible && isHealthKitAuthorized) {
-      fetchAppleWorkouts();
-      fetchBetterUWorkouts(); // Also auto-load BetterU workouts for export
-    }
-  }, [healthKitModalVisible, isHealthKitAuthorized]);
+  // Temporarily disabled for TestFlight
+  // useEffect(() => {
+  //   if (healthKitModalVisible && isHealthKitAuthorized) {
+  //     fetchAppleWorkouts();
+  //     fetchBetterUWorkouts(); // Also auto-load BetterU workouts for export
+  //   }
+  // }, [healthKitModalVisible, isHealthKitAuthorized]);
 
   // ==================================================
   // UPLOAD WORKOUT TO FEED - Runs go to runs table, others to workout_sessions
@@ -1281,6 +1396,66 @@ const ProfileScreen = () => {
     }
   }, [user]);
 
+  // Fetch theme costs from database
+  useEffect(() => {
+    const fetchThemeCosts = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profile_theme_costs')
+          .select('theme_key, neuros_cost')
+          .eq('is_active', true);
+        
+        if (error) {
+          console.error('Error fetching theme costs:', error);
+          // Use default costs if fetch fails
+          return;
+        }
+        
+        // Convert array to object for easy lookup
+        const costsMap = {};
+        data?.forEach(item => {
+          costsMap[item.theme_key] = item.neuros_cost;
+        });
+        
+        setThemeCosts(costsMap);
+      } catch (error) {
+        console.error('Error fetching theme costs:', error);
+      } finally {
+        setThemeCostsLoading(false);
+      }
+    };
+    
+    fetchThemeCosts();
+  }, []);
+
+  // Fetch active custom background for display
+  useEffect(() => {
+    const fetchActiveBackground = async () => {
+      if (!user?.id) return;
+      
+      try {
+        // Fetch active background
+        const { data: backgrounds, error: bgError } = await supabase
+          .from('custom_backgrounds')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .limit(1);
+        
+        if (bgError) {
+          console.error('Error fetching custom background:', bgError);
+          return;
+        }
+        
+        setActiveCustomBackground(backgrounds?.[0] || null);
+      } catch (error) {
+        console.error('Error fetching custom background:', error);
+      }
+    };
+    
+    fetchActiveBackground();
+  }, [user?.id, userProfile?.active_custom_background_id]);
+
 
   const fetchProfile = async () => {
     try {
@@ -1407,16 +1582,33 @@ const ProfileScreen = () => {
       // Generate a unique referral code based on username
       const referralCode = (userProfile?.username || user?.id?.slice(0, 8) || 'BETTERU').toUpperCase();
       
-      const shareMessage = `✨ Use my referral code to get started on BetterU!\n\nCode: ${referralCode}\n\n💪 BetterU is an AI-powered fitness app with personalized workouts, mental wellness sessions, and an AI trainer.\n\n🎁 We both get 3 Sparks immediately when you sign up! Spend Sparks on exclusive profile themes.\n\nDownload now: https://betteruai.com`;
+      // Create a simple shareable message with the referral code and App Store link
+      // Format it nicely so the link doesn't look like a blob of text
+      const shareMessage = `Use my referral code to get started on BetterU!\n\n🎫 Code: ${referralCode}\n\n📱 Download here:\nhttps://apps.apple.com/us/app/betteru-social-fitness/id6744857930`;
       
-      const shareData = {
-        message: shareMessage,
-        url: 'https://betteruai.com',
-      };
-      await Share.share(shareData);
+      // Share with just the message (URL is already included in the message)
+      try {
+        const result = await Share.share({
+          message: shareMessage,
+          title: `BetterU Referral Code: ${referralCode}`, // Title for Android share sheet
+        });
+        
+        // Check if sharing was successful
+        if (result.action === Share.sharedAction) {
+          console.log('Referral code shared successfully');
+        } else if (result.action === Share.dismissedAction) {
+          console.log('Share dismissed');
+        }
+      } catch (shareError) {
+        // Fallback: try with just message if platform-specific sharing fails
+        console.warn('Primary share method failed, trying fallback:', shareError);
+        await Share.share({
+          message: shareMessage,
+        });
+      }
     } catch (error) {
       console.error('Error sharing referral:', error);
-      Alert.alert('Error', 'Failed to share referral code');
+      Alert.alert('Error', 'Failed to share referral code. Please try again.');
     }
   };
   
@@ -1440,22 +1632,17 @@ const ProfileScreen = () => {
       console.error('Error fetching referrals:', error);
     }
     
-    const sparksBalance = userProfile?.sparks_balance || 0;
+    const neurosBalance = userProfile?.neuros_balance || 0;
     
     Alert.alert(
-      '✨ Refer Friends, Earn Sparks!',
+      '✨ Refer Friends, Earn Neuros!',
       `Your referral code: ${referralCode}\n\n` +
-      `Current Sparks: ${sparksBalance} ⭐\n` +
+      `Current Neuros: ${neurosBalance} ⭐\n` +
       `Completed Referrals: ${referralCount}\n\n` +
       `🎁 How It Works:\n` +
       `• Share your code with friends\n` +
-      `• When they sign up: you both get +3 Sparks immediately!\n` +
-      `• Spend Sparks on exclusive profile themes!\n\n` +
-      `💎 Theme Costs:\n` +
-      `• Starter themes: 1 Spark\n` +
-      `• Bronze themes: 5 Sparks\n` +
-      `• Silver themes: 10 Sparks\n` +
-      `• Gold themes: 15 Sparks\n\n` +
+      `• When they sign up: you both get +50 Neuros immediately!\n` +
+      `• Spend Neuros on exclusive profile themes!\n\n` +
       `Share your code and unlock amazing themes!`,
       [
         { text: 'Share Code', onPress: handleReferral },
@@ -1464,84 +1651,103 @@ const ProfileScreen = () => {
     );
   };
 
+  // Get theme cost from database (falls back to 0 if not found)
+  const getThemeCost = (themeKey) => {
+    return themeCosts[themeKey] ?? 0; // Default to 0 (free) if cost not found
+  };
+
   // Check if theme is unlocked (free or purchased)
   const isThemeUnlocked = (themeKey) => {
     const theme = PROFILE_THEMES[themeKey];
     if (!theme) return false;
     
+    // Get cost from database
+    const cost = getThemeCost(themeKey);
+    
     // Free themes are always unlocked
-    if (theme.cost === 0) return true;
+    if (cost === 0) return true;
     
     // Check if user has purchased this theme
     const purchasedThemes = userProfile?.purchased_themes || [];
     return purchasedThemes.includes(themeKey);
   };
 
-  // Handle profile theme selection or purchase
+  // Handle rotating theme selection
+  const handleRotatingThemeSelect = async (themeKey) => {
+    try {
+      // Check if owned
+      const purchasedThemes = userProfile?.purchased_themes || [];
+      if (!purchasedThemes.includes(themeKey)) {
+        Alert.alert(
+          'Theme Not Owned',
+          'This theme is not in your collection. Visit the store to purchase it!',
+          [
+            { text: 'OK' },
+            { 
+              text: 'Go to Store', 
+              onPress: () => {
+                setShowThemeModal(false);
+                setTimeout(() => router.push('/store'), 300);
+              }
+            }
+          ]
+        );
+        return;
+      }
+      
+      // Deactivate all custom backgrounds
+      await supabase
+        .from('custom_backgrounds')
+        .update({ is_active: false })
+        .eq('user_id', user?.id);
+      
+      // Set theme
+      const { error } = await supabase
+        .from('profiles')
+        .update({ 
+          profile_theme: themeKey,
+          active_custom_background_id: null
+        })
+        .eq('id', user?.id);
+      
+      if (error) throw error;
+      
+      if (updateProfile) {
+        updateProfile({ 
+          profile_theme: themeKey,
+          active_custom_background_id: null
+        });
+      }
+      
+      setSelectedTheme(themeKey);
+      setActiveCustomBackground(null);
+      setShowThemeModal(false);
+    } catch (error) {
+      console.error('Error saving rotating theme:', error);
+      Alert.alert('Error', 'Failed to save theme. Please try again.');
+    }
+  };
+
+  // Handle profile theme selection (only for owned themes)
   const handleThemeSelect = async (themeKey) => {
     try {
       const theme = PROFILE_THEMES[themeKey];
       if (!theme) return;
 
-      const sparksBalance = userProfile?.sparks_balance || 0;
       const isUnlocked = isThemeUnlocked(themeKey);
 
-      // If theme is locked and user doesn't have enough sparks, show purchase prompt
-      if (!isUnlocked && theme.cost > 0) {
-        if (sparksBalance < theme.cost) {
-          Alert.alert(
-            'Not Enough Sparks',
-            `This theme costs ${theme.cost} Sparks, but you only have ${sparksBalance}. Refer friends to earn more Sparks!`,
-            [
-              { text: 'OK' },
-              { 
-                text: 'Refer Friends', 
-                onPress: () => {
-                  setShowThemeModal(false);
-                  setTimeout(() => showReferralInfo(), 300);
-                }
-              }
-            ]
-          );
-          return;
-        }
-
-        // Confirm purchase
+      // Only allow selection of unlocked themes
+      if (!isUnlocked) {
         Alert.alert(
-          'Purchase Theme?',
-          `Purchase "${theme.name}" for ${theme.cost} Sparks?\n\nYou will have ${sparksBalance - theme.cost} Sparks remaining.`,
+          'Theme Not Owned',
+          'This theme is not in your collection. Visit the store to purchase more themes!',
           [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Purchase',
-              onPress: async () => {
-                // Deduct sparks and add to purchased themes
-                const newSparksBalance = sparksBalance - theme.cost;
-                const purchasedThemes = [...(userProfile?.purchased_themes || []), themeKey];
-                
-                const { error: purchaseError } = await supabase
-                  .from('profiles')
-                  .update({
-                    sparks_balance: newSparksBalance,
-                    purchased_themes: purchasedThemes,
-                    profile_theme: themeKey, // Also set as active theme
-                  })
-                  .eq('id', user?.id);
-
-                if (purchaseError) throw purchaseError;
-
-                // Update local profile
-                if (updateProfile) {
-                  updateProfile({
-                    sparks_balance: newSparksBalance,
-                    purchased_themes: purchasedThemes,
-                    profile_theme: themeKey,
-                  });
-                }
-
-                Alert.alert('Success!', `"${theme.name}" theme purchased and activated!`);
-                setSelectedTheme(themeKey);
+            { text: 'OK' },
+            { 
+              text: 'Go to Store', 
+              onPress: () => {
                 setShowThemeModal(false);
+                setTimeout(() => router.push('/store'), 300);
               }
             }
           ]
@@ -1552,18 +1758,33 @@ const ProfileScreen = () => {
       // Theme is unlocked, just set it as active
       setSelectedTheme(themeKey);
       
-      // Save to database
+      // Deactivate all custom backgrounds for this user
+      await supabase
+        .from('custom_backgrounds')
+        .update({ is_active: false })
+        .eq('user_id', user?.id);
+      
+      // Save to database - clear custom background when theme is selected
       const { error } = await supabase
         .from('profiles')
-        .update({ profile_theme: themeKey })
+        .update({ 
+          profile_theme: themeKey,
+          active_custom_background_id: null // Clear custom background when theme is selected
+        })
         .eq('id', user?.id);
       
       if (error) throw error;
       
       // Update local profile
       if (updateProfile) {
-        updateProfile({ profile_theme: themeKey });
+        updateProfile({ 
+          profile_theme: themeKey,
+          active_custom_background_id: null // Clear custom background in local state
+        });
       }
+      
+      // Clear active custom background from local state
+      setActiveCustomBackground(null);
       
       setShowThemeModal(false);
     } catch (error) {
@@ -1572,8 +1793,50 @@ const ProfileScreen = () => {
     }
   };
 
-  // Get current theme colors
-  const currentTheme = PROFILE_THEMES[selectedTheme] || PROFILE_THEMES.default;
+  // Get current theme colors - handle both classic and rotating themes
+  // If selectedTheme is not in PROFILE_THEMES, it's a rotating theme
+  const currentTheme = PROFILE_THEMES[selectedTheme] || currentRotatingTheme || PROFILE_THEMES.default;
+  
+  // Fetch rotating theme details when selectedTheme changes
+  useEffect(() => {
+    const fetchRotatingThemeDetails = async () => {
+      // Check if selectedTheme is a rotating theme (not in PROFILE_THEMES)
+      if (!selectedTheme || PROFILE_THEMES[selectedTheme]) {
+        setCurrentRotatingTheme(null);
+        return;
+      }
+      
+      try {
+        // Fetch theme from theme_bank by theme_key
+        const { data: themeData, error } = await supabase
+          .from('theme_bank')
+          .select('name, theme_key, image_url, background_color, gradient_colors')
+          .eq('theme_key', selectedTheme)
+          .eq('is_active', true)
+          .single();
+        
+        if (error || !themeData) {
+          console.error('Error fetching rotating theme:', error);
+          setCurrentRotatingTheme(null);
+          return;
+        }
+        
+        // Format to match PROFILE_THEMES structure
+        // Normalize image_url to convert Google Drive links to direct image URLs
+        setCurrentRotatingTheme({
+          name: themeData.name,
+          backgroundColor: themeData.background_color || '#000000',
+          gradientColors: themeData.gradient_colors || [themeData.background_color || '#000000', '#0a0a0a'],
+          image_url: themeData.image_url ? normalizeImageUrl(themeData.image_url) : null, // Normalize Google Drive URLs to direct image URLs
+        });
+      } catch (error) {
+        console.error('Error in fetchRotatingThemeDetails:', error);
+        setCurrentRotatingTheme(null);
+      }
+    };
+    
+    fetchRotatingThemeDetails();
+  }, [selectedTheme]);
 
 
   const validateInput = (field, value) => {
@@ -1802,8 +2065,41 @@ const ProfileScreen = () => {
 
 
   const handleEditProfile = () => {
-    router.push('/(auth)/onboarding/age-weight');
+    router.push('/(auth)/onboarding/about-you');
   };
+
+
+  const handleSettingsPress = () => {
+    router.push('/(tabs)/settings');
+  };
+
+
+  const settingsOptions = [
+    {
+      title: 'Units',
+      icon: 'scale-outline',
+      color: '#4CAF50',
+      onPress: () => setShowUnitsModal(true),
+    },
+    {
+      title: 'Language',
+      icon: 'language-outline',
+      color: '#2196F3',
+      onPress: () => setShowLanguageModal(true),
+    },
+    {
+      title: 'Privacy Policy',
+      icon: 'shield-checkmark-outline',
+      color: '#9C27B0',
+      onPress: () => Linking.openURL('https://betteruai.com/privacy'),
+    },
+    {
+      title: 'Terms of Service',
+      icon: 'document-text-outline',
+      color: '#FF9800',
+      onPress: () => Linking.openURL('https://betteruai.com/terms'),
+    },
+  ];
 
 
   const handleGoalEdit = async (type, value) => {
@@ -1814,7 +2110,7 @@ const ProfileScreen = () => {
         : parseFloat(value);
         
       if (isNaN(numValue) || numValue <= 0) {
-        Alert.alert(t('settings.alertInvalidValueTitle'), t('settings.alertInvalidPositiveNumber'));
+        Alert.alert('Invalid Value', 'Please enter a valid number greater than 0');
         return;
       }
 
@@ -1854,7 +2150,7 @@ const ProfileScreen = () => {
       setEditValue('');
     } catch (error) {
       console.error('Error updating goal:', error);
-      Alert.alert(t('common.error'), t('settings.alertErrorUpdateGoal'));
+      Alert.alert('Error', 'Failed to update goal. Please try again.');
     }
   };
 
@@ -2110,6 +2406,274 @@ const ProfileScreen = () => {
     }
   };
 
+  /**
+   * Upload custom background image
+   * This function handles the entire flow:
+   * 1. Checks user has enough neuros
+   * 2. Deducts neuros from balance
+   * 3. Uploads image to Cloudinary
+   * 4. Saves background to database
+   * 5. Sets it as active
+   */
+  const handleBackgroundUpload = async () => {
+    if (!user?.id) {
+      Alert.alert('Error', 'Please log in to upload backgrounds.');
+      return;
+    }
+
+    // Check neuros balance
+    const currentNeuros = userProfile?.neuros_balance || 0;
+    if (currentNeuros < backgroundUploadCost) {
+      Alert.alert(
+        'Insufficient Neuros',
+        `You need ${backgroundUploadCost.toLocaleString()} Neuros to upload a custom background.\n\nCurrent balance: ${currentNeuros.toLocaleString()} ⭐`,
+        [
+          { text: 'OK' },
+          {
+            text: 'Earn Neuros',
+            onPress: () => {
+              // Show referral info or navigate to earn neuros
+              handleReferralInfo();
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    // Ask for permission
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission required', 'Please allow access to your photos to upload a background.');
+      return;
+    }
+
+    // Pick image
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [9, 16], // Portrait orientation for backgrounds
+      quality: 0.8,
+    });
+
+    if (result.canceled || !result.assets || !result.assets[0]?.uri) return;
+
+    setUploadingBackground(true);
+    try {
+      // Step 1: Deduct neuros first (before upload to prevent free uploads if balance changes)
+      // Get current balance
+      const { data: profileData, error: fetchError } = await supabase
+        .from('profiles')
+        .select('neuros_balance')
+        .eq('id', user.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const currentBalance = profileData?.neuros_balance || 0;
+      if (currentBalance < backgroundUploadCost) {
+        throw new Error(`Insufficient Neuros. You need ${backgroundUploadCost.toLocaleString()} Neuros.`);
+      }
+
+      // Deduct neuros
+      const newBalance = currentBalance - backgroundUploadCost;
+      const { error: deductError } = await supabase
+        .from('profiles')
+        .update({ neuros_balance: newBalance })
+        .eq('id', user.id);
+
+      if (deductError) {
+        throw new Error(`Failed to deduct Neuros: ${deductError.message}`);
+      }
+
+      // Step 2: Upload to Cloudinary
+      const formData = new FormData();
+      formData.append('file', {
+        uri: result.assets[0].uri,
+        type: 'image/jpeg',
+        name: 'background.jpg',
+      });
+      formData.append('upload_preset', 'profilepics');
+      const cloudinaryUrl = 'https://api.cloudinary.com/v1_1/derqwaq9h/image/upload';
+      
+      const response = await fetch(cloudinaryUrl, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+      if (!data.secure_url) throw new Error('Upload failed');
+
+      // Step 3: Save background to database and set as active
+      // First, deactivate all existing backgrounds
+      await supabase
+        .from('custom_backgrounds')
+        .update({ is_active: false })
+        .eq('user_id', user.id);
+
+      // Insert new background as active
+      const { data: newBackground, error: insertError } = await supabase
+        .from('custom_backgrounds')
+        .insert({
+          user_id: user.id,
+          image_url: data.secure_url,
+          is_active: true,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      // Update profile to reference the new background
+      await supabase
+        .from('profiles')
+        .update({ active_custom_background_id: newBackground.id })
+        .eq('id', user.id);
+
+      // Refresh backgrounds list
+      const { data: backgrounds } = await supabase
+        .from('custom_backgrounds')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      setCustomBackgrounds(backgrounds || []);
+      setActiveCustomBackground(newBackground);
+
+      // Update local profile with new neuros balance
+      if (updateProfile) {
+        await updateProfile({ neuros_balance: currentNeuros - backgroundUploadCost });
+      }
+
+      Alert.alert('Success!', `Background uploaded successfully! ${backgroundUploadCost.toLocaleString()} Neuros deducted.`);
+    } catch (error) {
+      console.error('Error uploading background:', error);
+      Alert.alert('Upload Failed', error.message || 'Failed to upload background. Please try again.');
+      
+      // If upload failed but neuros were deducted, we should refund
+      // (In production, you might want to add a refund mechanism)
+    } finally {
+      setUploadingBackground(false);
+    }
+  };
+
+  /**
+   * Set a custom background as active
+   * This deactivates all other backgrounds and activates the selected one
+   */
+  const handleSetActiveBackground = async (backgroundId) => {
+    if (!user?.id) return;
+
+    try {
+      // Deactivate all backgrounds
+      await supabase
+        .from('custom_backgrounds')
+        .update({ is_active: false })
+        .eq('user_id', user.id);
+
+      // Activate selected background
+      const { error } = await supabase
+        .from('custom_backgrounds')
+        .update({ is_active: true })
+        .eq('id', backgroundId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      // Update profile reference
+      await supabase
+        .from('profiles')
+        .update({ active_custom_background_id: backgroundId })
+        .eq('id', user.id);
+
+      // Refresh backgrounds
+      const { data: backgrounds } = await supabase
+        .from('custom_backgrounds')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      setCustomBackgrounds(backgrounds || []);
+      const active = backgrounds?.find(bg => bg.id === backgroundId);
+      setActiveCustomBackground(active);
+
+      // Update local profile
+      if (updateProfile && active) {
+        await updateProfile({ active_custom_background_id: active.id });
+      }
+    } catch (error) {
+      console.error('Error setting active background:', error);
+      Alert.alert('Error', 'Failed to set background. Please try again.');
+    }
+  };
+
+  /**
+   * Delete a custom background
+   * Only allows deletion if it's not the active background (or if it's the only one)
+   */
+  const handleDeleteBackground = async (backgroundId) => {
+    if (!user?.id) return;
+
+    const background = customBackgrounds.find(bg => bg.id === backgroundId);
+    if (!background) return;
+
+    Alert.alert(
+      'Delete Background',
+      'Are you sure you want to delete this background? This action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // If it's the active background, we need to clear the profile reference
+              if (background.is_active) {
+                await supabase
+                  .from('profiles')
+                  .update({ active_custom_background_id: null })
+                  .eq('id', user.id);
+              }
+
+              // Delete the background
+              const { error } = await supabase
+                .from('custom_backgrounds')
+                .delete()
+                .eq('id', backgroundId)
+                .eq('user_id', user.id);
+
+              if (error) throw error;
+
+              // Refresh backgrounds
+              const { data: backgrounds } = await supabase
+                .from('custom_backgrounds')
+                .select('*')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false });
+
+              setCustomBackgrounds(backgrounds || []);
+              
+              if (background.is_active) {
+                setActiveCustomBackground(null);
+                if (updateProfile) {
+                  await updateProfile({ active_custom_background_id: null });
+                }
+              }
+
+              Alert.alert('Success', 'Background deleted successfully.');
+            } catch (error) {
+              console.error('Error deleting background:', error);
+              Alert.alert('Error', 'Failed to delete background. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
 
   if (isLoading) {
     return (
@@ -2129,11 +2693,38 @@ const ProfileScreen = () => {
   const bmiCategory = getBMICategory(bmi);
 
 
+  // Determine background source - prioritize custom background, then rotating theme image, then solid color
+  // Normalize Google Drive URLs to direct image URLs for proper display
+  const backgroundSource = activeCustomBackground?.image_url 
+    ? { uri: normalizeImageUrl(activeCustomBackground.image_url) }
+    : (currentRotatingTheme?.image_url ? { uri: normalizeImageUrl(currentRotatingTheme.image_url) } : null);
+  
+  const backgroundColor = (activeCustomBackground || currentRotatingTheme?.image_url) 
+    ? 'transparent' 
+    : currentTheme.backgroundColor;
+
   return (
-    <View style={[styles.container, { backgroundColor: currentTheme.backgroundColor }]}>
+    <View style={[styles.container, { backgroundColor }]}>
+      {/* Stationary background image - stays fixed while content scrolls */}
+      {/* Shows custom background OR rotating theme image */}
+      {backgroundSource && (
+        <View style={styles.backgroundImageContainer}>
+          <ImageBackground
+            source={backgroundSource}
+            style={styles.backgroundImage}
+            resizeMode="cover"
+            imageStyle={styles.backgroundImageStyleFullOpacity}
+          />
+          {/* No overlay - show original colors for both custom backgrounds and rotating theme images */}
+        </View>
+      )}
       <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: scrollPaddingBottom + PROFILE_SCROLL_EXTRA_BOTTOM },
+        ]}
         showsVerticalScrollIndicator={false}
+        style={backgroundSource ? styles.scrollViewWithBackground : null}
       >
         <View style={styles.headerSection}>
           {/* Avatar and Name Row */}
@@ -2182,14 +2773,42 @@ const ProfileScreen = () => {
             </View>
 
             <View style={styles.nameContainer}>
+              <View style={styles.nameRow}>
               <Text style={styles.name}>{userProfile?.full_name || 'User'}</Text>
+                <VerifiedBadge isVerified={userProfile?.isverified || false} size={18} />
+              </View>
               <Text style={styles.username}>@{userProfile?.username || '--'}</Text>
               <Text style={styles.email}>{userProfile?.email}</Text>
+              
               <TouchableOpacity
                 style={styles.editNameButton}
                 onPress={() => handleEdit('full_name', userProfile?.full_name)}
               >
                 <Ionicons name="create-outline" size={16} color="#00ffff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Neuro Counter and Bonds Button - Only visible to the user themselves */}
+          <View style={styles.neuroActionsWrapper}>
+            <View style={styles.neuroActionsContainer}>
+              <TouchableOpacity
+                style={styles.neuroCounterContainer}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="sparkles" size={16} color="#FFD700" />
+                <Text style={styles.neuroCounterText} numberOfLines={1}>
+                  {(userProfile?.neuros_balance ?? 0).toLocaleString()} Neuros
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.bondsButton}
+                onPress={() => router.push('/bonds')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="trending-up" size={16} color="#00ffff" />
+                <Text style={styles.bondsButtonText} numberOfLines={1}>My Bonds</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2227,6 +2846,11 @@ const ProfileScreen = () => {
             </TouchableOpacity>
           </View>
          
+          <TouchableOpacity onPress={() => router.push('/store')} style={styles.storeButton}>
+            <Ionicons name="storefront-outline" size={20} color="#00ffff" />
+            <Text style={styles.storeButtonText}>Store</Text>
+          </TouchableOpacity>
+          
           <TouchableOpacity onPress={showReferralInfo} style={styles.shareButton}>
             <Ionicons name="gift-outline" size={20} color="#00ffff" />
             <Text style={styles.shareButtonText}>Refer & Earn</Text>
@@ -2506,14 +3130,16 @@ const ProfileScreen = () => {
           </View>
           <View style={styles.themeButtonTextBlock}>
             <Text style={styles.themeButtonTitle}>Profile Theme</Text>
-            <Text style={styles.themeButtonSubtitle}>{currentTheme.name}</Text>
+            <Text style={styles.themeButtonSubtitle}>
+              {activeCustomBackground ? 'Custom Background Active' : currentTheme.name}
+            </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color="#00ffff" />
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.settingsButton} onPress={() => router.push('/settings')}>
           <Ionicons name="settings-outline" size={24} color="#00ffff" />
-          <Text style={styles.settingsButtonText}>{t('settings.title')}</Text>
+          <Text style={styles.settingsButtonText}>Settings</Text>
         </TouchableOpacity>
 
         {/* Admin Section - Only show if user is admin */}
@@ -2527,8 +3153,8 @@ const ProfileScreen = () => {
           </TouchableOpacity>
         )}
 
-        {/* HealthKit Integration Button */}
-        <TouchableOpacity
+        {/* HealthKit Integration Button - Temporarily disabled for TestFlight */}
+        {/* <TouchableOpacity
           style={styles.healthKitButton}
           activeOpacity={0.85}
           onPress={async () => {
@@ -2561,7 +3187,7 @@ const ProfileScreen = () => {
             </View>
             <Ionicons name="chevron-forward" size={18} color="#0f172a" />
           </View>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
 
 
 
@@ -2607,7 +3233,8 @@ const ProfileScreen = () => {
       </Modal>
       )}
 
-      {/* HealthKit Modal */}
+      {/* HealthKit Modal - Temporarily disabled for TestFlight */}
+      {false && (
       <Modal
         transparent
         visible={healthKitModalVisible}
@@ -2909,6 +3536,7 @@ const ProfileScreen = () => {
           </View>
         </View>
       </Modal>
+      )}
 
       {/* Badge Modal */}
       <BadgeModal
@@ -2999,79 +3627,220 @@ const ProfileScreen = () => {
               contentContainerStyle={styles.themeModalScrollContent}
               showsVerticalScrollIndicator={true}
             >
-              {/* Sparks Balance Display */}
-              <View style={styles.sparksBalanceCard}>
-                <Ionicons name="sparkles" size={20} color="#FFD700" />
-                <Text style={styles.sparksBalanceText}>
-                  {userProfile?.sparks_balance || 0} Sparks
-                </Text>
-                <TouchableOpacity 
-                  style={styles.earnSparksButton}
-                  onPress={() => {
-                    setShowThemeModal(false);
-                    setTimeout(() => showReferralInfo(), 300);
-                  }}
-                >
-                  <Text style={styles.earnSparksText}>Earn More</Text>
-                </TouchableOpacity>
-              </View>
-              
               <Text style={styles.themeModalSubtitle}>
-                Select a background color for your profile. Refer friends to unlock exclusive themes!
+                Select a theme from your collection. Buy more themes in the store!
               </Text>
 
-              <View style={styles.themeOptionsGrid}>
-                {Object.entries(PROFILE_THEMES).map(([key, theme]) => {
-                  const isUnlocked = isThemeUnlocked(key);
-                  const sparksBalance = userProfile?.sparks_balance || 0;
-                  const canAfford = theme.cost === 0 || isUnlocked || sparksBalance >= theme.cost;
+              {/* Custom Background Info - Only visible to admins */}
+              {userProfile?.is_admin && (
+                <View style={styles.customBackgroundInfoCard}>
+                  <Ionicons name="image-outline" size={24} color="#00ffff" />
+                  <View style={styles.customBackgroundInfoText}>
+                    <Text style={styles.customBackgroundInfoTitle}>Want a Custom Background?</Text>
+                    <Text style={styles.customBackgroundInfoSubtitle}>
+                      Upload your own background image in the store!
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.customBackgroundInfoButton}
+                    onPress={() => {
+                      setShowThemeModal(false);
+                      setTimeout(() => router.push('/store'), 300);
+                    }}
+                  >
+                    <Ionicons name="chevron-forward" size={18} color="#00ffff" />
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* Store Button */}
+              <TouchableOpacity 
+                style={styles.goToStoreButton}
+                onPress={() => {
+                  setShowThemeModal(false);
+                  setTimeout(() => router.push('/store'), 300);
+                }}
+              >
+                <Ionicons name="storefront-outline" size={20} color="#00ffff" />
+                <Text style={styles.goToStoreButtonText}>Buy More Themes in the Store</Text>
+                <Ionicons name="chevron-forward" size={18} color="#00ffff" />
+              </TouchableOpacity>
+
+              {/* Themes organized by Rarity */}
+              {(() => {
+                // Helper function to get rarity color
+                const getRarityColor = (rarity) => {
+                  switch (rarity) {
+                    case 'common': return '#9e9e9e'; // Gray
+                    case 'rare': return '#2196f3'; // Blue
+                    case 'epic': return '#9c27b0'; // Purple
+                    case 'legendary': return '#ff9800'; // Orange
+                    case 'mythic': return '#f44336'; // Red
+                    case 'classic': return '#ffd700'; // Gold for classic OG themes
+                    default: return '#9e9e9e';
+                  }
+                };
+
+                // Combine all themes with their rarity
+                const allThemes = [];
+                
+                // Add rotating themes
+                rotatingThemes.forEach((slot) => {
+                  if (!slot.theme) return;
+                  const theme = slot.theme;
+                  const isOwned = (userProfile?.purchased_themes || []).includes(theme.theme_key);
+                  if (!isOwned) return; // Only show owned themes
+                  
+                  allThemes.push({
+                    id: slot.id,
+                    type: 'rotating',
+                    themeKey: theme.theme_key,
+                    name: theme.name,
+                    backgroundColor: theme.background_color || '#000',
+                    imageUrl: theme.image_url,
+                    rarity: slot.slot_rarity || 'common',
+                    slot: slot,
+                  });
+                });
+                
+                // Add classic themes (OG themes - labeled as "classic" instead of "common")
+                Object.entries(PROFILE_THEMES)
+                  .filter(([key]) => isThemeUnlocked(key))
+                  .forEach(([key, theme]) => {
+                    allThemes.push({
+                      id: `classic-${key}`,
+                      type: 'classic',
+                      themeKey: key,
+                      name: theme.name,
+                      backgroundColor: theme.backgroundColor,
+                      imageUrl: null,
+                      rarity: 'classic', // Changed from 'common' to 'classic' for OG themes
+                      theme: theme,
+                    });
+                  });
+                
+                // Group by rarity
+                const themesByRarity = {
+                  mythic: [],
+                  legendary: [],
+                  epic: [],
+                  rare: [],
+                  common: [],
+                  classic: [], // Add classic section for OG themes
+                };
+                
+                allThemes.forEach(theme => {
+                  const rarity = theme.rarity.toLowerCase();
+                  if (themesByRarity[rarity]) {
+                    themesByRarity[rarity].push(theme);
+                  } else {
+                    themesByRarity.common.push(theme); // Fallback to common
+                  }
+                });
+                
+                // Rarity order (most rare first, classic at the end)
+                const rarityOrder = ['mythic', 'legendary', 'epic', 'rare', 'common', 'classic'];
+                const rarityLabels = {
+                  mythic: 'Mythic',
+                  legendary: 'Legendary',
+                  epic: 'Epic',
+                  rare: 'Rare',
+                  common: 'Common',
+                  classic: 'Classic', // Label for OG themes
+                };
+                
+                // Render sections by rarity
+                return rarityOrder.map(rarity => {
+                  const themes = themesByRarity[rarity];
+                  if (themes.length === 0) return null;
+                  
+                  const rarityColor = getRarityColor(rarity);
                   
                   return (
-                    <TouchableOpacity
-                      key={key}
-                      style={[
-                        styles.themeOption,
-                        { backgroundColor: theme.backgroundColor },
-                        selectedTheme === key && styles.themeOptionSelected,
-                        !canAfford && styles.themeOptionLocked,
-                      ]}
-                      onPress={() => handleThemeSelect(key)}
-                      disabled={!canAfford && !isUnlocked}
-                    >
-                      <View style={styles.themeOptionHeader}>
-                        <Text style={styles.themeOptionName}>{theme.name}</Text>
-                        {theme.cost > 0 && (
-                          <View style={styles.themeCostBadge}>
-                            {isUnlocked ? (
-                              <Ionicons name="checkmark-circle" size={16} color="#00ff00" />
-                            ) : (
-                              <>
-                                <Ionicons name="sparkles" size={14} color="#FFD700" />
-                                <Text style={styles.themeCostText}>{theme.cost}</Text>
-                              </>
-                            )}
-                          </View>
-                        )}
+                    <View key={rarity} style={styles.raritySection}>
+                      <View style={styles.raritySectionHeader}>
+                        <View style={[styles.raritySectionBadge, { backgroundColor: rarityColor + '40', borderColor: rarityColor }]}>
+                          <Text style={[styles.raritySectionTitle, { color: rarityColor }]}>
+                            {rarityLabels[rarity]}
+                          </Text>
+                        </View>
+                        <Text style={styles.raritySectionCount}>{themes.length} theme{themes.length !== 1 ? 's' : ''}</Text>
                       </View>
-                      {selectedTheme === key && (
-                        <View style={styles.themeOptionCheck}>
-                          <Ionicons name="checkmark-circle" size={24} color="#00ffff" />
-                        </View>
-                      )}
-                      {!canAfford && !isUnlocked && (
-                        <View style={styles.themeLockOverlay}>
-                          <Ionicons name="lock-closed" size={24} color="#fff" />
-                        </View>
-                      )}
-                    </TouchableOpacity>
+                      <View style={styles.themeOptionsGrid}>
+                        {themes.map((themeItem) => {
+                          const isSelected = selectedTheme === themeItem.themeKey;
+                          
+                          return (
+                            <TouchableOpacity
+                              key={themeItem.id}
+                              style={[
+                                styles.themeOption,
+                                themeItem.imageUrl 
+                                  ? {} 
+                                  : { backgroundColor: themeItem.backgroundColor, padding: 12 },
+                                isSelected && styles.themeOptionSelected,
+                              ]}
+                              onPress={() => {
+                                if (themeItem.type === 'rotating') {
+                                  handleRotatingThemeSelect(themeItem.themeKey);
+                                } else {
+                                  handleThemeSelect(themeItem.themeKey);
+                                }
+                              }}
+                            >
+                              {/* Show image if available (like store), otherwise use background color */}
+                              {themeItem.imageUrl ? (
+                                <ImageBackground
+                                  source={{ uri: normalizeImageUrl(themeItem.imageUrl) }}
+                                  style={styles.themeOptionImageBackground}
+                                  imageStyle={styles.themeOptionImageStyle}
+                                  resizeMode="cover"
+                                >
+                                  <View style={styles.themeOptionContent}>
+                                    <View style={styles.themeOptionHeader}>
+                                      <Text style={styles.themeOptionName}>{themeItem.name}</Text>
+                                    </View>
+                                    {isSelected && (
+                                      <View style={styles.themeOptionCheck}>
+                                        <Ionicons name="checkmark-circle" size={24} color="#00ffff" />
+                                      </View>
+                                    )}
+                                  </View>
+                                </ImageBackground>
+                              ) : (
+                                <>
+                                  <View style={styles.themeOptionHeader}>
+                                    <Text style={styles.themeOptionName}>{themeItem.name}</Text>
+                                  </View>
+                                  {isSelected && (
+                                    <View style={styles.themeOptionCheck}>
+                                      <Ionicons name="checkmark-circle" size={24} color="#00ffff" />
+                                    </View>
+                                  )}
+                                </>
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </View>
                   );
-                })}
-              </View>
+                });
+              })()}
+              
+              {/* Empty State */}
+              {rotatingThemes.length === 0 && Object.entries(PROFILE_THEMES).filter(([key]) => isThemeUnlocked(key)).length === 0 && (
+                <View style={styles.emptyThemesContainer}>
+                  <Ionicons name="color-palette-outline" size={48} color="#666" />
+                  <Text style={styles.emptyThemesText}>No themes in your collection yet</Text>
+                  <Text style={styles.emptyThemesSubtext}>Visit the store to purchase themes!</Text>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
       </Modal>
-      
+
     </View>
   );
 };
@@ -3080,17 +3849,38 @@ const ProfileScreen = () => {
 const styles = StyleSheet.create({
 
  
-  shareButton: {
+  storeButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(0, 255, 255, 0.08)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Same opacity background as bio section for visibility
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 20,
     marginTop: 20,
     marginBottom: 8,
-    borderWidth: 1.5,
+    borderWidth: 2,
+    borderColor: '#FFD700', // Yellow outline (same color as the text)
+    width: '100%',
+  },
+  storeButtonText: {
+    color: '#FFD700',
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginLeft: 8,
+    letterSpacing: 0.5,
+  },
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Same opacity background as bio section for visibility
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    marginTop: 12,
+    marginBottom: 8,
+    borderWidth: 1,
     borderColor: '#00ffff',
     width: '100%',
   },
@@ -3407,12 +4197,16 @@ const styles = StyleSheet.create({
     paddingLeft: 15,
     position: 'relative',
   },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   name: {
     fontSize: 24,
     color: '#fff',
     fontWeight: '700',
     letterSpacing: 0.3,
-    marginBottom: 6,
   },
   username: {
     color: '#00ffff',
@@ -3426,6 +4220,68 @@ const styles = StyleSheet.create({
     color: '#fff',
     opacity: 0.8,
     marginBottom: 12,
+  },
+  neuroActionsWrapper: {
+    marginTop: 16,
+    marginBottom: 12,
+    marginLeft: -20,
+    marginRight: -20,
+    paddingLeft: 12,
+    paddingRight: 12,
+  },
+  neuroActionsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    width: '100%',
+  },
+  neuroCounterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 2,
+    borderColor: '#FFD700',
+    flex: 2,
+    minWidth: 0,
+  },
+  neuroCounterText: {
+    color: '#FFD700',
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginLeft: 6,
+    letterSpacing: 0.3,
+    flexShrink: 1,
+  },
+  bondsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 2,
+    borderColor: '#00ffff',
+    flex: 1,
+    minWidth: 0,
+  },
+  bondsButtonText: {
+    color: '#00ffff',
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginLeft: 6,
+    letterSpacing: 0.3,
+  },
+  bondsButtonText: {
+    color: '#00ffff',
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginLeft: 6,
+    letterSpacing: 0.3,
   },
   editNameButton: {
     position: 'absolute',
@@ -3794,21 +4650,22 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   themeOptionsGrid: {
-    gap: 12,
+    gap: 10, // Reduced gap for tighter spacing
   },
   themeOption: {
     borderRadius: 16,
-    padding: 20,
     borderWidth: 2,
     borderColor: 'transparent',
     position: 'relative',
+    overflow: 'hidden', // Ensure image backgrounds are clipped to border radius
+    minHeight: 60, // Reduced height for slimmer cards
   },
   themeOptionSelected: {
     borderColor: '#00ffff',
   },
   themeOptionName: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15, // Slightly smaller font for slimmer appearance
     fontWeight: '600',
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 0, height: 1 },
@@ -3818,6 +4675,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 12,
     right: 12,
+  },
+  themeOptionImageBackground: {
+    width: '100%',
+    minHeight: 60, // Fixed height to match themeOption minHeight
+    maxHeight: 60, // Prevent infinite expansion
+  },
+  themeOptionImageStyle: {
+    borderRadius: 14,
+  },
+  themeOptionContent: {
+    flex: 1,
+    width: '100%',
+    padding: 12, // Reduced padding for slimmer cards
+    minHeight: 60,
   },
   themeOptionHeader: {
     flexDirection: 'row',
@@ -3871,6 +4742,118 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     flex: 1,
+  },
+  customBackgroundInfoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.08)',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.2)',
+    gap: 12,
+  },
+  customBackgroundInfoText: {
+    flex: 1,
+  },
+  customBackgroundInfoTitle: {
+    color: '#00ffff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  customBackgroundInfoSubtitle: {
+    color: '#999',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  customBackgroundInfoButton: {
+    padding: 8,
+  },
+  goToStoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.3)',
+    gap: 12,
+  },
+  goToStoreButtonText: {
+    color: '#00ffff',
+    fontSize: 16,
+    fontWeight: '600',
+    flex: 1,
+  },
+  emptyThemesContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  emptyThemesText: {
+    color: '#999',
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyThemesSubtext: {
+    color: '#666',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  themeSectionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 20,
+    marginBottom: 12,
+    paddingHorizontal: 20,
+  },
+  raritySection: {
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  raritySectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  raritySectionBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  raritySectionTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  raritySectionCount: {
+    color: '#999',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  rarityBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  rarityText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  themeOptionLocked: {
+    opacity: 0.6,
   },
   earnSparksButton: {
     backgroundColor: 'rgba(255, 215, 0, 0.2)',
@@ -4676,6 +5659,156 @@ const styles = StyleSheet.create({
     color: '#64748b',
     textAlign: 'center',
     marginTop: 8,
+  },
+  // Custom Background Styles
+  backgroundImageContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
+  },
+  backgroundImage: {
+    width: '100%',
+    height: '100%',
+  },
+  backgroundImageStyle: {
+    opacity: 0.4, // Moderate opacity for rotating theme images
+  },
+  backgroundImageStyleFullOpacity: {
+    opacity: 1.0, // Full opacity for custom backgrounds (original colors)
+  },
+  backgroundOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)', // Dark overlay to reduce brightness and improve text readability (only for rotating themes)
+  },
+  scrollViewWithBackground: {
+    backgroundColor: 'transparent',
+  },
+  uploadBackgroundButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffd700',
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    marginBottom: 24,
+    gap: 10,
+    shadowColor: '#ffd700',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  uploadBackgroundButtonDisabled: {
+    opacity: 0.6,
+  },
+  uploadBackgroundButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  backgroundsList: {
+    marginTop: 8,
+  },
+  backgroundsListTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  backgroundItem: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 14,
+    marginBottom: 12,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  backgroundItemImage: {
+    width: 100,
+    height: 120,
+    backgroundColor: '#333',
+  },
+  backgroundItemContent: {
+    flex: 1,
+    padding: 12,
+    justifyContent: 'space-between',
+  },
+  backgroundItemInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  backgroundItemDate: {
+    color: '#aaa',
+    fontSize: 12,
+  },
+  activeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0, 255, 0, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  activeBadgeText: {
+    color: '#00ff00',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  backgroundItemActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  backgroundActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(0, 255, 255, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#00ffff',
+  },
+  backgroundActionButtonDanger: {
+    backgroundColor: 'rgba(255, 68, 68, 0.1)',
+    borderColor: '#ff4444',
+  },
+  backgroundActionButtonText: {
+    color: '#00ffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  backgroundActionButtonTextDanger: {
+    color: '#ff4444',
+  },
+  emptyBackgroundsContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyBackgroundsText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyBackgroundsSubtext: {
+    color: '#666',
+    fontSize: 14,
+    textAlign: 'center',
   },
 });
 

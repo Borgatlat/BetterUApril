@@ -6,8 +6,8 @@ const isIphoneX = Platform.OS === 'ios' && (height >= 812 || width >= 812);
 /** Matches tab bar height in app/(tabs)/_layout.js */
 export const TAB_BAR_HEIGHT = Platform.OS === 'ios' ? (isIphoneX ? 80 : 60) : 60;
 
-/** Typical adaptive banner height until onLayout reports actual size */
-export const FALLBACK_BANNER_HEIGHT = 56;
+/** Typical standard adaptive banner height until onLayout reports actual size */
+export const FALLBACK_BANNER_HEIGHT = 50;
 
 export const FLOATING_AI_SIZE = 64;
 export const SCROLL_EXTRA_GAP = 28;

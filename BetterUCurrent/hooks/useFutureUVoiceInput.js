@@ -17,7 +17,18 @@ try {
 export function useFutureUVoiceInput({ onTranscript, disabled = false }) {
   const [listening, setListening] = useState(false);
   const onTranscriptRef = useRef(onTranscript);
+  const isMountedRef = useRef(true);
   onTranscriptRef.current = onTranscript;
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (ExpoSpeechRecognitionModule) {
+        ExpoSpeechRecognitionModule.stop().catch(() => {});
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!ExpoSpeechRecognitionModule) return undefined;
@@ -30,11 +41,11 @@ export function useFutureUVoiceInput({ onTranscript, disabled = false }) {
     });
 
     const endSub = ExpoSpeechRecognitionModule.addListener('end', () => {
-      setListening(false);
+      if (isMountedRef.current) setListening(false);
     });
 
     const errorSub = ExpoSpeechRecognitionModule.addListener('error', (event) => {
-      setListening(false);
+      if (isMountedRef.current) setListening(false);
       const message = event?.error ?? event?.message ?? 'Speech recognition failed';
       if (__DEV__) console.warn('[FutureU voice]', message);
     });
@@ -53,7 +64,7 @@ export function useFutureUVoiceInput({ onTranscript, disabled = false }) {
     } catch {
       /* ignore */
     }
-    setListening(false);
+    if (isMountedRef.current) setListening(false);
   }, []);
 
   const startListening = useCallback(async () => {
@@ -85,7 +96,7 @@ export function useFutureUVoiceInput({ onTranscript, disabled = false }) {
         interimResults: true,
         continuous: false,
       });
-      setListening(true);
+      if (isMountedRef.current) setListening(true);
     } catch (e) {
       Alert.alert('Voice input', String(e?.message || e || 'Could not start listening'));
     }

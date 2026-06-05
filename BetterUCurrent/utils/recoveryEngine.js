@@ -201,11 +201,18 @@ function inferMusclesFromExerciseName(name) {
   if (/\b(bench|push-up|pushup|fly|dip|pec)\b/.test(lower)) return 'Chest, Triceps';
   if (/\b(press|shoulder|overhead|lateral raise|arnold)\b/.test(lower)) return 'Shoulders';
   if (/\b(tricep|extension|skull crusher|pushdown)\b/.test(lower)) return 'Triceps';
+  // Calf isolation — check before generic `leg press` (e.g. "Leg Press Calf Raise").
+  if (
+    /\b(leg press calf|seated calf|standing calf|single.?leg calf|donkey calf|calf raise|calves|calf)\b/.test(
+      lower
+    )
+  ) {
+    return 'Calves';
+  }
   if (/\b(squat|lunge|leg press|leg extension|hack squat|goblet squat|step-up|step up)\b/.test(lower)) {
     return 'Quads, Glutes';
   }
   if (/\b(romanian|rdl|leg curl|hamstring|good morning|stiff.?leg)\b/.test(lower)) return 'Hamstrings, Glutes';
-  if (/\b(calf raise|calves|calf)\b/.test(lower)) return 'Calves';
   if (/\b(adductor|inner thigh|groin|copenhagen)\b/.test(lower)) return 'Quads, Hamstrings';
   if (/\b(shrug|trap|upright row)\b/.test(lower)) return 'Back, Shoulders';
   if (/\b(hip thrust|glute bridge)\b/.test(lower)) return 'Glutes, Hamstrings';

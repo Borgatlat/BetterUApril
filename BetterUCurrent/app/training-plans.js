@@ -1,9 +1,21 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { openWorkoutDetail } from '../utils/navigateToWorkoutDetail';
 
 const TrainingPlansScreen = () => {
   const router = useRouter();
+
+  const previewPlanWorkout = (workoutName) => {
+    openWorkoutDetail(router, {
+      name: workoutName,
+      workout_name: workoutName,
+      exercises: [],
+    }, {
+      startMode: 'type',
+      title: workoutName,
+    });
+  };
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -29,10 +41,7 @@ const TrainingPlansScreen = () => {
         </View>
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Push Day' }
-          })}
+          onPress={() => previewPlanWorkout('Push Day')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -61,10 +70,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Push Day' }
-            })}
+            onPress={() => previewPlanWorkout('Push Day')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -72,10 +78,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Pull Day' }
-          })}
+          onPress={() => previewPlanWorkout('Pull Day')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -104,10 +107,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Pull Day' }
-            })}
+            onPress={() => previewPlanWorkout('Pull Day')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -115,10 +115,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Leg Day' }
-          })}
+          onPress={() => previewPlanWorkout('Leg Day')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -147,10 +144,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Leg Day' }
-            })}
+            onPress={() => previewPlanWorkout('Leg Day')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -168,10 +162,7 @@ const TrainingPlansScreen = () => {
         </View>
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Upper Body 1' }
-          })}
+          onPress={() => previewPlanWorkout('Upper Body 1')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -200,10 +191,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Upper Body 1' }
-            })}
+            onPress={() => previewPlanWorkout('Upper Body 1')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -211,10 +199,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Lower Body 1' }
-          })}
+          onPress={() => previewPlanWorkout('Lower Body 1')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -243,10 +228,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Lower Body 1' }
-            })}
+            onPress={() => previewPlanWorkout('Lower Body 1')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -254,10 +236,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Upper Body 2' }
-          })}
+          onPress={() => previewPlanWorkout('Upper Body 2')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -286,10 +265,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Upper Body 2' }
-            })}
+            onPress={() => previewPlanWorkout('Upper Body 2')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -297,10 +273,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Lower Body 2' }
-          })}
+          onPress={() => previewPlanWorkout('Lower Body 2')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -329,10 +302,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Lower Body 2' }
-            })}
+            onPress={() => previewPlanWorkout('Lower Body 2')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -350,10 +320,7 @@ const TrainingPlansScreen = () => {
         </View>
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Strength Day 1' }
-          })}
+          onPress={() => previewPlanWorkout('Strength Day 1')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -382,10 +349,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Strength Day 1' }
-            })}
+            onPress={() => previewPlanWorkout('Strength Day 1')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -393,10 +357,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Strength Day 2' }
-          })}
+          onPress={() => previewPlanWorkout('Strength Day 2')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -425,10 +386,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Strength Day 2' }
-            })}
+            onPress={() => previewPlanWorkout('Strength Day 2')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -436,10 +394,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Strength Day 3' }
-          })}
+          onPress={() => previewPlanWorkout('Strength Day 3')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -468,10 +423,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Strength Day 3' }
-            })}
+            onPress={() => previewPlanWorkout('Strength Day 3')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -489,10 +441,7 @@ const TrainingPlansScreen = () => {
         </View>
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Chest & Triceps' }
-          })}
+          onPress={() => previewPlanWorkout('Chest & Triceps')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -521,10 +470,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Chest & Triceps' }
-            })}
+            onPress={() => previewPlanWorkout('Chest & Triceps')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -532,10 +478,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Back & Biceps' }
-          })}
+          onPress={() => previewPlanWorkout('Back & Biceps')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -564,10 +507,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Back & Biceps' }
-            })}
+            onPress={() => previewPlanWorkout('Back & Biceps')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -575,10 +515,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Legs' }
-          })}
+          onPress={() => previewPlanWorkout('Legs')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -607,10 +544,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Legs' }
-            })}
+            onPress={() => previewPlanWorkout('Legs')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>
@@ -618,10 +552,7 @@ const TrainingPlansScreen = () => {
 
         <TouchableOpacity 
           style={styles.planCard}
-          onPress={() => router.push({
-            pathname: '/active-workout',
-            params: { type: 'Shoulders & Arms' }
-          })}
+          onPress={() => previewPlanWorkout('Shoulders & Arms')}
         >
           <View>
             <View style={styles.workoutHeader}>
@@ -650,10 +581,7 @@ const TrainingPlansScreen = () => {
           </View>
           <TouchableOpacity 
             style={styles.startButton}
-            onPress={() => router.push({
-              pathname: '/active-workout',
-              params: { type: 'Shoulders & Arms' }
-            })}
+            onPress={() => previewPlanWorkout('Shoulders & Arms')}
           >
             <Text style={styles.startButtonText}>Start Workout</Text>
           </TouchableOpacity>

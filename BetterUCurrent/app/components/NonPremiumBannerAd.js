@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, Platform } from 'react-native';
-import Constants from 'expo-constants';
 import { useUser } from '../../context/UserContext';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
+import { FALLBACK_BANNER_HEIGHT } from '../../utils/bottomChromeInsets';
 import {
-  getBannerAdUnitId,
   isNativeMobileAdsSupported,
+  resolveBannerAdUnitId,
+  whenAdMobReady,
 } from '../../lib/adMob';
 import { useBannerAd } from '../../context/BannerAdContext';
+
+const MAX_LOAD_ATTEMPTS = 3;
 
 function loadBannerAdModule() {
   try {
@@ -25,45 +28,78 @@ export default function NonPremiumBannerAd({ style }) {
   const { isPremium, isLoading } = useUser();
   const { setBannerHeight, clearBannerHeight } = useBottomChromeInsets();
   const { suppressed } = useBannerAd();
+  const [sdkReady, setSdkReady] = useState(false);
   const [adLoaded, setAdLoaded] = useState(false);
   const [adFailed, setAdFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!isNativeMobileAdsSupported()) return undefined;
+    let cancelled = false;
+    whenAdMobReady().finally(() => {
+      if (!cancelled) setSdkReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (isLoading || isPremium || Platform.OS === 'web' || suppressed) {
     return null;
   }
-  if (!isNativeMobileAdsSupported()) return null;
-  if (adFailed) return null;
+  if (!isNativeMobileAdsSupported() || !sdkReady) {
+    return null;
+  }
+  if (adFailed) {
+    return null;
+  }
 
   const gma = loadBannerAdModule();
-  if (!gma?.BannerAd || !gma?.BannerAdSize || !gma?.TestIds) return null;
+  if (!gma?.BannerAd || !gma?.BannerAdSize) return null;
 
   const { BannerAd, BannerAdSize, TestIds } = gma;
-
-  const configuredUnitId = getBannerAdUnitId();
-  const adUnitId = __DEV__ ? TestIds.BANNER : (configuredUnitId || TestIds.BANNER);
+  const adUnitId = resolveBannerAdUnitId(TestIds);
+  // Standard anchored adaptive (~50px). LARGE adaptive is ~2× tall and looked oversized in the tab footer.
+  const bannerSize = BannerAdSize.ANCHORED_ADAPTIVE_BANNER ?? BannerAdSize.BANNER;
 
   const handleLayout = (e) => {
-    const h = e.nativeEvent.layout.height;
-    if (adLoaded && h > 0) setBannerHeight(h);
+    if (!adLoaded) return;
+    const h = Math.ceil(e.nativeEvent.layout.height || 0);
+    if (h > 0) setBannerHeight(h);
+  };
+
+  const handleAdFailedToLoad = (error) => {
+    clearBannerHeight();
+    setAdLoaded(false);
+    const nextAttempt = loadAttempt + 1;
+    console.warn(
+      '[AdMob] Banner failed to load:',
+      error?.message || error,
+      `(attempt ${nextAttempt}/${MAX_LOAD_ATTEMPTS})`
+    );
+    if (nextAttempt >= MAX_LOAD_ATTEMPTS) {
+      setAdFailed(true);
+    }
+    setLoadAttempt(nextAttempt);
   };
 
   return (
     <View
-      style={[styles.container, !adLoaded && styles.collapsed, style]}
+      style={[styles.container, !adLoaded && styles.loading, style]}
       onLayout={handleLayout}
     >
       <BannerAd
+        key={`banner-${loadAttempt}`}
         unitId={adUnitId}
-        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+        size={bannerSize}
         requestOptions={{
           requestNonPersonalizedAdsOnly: true,
         }}
-        onAdLoaded={() => setAdLoaded(true)}
-        onAdFailedToLoad={(error) => {
-          setAdFailed(true);
-          clearBannerHeight();
-          if (__DEV__) console.warn('[AdMob] Banner failed to load:', error?.message || error);
+        onAdLoaded={() => {
+          setAdLoaded(true);
+          setAdFailed(false);
         }}
+        onAdFailedToLoad={handleAdFailedToLoad}
         onAdOpened={() => {}}
         onAdClosed={() => {}}
       />
@@ -76,14 +112,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    paddingVertical: 4,
     backgroundColor: '#000',
+    overflow: 'hidden',
     zIndex: 8,
     elevation: 8,
   },
-  collapsed: {
-    height: 0,
-    paddingVertical: 0,
-    overflow: 'hidden',
+  // Reserve minimal space while the adaptive banner measures (height: 0 blocks loads).
+  loading: {
+    minHeight: FALLBACK_BANNER_HEIGHT,
+    opacity: 0.02,
   },
 });

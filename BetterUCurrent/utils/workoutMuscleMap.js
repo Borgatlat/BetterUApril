@@ -52,7 +52,7 @@ function expandUmbrellaLabel(rawLower) {
     return ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps'];
   }
   if (rawLower === 'full body') {
-    return ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Abs'];
+    return ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Quads', 'Hamstrings', 'Glutes', 'Calves', 'Abs'];
   }
   return null;
 }
@@ -163,6 +163,15 @@ const KEYWORD_MUSCLE_PATTERNS = [
   ['close-grip bench',        ['Triceps'],   ['Chest']],
   ['close grip bench',        ['Triceps'],   ['Chest']],
   ['bench press',             ['Chest'],     ['Shoulders', 'Triceps']],
+  // Calf isolation on leg press — feet low on platform; calves only (must precede `leg press`).
+  ['leg press calf raise',    ['Calves'],    []],
+  ['leg press calf raises',   ['Calves'],    []],
+  ['seated calf raise',       ['Calves'],    []],
+  ['seated calf raises',      ['Calves'],    []],
+  ['standing calf raise',     ['Calves'],    []],
+  ['standing calf raises',    ['Calves'],    []],
+  ['single leg calf raise',   ['Calves'],    []],
+  ['donkey calf raise',       ['Calves'],    []],
   ['leg press',               ['Quads'],     ['Glutes', 'Hamstrings']],
   ['incline press',           ['Chest'],     ['Shoulders', 'Triceps']],
   ['dumbbell shoulder press', ['Shoulders'], ['Triceps']],
@@ -429,10 +438,16 @@ function splitTargetMusclesField(raw) {
  *
  * @returns {{ primary: string[], secondary: string[] }}
  */
+/** Placeholder targets from failed lookups — must not block name-based inference. */
+function isPlaceholderTargetMuscles(raw) {
+  const lower = String(raw || '').trim().toLowerCase();
+  return !lower || lower === 'full body' || lower === 'various' || lower === 'general';
+}
+
 function getMuscleGroupsForExercise(exercise) {
-  // 1. Object with explicit targetMuscles wins.
+  // 1. Object with explicit targetMuscles wins (unless it's a generic placeholder).
   let raw = null;
-  if (exercise && typeof exercise === 'object') {
+  if (exercise && typeof exercise === 'object' && !isPlaceholderTargetMuscles(exercise.targetMuscles)) {
     raw = exercise.targetMuscles;
   }
 
@@ -440,7 +455,9 @@ function getMuscleGroupsForExercise(exercise) {
   const name = typeof exercise === 'string' ? exercise : exercise?.name;
   if (!raw) {
     const info = name ? getExerciseInfo(name) : null;
-    raw = info?.targetMuscles;
+    if (info?.targetMuscles && !isPlaceholderTargetMuscles(info.targetMuscles)) {
+      raw = info.targetMuscles;
+    }
   }
 
   // 3. If we have a `raw` value (from 1 or 2), parse it using the
@@ -514,6 +531,17 @@ function inferGroupsFromWorkoutName(workoutName) {
  * @param {string} [workoutName] – fallback used when nothing else matches
  * @returns {{ primary: string[], secondary: string[] }}
  */
+/**
+ * Human-readable target string for workout cards / active-workout rows.
+ * @param {string|{ name?: string, targetMuscles?: string }} exercise
+ * @returns {string}
+ */
+export function formatTargetMusclesForExercise(exercise) {
+  const split = getMuscleGroupsForExercise(exercise);
+  const groups = [...split.primary, ...split.secondary];
+  return groups.length > 0 ? groups.join(', ') : 'Full Body';
+}
+
 export function aggregateWorkoutMuscleGroups(exercises, workoutName) {
   const primary = new Set();
   const secondary = new Set();

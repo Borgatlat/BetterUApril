@@ -33,6 +33,23 @@ function isMissingTableError(error) {
   return code === "42P01" || msg.includes("focus_sessions") || msg.includes("does not exist");
 }
 
+function isFocusSessionsRlsDenied(error) {
+  const code = error?.code ?? "";
+  const msg = String(error?.message ?? "").toLowerCase();
+  return code === "42501" || msg.includes("row-level security") || msg.includes("permission denied");
+}
+
+function isFocusRpcProbeSuccess(error) {
+  const raw = String(error?.message ?? "").toLowerCase();
+  return (
+    raw.includes("not found") ||
+    raw.includes("not owned") ||
+    raw.includes("not completed") ||
+    raw.includes("points denied") ||
+    raw.includes("focus session not found")
+  );
+}
+
 /**
  * @param {string} userId
  * @param {string|null|undefined} orgId
@@ -66,6 +83,11 @@ export async function checkFocusSessionsAvailable() {
         "Focus Lock is not set up yet. Run Supabase migrations 20260601000300_focus_sessions.sql and 20260601000000_grade_level_and_focus_points.sql.",
       );
     }
+    if (isFocusSessionsRlsDenied(tableError)) {
+      throw new Error(
+        "Focus Lock access denied. Run Supabase migration 20260601000300_focus_sessions.sql and sign in again.",
+      );
+    }
     throw new Error(formatApiError(tableError));
   }
 
@@ -79,13 +101,9 @@ export async function checkFocusSessionsAvailable() {
         "Focus points are not set up yet. Run Supabase migration 20260601000300_focus_sessions.sql on your project.",
       );
     }
-    const msg = formatApiError(rpcError).toLowerCase();
-    if (
-      msg.includes("not found") ||
-      msg.includes("not owned") ||
-      msg.includes("not completed") ||
-      msg.includes("points denied")
-    ) {
+    // Probe uses a fake session id; RPC returns 42501 with "not owned" — check raw message
+    // before formatApiError, which would replace it with a generic permission string.
+    if (isFocusRpcProbeSuccess(rpcError)) {
       return true;
     }
     throw new Error(formatApiError(rpcError));

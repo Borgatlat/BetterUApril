@@ -143,7 +143,7 @@ export default function ReferralCodeScreen() {
                 console.log('Attempting to award Sparks to referred user directly...');
                 const { error: directError } = await supabase
                   .from('profiles')
-                  .update({ sparks_balance: (userProfile?.sparks_balance || 0) + 3 })
+                  .update({ neuros_balance: (userProfile?.neuros_balance || 0) + 3 })
                   .eq('id', currentUserId);
                 
                 if (directError) {

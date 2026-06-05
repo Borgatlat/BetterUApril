@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -14,22 +14,23 @@ import {
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Polyline, Marker, PROVIDER_GOOGLE } from '../../lib/MapView';
+import RunRouteMap from '../../components/RunRouteMap';
+import { hasDrawableRunPath } from '../../utils/runPathMap';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../context/AuthContext';
 import { useUnits } from '../../context/UnitsContext';
 import { LinearGradient } from 'expo-linear-gradient';
+import { shareActivityLink } from '../../lib/shareLinks';
 
 const { width, height } = Dimensions.get('window');
 
 const ActivityDetailScreen = () => {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
+  const { id, type: typeHint } = useLocalSearchParams();
   const { user } = useAuth();
   const { useImperial } = useUnits();
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [mapRegion, setMapRegion] = useState(null);
   const [showFullMap, setShowFullMap] = useState(false);
   const [error, setError] = useState(null);
   const [spotifyTracks, setSpotifyTracks] = useState([]);
@@ -158,13 +159,6 @@ const ActivityDetailScreen = () => {
       if (runData && !runError) {
         console.log('Found activity in runs table:', runData);
         setActivity({ ...runData, type: 'run' });
-        // Safely calculate map region with error handling
-        try {
-          calculateMapRegion(runData.path);
-        } catch (mapError) {
-          console.error('Error calculating map region:', mapError);
-          // Don't set error state for map issues - just log them
-        }
         await fetchUserProfile(runData.user_id);
         setSpotifyTracks([]);
         
@@ -294,60 +288,10 @@ const ActivityDetailScreen = () => {
     }
   };
 
-  const calculateMapRegion = (pathString) => {
-    try {
-      if (!pathString) {
-        console.log('No path data provided for map region calculation');
-        return;
-      }
-      
-      const path = typeof pathString === 'string' ? JSON.parse(pathString) : pathString;
-      if (!path || !Array.isArray(path) || path.length === 0) {
-        console.log('Invalid path data for map region calculation:', pathString);
-        return;
-      }
-
-      // Filter out invalid coordinates
-      const validCoords = path.filter(coord => 
-        coord && 
-        typeof coord.latitude === 'number' && 
-        typeof coord.longitude === 'number' &&
-        !isNaN(coord.latitude) && 
-        !isNaN(coord.longitude) &&
-        coord.latitude >= -90 && 
-        coord.latitude <= 90 &&
-        coord.longitude >= -180 && 
-        coord.longitude <= 180
-      );
-
-      if (validCoords.length === 0) {
-        console.log('No valid coordinates found in path');
-        return;
-      }
-
-      const lats = validCoords.map(coord => coord.latitude);
-      const lngs = validCoords.map(coord => coord.longitude);
-      
-      const minLat = Math.min(...lats);
-      const maxLat = Math.max(...lats);
-      const minLng = Math.min(...lngs);
-      const maxLng = Math.max(...lngs);
-      
-      const centerLat = (minLat + maxLat) / 2;
-      const centerLng = (minLng + maxLng) / 2;
-      const latDelta = Math.max((maxLat - minLat) * 1.2, 0.01);
-      const lngDelta = Math.max((maxLng - minLng) * 1.2, 0.01);
-      
-      setMapRegion({
-        latitude: centerLat,
-        longitude: centerLng,
-        latitudeDelta: latDelta,
-        longitudeDelta: lngDelta,
-      });
-    } catch (error) {
-      console.error('Error calculating map region:', error);
-    }
-  };
+  const hasRouteMap = useMemo(
+    () => activity?.type === 'run' && hasDrawableRunPath(activity?.path),
+    [activity?.type, activity?.path]
+  );
 
   const formatDuration = (seconds) => {
     // Round to nearest integer to avoid decimal places
@@ -418,14 +362,18 @@ const ActivityDetailScreen = () => {
   };
 
   const handleShare = async () => {
-    if (!activity) return;
+    if (!activity?.id) return;
 
-    const activityText = `${getActivityTitle(activity.type, activity.activity_type, activity.name)} - ${formatDistance(activity.distance_meters || 0)} in ${formatDuration(activity.duration_seconds || 0)}`;
-    
     try {
-      await Share.share({
-        message: activityText,
-        title: 'Check out my activity!'
+      const title = getActivityTitle(
+        activity.type,
+        activity.activity_type,
+        activity.name
+      );
+      await shareActivityLink({
+        id: activity.id,
+        type: activity.type,
+        title,
       });
     } catch (error) {
       console.error('Error sharing activity:', error);
@@ -760,8 +708,29 @@ const ActivityDetailScreen = () => {
            </View>
          </View>
 
+        {hasRouteMap && (
+          <View style={styles.mapSection}>
+            <Text style={styles.sectionTitle}>Route</Text>
+            <TouchableOpacity
+              style={styles.mapContainer}
+              onPress={() => setShowFullMap(true)}
+              activeOpacity={0.9}
+            >
+              <RunRouteMap
+                path={activity.path}
+                style={styles.map}
+                interactable={false}
+              />
+              <View style={styles.mapOverlay}>
+                <Ionicons name="expand-outline" size={20} color="#fff" />
+                <Text style={styles.mapOverlayText}>Tap to view full map</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* No Route Available for Apple Health Imports */}
-        {isAppleHealthImport && activity.type === 'run' && (!activity.path || !Array.isArray(activity.path) || activity.path.length <= 1) && (
+        {isAppleHealthImport && activity.type === 'run' && !hasRouteMap && (
           <View style={styles.noRouteSection}>
             <View style={styles.noRouteCard}>
               <View style={styles.noRouteIconContainer}>
@@ -772,89 +741,6 @@ const ActivityDetailScreen = () => {
                 GPS route data isn't available for activities imported from Apple Health
               </Text>
             </View>
-          </View>
-        )}
-
-        {/* Route Map - Only show if path has GPS data */}
-        {activity.path && Array.isArray(activity.path) && activity.path.length > 1 && activity.type === 'run' && (
-          <View style={styles.mapSection}>
-            <Text style={styles.sectionTitle}>Route</Text>
-            
-            <TouchableOpacity 
-              style={styles.mapContainer}
-              onPress={() => setShowFullMap(true)}
-              activeOpacity={0.9}
-            >
-              {mapRegion ? (
-                <MapView
-                  style={styles.map}
-                  region={mapRegion}
-                  provider={PROVIDER_GOOGLE}
-                  showsUserLocation={false}
-                  showsMyLocationButton={false}
-                  scrollEnabled={false}
-                  zoomEnabled={false}
-                  rotateEnabled={false}
-                  pitchEnabled={false}
-                >
-                  {(() => {
-                    try {
-                      const path = typeof activity.path === 'string' ? JSON.parse(activity.path) : activity.path;
-                      if (path && path.length > 1) {
-                        return (
-                          <Polyline
-                            coordinates={path}
-                            strokeColor="#00ffff"
-                            strokeWidth={4}
-                            lineDashPattern={[1]}
-                            zIndex={1}
-                            lineCap="round"
-                            lineJoin="round"
-                            geodesic={true}
-                          />
-                        );
-                      }
-                    } catch (error) {
-                      console.error('Error rendering route:', error);
-                    }
-                    return null;
-                  })()}
-                  
-                  {(() => {
-                    try {
-                      const path = typeof activity.path === 'string' ? JSON.parse(activity.path) : activity.path;
-                      if (path && path.length > 0) {
-                        return (
-                          <>
-                            <Marker coordinate={path[0]} title="Start">
-                              <View style={styles.startMarker} />
-                            </Marker>
-                            {path.length > 1 && (
-                              <Marker coordinate={path[path.length - 1]} title="End">
-                                <View style={styles.endMarker} />
-                              </Marker>
-                            )}
-                          </>
-                        );
-                      }
-                    } catch (error) {
-                      console.error('Error rendering markers:', error);
-                    }
-                    return null;
-                  })()}
-                </MapView>
-              ) : (
-                <View style={styles.mapPlaceholder}>
-                  <Ionicons name="map-outline" size={32} color="#00ffff" />
-                  <Text style={styles.mapPlaceholderText}>Route Map</Text>
-                </View>
-              )}
-              
-              <View style={styles.mapOverlay}>
-                <Ionicons name="expand-outline" size={20} color="#fff" />
-                <Text style={styles.mapOverlayText}>Tap to view full map</Text>
-              </View>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -1097,11 +983,10 @@ const ActivityDetailScreen = () => {
          </View>
       </ScrollView>
 
-      {/* Full Map Modal */}
-      {showFullMap && activity.path && (
+      {showFullMap && hasRouteMap && (
         <View style={styles.fullMapContainer}>
           <View style={styles.fullMapHeader}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.closeMapButton}
               onPress={() => setShowFullMap(false)}
             >
@@ -1110,66 +995,14 @@ const ActivityDetailScreen = () => {
             <Text style={styles.fullMapTitle}>Route Map</Text>
             <View style={{ width: 24 }} />
           </View>
-          
-          {mapRegion && (
-            <MapView
-              style={styles.fullMap}
-              region={mapRegion}
-              provider={PROVIDER_GOOGLE}
-              showsUserLocation={false}
-              showsMyLocationButton={false}
-              scrollEnabled={true}
-              zoomEnabled={true}
-              rotateEnabled={true}
-              pitchEnabled={true}
-            >
-              {(() => {
-                try {
-                  const path = typeof activity.path === 'string' ? JSON.parse(activity.path) : activity.path;
-                  if (path && path.length > 1) {
-                    return (
-                      <Polyline
-                        coordinates={path}
-                        strokeColor="#00ffff"
-                        strokeWidth={4}
-                        lineDashPattern={[1]}
-                        zIndex={1}
-                        lineCap="round"
-                        lineJoin="round"
-                        geodesic={true}
-                      />
-                    );
-                  }
-                } catch (error) {
-                  console.error('Error rendering full map route:', error);
-                }
-                return null;
-              })()}
-              
-              {(() => {
-                try {
-                  const path = typeof activity.path === 'string' ? JSON.parse(activity.path) : activity.path;
-                  if (path && path.length > 0) {
-                    return (
-                      <>
-                        <Marker coordinate={path[0]} title="Start">
-                          <View style={styles.startMarker} />
-                        </Marker>
-                        {path.length > 1 && (
-                          <Marker coordinate={path[path.length - 1]} title="End">
-                            <View style={styles.endMarker} />
-                          </Marker>
-                        )}
-                      </>
-                    );
-                  }
-                } catch (error) {
-                  console.error('Error rendering full map markers:', error);
-                }
-                return null;
-              })()}
-            </MapView>
-          )}
+
+          <RunRouteMap
+            path={activity.path}
+            style={styles.fullMap}
+            interactable
+            showsCompass
+            showsScale
+          />
         </View>
       )}
     </View>
@@ -1299,7 +1132,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   mapSection: {
-    marginTop: 20,
+    marginTop: 4,
   },
   mapContainer: {
     height: 220,

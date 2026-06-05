@@ -58,7 +58,15 @@ function LikertRow({ label, value, onChange }) {
  * Parent controls modal via modalOpen / onModalOpenChange; onPulseSaved refreshes banner.
  */
 export const StudentDailyPulseCard = forwardRef(function StudentDailyPulseCard(
-  { todayPulse = null, modalOpen: controlledOpen, onModalOpenChange, onPulseSaved, compact = false },
+  {
+    todayPulse = null,
+    modalOpen: controlledOpen,
+    onModalOpenChange,
+    onPulseSaved,
+    compact = false,
+    /** When true, only renders the pulse modal (banner + quick row handle UI elsewhere). */
+    surfaceHidden = false,
+  },
   ref,
 ) {
   const { workspace, profile, user } = useAuthSession();
@@ -149,46 +157,50 @@ export const StudentDailyPulseCard = forwardRef(function StudentDailyPulseCard(
   };
 
   return (
-    <View style={[styles.card, compact && styles.cardCompact]}>
-      <View style={styles.titleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.cardTitle}>Today's pulse</Text>
-          <Text style={styles.cardSubtitle}>Mood, stress & sleep · scale 1–5</Text>
+    <>
+      {!surfaceHidden ? (
+        <View style={[styles.card, compact && styles.cardCompact]}>
+          <View style={styles.titleRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle}>Today's pulse</Text>
+              <Text style={styles.cardSubtitle}>Mood, stress & sleep · scale 1–5</Text>
+            </View>
+            {loggedToday ? (
+              <Ionicons name="checkmark-circle" size={26} color={T.pulseDone} accessibilityLabel="Logged today" />
+            ) : null}
+          </View>
+
+          <TouchableOpacity
+            style={styles.primaryBtn}
+            onPress={() => setOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel={loggedToday ? "Update pulse" : "Log pulse"}
+          >
+            <Ionicons name="pulse-outline" size={20} color="#000" style={styles.btnIcon} />
+            <Text style={styles.primaryBtnText}>{loggedToday ? "Update pulse" : "Log pulse"}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={styles.crisisBtn}
+            onPress={onRequestCounselor}
+            disabled={requesting}
+            accessibilityRole="button"
+            accessibilityLabel="Request counselor support"
+          >
+            {requesting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Ionicons name="heart" size={20} color="#fff" />
+                <Text style={styles.crisisBtnText}>Request counselor support</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <Text style={styles.crisisHint}>Shares your name with your school counseling team.</Text>
         </View>
-        {loggedToday ? (
-          <Ionicons name="checkmark-circle" size={26} color={T.pulseDone} accessibilityLabel="Logged today" />
-        ) : null}
-      </View>
-
-      <TouchableOpacity
-        style={styles.primaryBtn}
-        onPress={() => setOpen(true)}
-        accessibilityRole="button"
-        accessibilityLabel={loggedToday ? "Update pulse" : "Log pulse"}
-      >
-        <Ionicons name="pulse-outline" size={20} color="#000" style={styles.btnIcon} />
-        <Text style={styles.primaryBtnText}>{loggedToday ? "Update pulse" : "Log pulse"}</Text>
-      </TouchableOpacity>
-
-      <View style={styles.divider} />
-
-      <TouchableOpacity
-        style={styles.crisisBtn}
-        onPress={onRequestCounselor}
-        disabled={requesting}
-        accessibilityRole="button"
-        accessibilityLabel="Request counselor support"
-      >
-        {requesting ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <>
-            <Ionicons name="heart" size={20} color="#fff" />
-            <Text style={styles.crisisBtnText}>Request counselor support</Text>
-          </>
-        )}
-      </TouchableOpacity>
-      <Text style={styles.crisisHint}>Shares your name with your school counseling team.</Text>
+      ) : null}
 
       <Modal visible={open} animationType="slide" transparent onRequestClose={() => setOpen(false)}>
         <KeyboardAvoidingView
@@ -232,7 +244,7 @@ export const StudentDailyPulseCard = forwardRef(function StudentDailyPulseCard(
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </View>
+    </>
   );
 });
 

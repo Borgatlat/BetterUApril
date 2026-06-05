@@ -87,6 +87,13 @@ const LoginScreen = () => {
   }, [response]);
 
   const handleAppleSignInSuccess = async (params) => {
+    if (loginMode === "school") {
+      Alert.alert(
+        "Use email and password",
+        "School sign-in requires your school email and password. Switch to Personal account to use Apple."
+      );
+      return;
+    }
     try {
       setIsLoading(true);
       setError("");
@@ -162,6 +169,13 @@ const LoginScreen = () => {
   };
 
   const handleAppleSignIn = async () => {
+    if (loginMode === "school") {
+      Alert.alert(
+        "Use email and password",
+        "School sign-in requires your school email and password. Switch to Personal account to use Apple."
+      );
+      return;
+    }
     try {
       setIsLoading(true);
       setError("");
@@ -524,7 +538,7 @@ const LoginScreen = () => {
         // Check onboarding status - handle case where profile doesn't exist
         const { data: profile, error: profileError } = await supabase
           .from('profiles')
-          .select('onboarding_completed')
+          .select('onboarding_completed, account_type, org_id')
           .eq('id', data.user.id)
           .single();
 
@@ -533,6 +547,15 @@ const LoginScreen = () => {
           
           // If profile doesn't exist (PGRST116 error), treat as not onboarded
           if (profileError.code === 'PGRST116') {
+            if (loginMode === "school") {
+              await supabase.auth.signOut();
+              setError("School account not set up yet. Sign up with your school email first.");
+              Alert.alert(
+                "School account",
+                "We verified your password, but your school profile is not ready yet. Create an account with your school email, then sign in here."
+              );
+              break;
+            }
             console.log('Profile not found, treating as not onboarded');
             router.replace('/(auth)/onboarding/welcome');
             return;
@@ -540,6 +563,21 @@ const LoginScreen = () => {
           
           setError('Failed to check onboarding status');
           break;
+        }
+
+        if (loginMode === "school") {
+          const schoolRoles = ["student", "counselor", "admin"];
+          const linkedToPartner =
+            profile?.org_id && schoolRoles.includes(profile?.account_type);
+          if (!linkedToPartner) {
+            await supabase.auth.signOut();
+            setError("This school email is not linked to a BetterU partner yet.");
+            Alert.alert(
+              "School not registered",
+              "Your password was correct, but this email domain is not registered with a partner school yet. Ask your school admin or switch to Personal account."
+            );
+            break;
+          }
         }
 
         console.log('Login successful, checking onboarding status...');
@@ -581,6 +619,13 @@ const LoginScreen = () => {
 
   // Native Apple login for standalone/dev builds
   const handleNativeAppleSignIn = async () => {
+    if (loginMode === "school") {
+      Alert.alert(
+        "Use email and password",
+        "School sign-in requires your school email and password. Switch to Personal account to use Apple."
+      );
+      return;
+    }
     try {
       setIsLoading(true);
       setError("");
@@ -653,52 +698,92 @@ const LoginScreen = () => {
                 : "Sign in to continue"}
             </Text>
 
-            <View style={styles.modeRow}>
-              <TouchableOpacity
-                style={[styles.modeChip, loginMode === "public" && styles.modeChipActive]}
-                onPress={() => setLoginMode("public")}
-                activeOpacity={0.85}
-                disabled={isLoading}
-              >
-                <Ionicons
-                  name="person-outline"
-                  size={18}
-                  color={loginMode === "public" ? "#000" : "#ccc"}
-                  style={styles.modeChipIcon}
-                />
-                <Text
-                  style={[styles.modeChipText, loginMode === "public" && styles.modeChipTextActive]}
+            <View style={styles.modeSwitcherWrap}>
+              <Text style={styles.modeSwitcherLabel}>Sign in as</Text>
+              <View style={styles.modeTrack}>
+                <TouchableOpacity
+                  style={[
+                    styles.modeSegment,
+                    loginMode === "public" && styles.modeSegmentActive,
+                  ]}
+                  onPress={() => setLoginMode("public")}
+                  activeOpacity={0.88}
+                  disabled={isLoading}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: loginMode === "public" }}
+                  accessibilityLabel="Personal account"
                 >
-                  Personal account
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modeChip, loginMode === "school" && styles.modeChipActive]}
-                onPress={() => setLoginMode("school")}
-                activeOpacity={0.85}
-                disabled={isLoading}
-              >
-                <Ionicons
-                  name="school-outline"
-                  size={18}
-                  color={loginMode === "school" ? "#000" : "#ccc"}
-                  style={styles.modeChipIcon}
-                />
-                <Text
-                  style={[styles.modeChipText, loginMode === "school" && styles.modeChipTextActive]}
+                  <Ionicons
+                    name={loginMode === "public" ? "person" : "person-outline"}
+                    size={20}
+                    color={loginMode === "public" ? "#001a1a" : "#8a8a8a"}
+                  />
+                  <Text
+                    style={[
+                      styles.modeSegmentTitle,
+                      loginMode === "public" && styles.modeSegmentTitleActive,
+                    ]}
+                  >
+                    Personal
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modeSegmentSubtitle,
+                      loginMode === "public" && styles.modeSegmentSubtitleActive,
+                    ]}
+                  >
+                    Gmail, iCloud, etc.
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.modeSegment,
+                    loginMode === "school" && styles.modeSegmentActive,
+                  ]}
+                  onPress={() => setLoginMode("school")}
+                  activeOpacity={0.88}
+                  disabled={isLoading}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: loginMode === "school" }}
+                  accessibilityLabel="School partner sign in"
                 >
-                  School sign in
-                </Text>
-              </TouchableOpacity>
+                  <Ionicons
+                    name={loginMode === "school" ? "school" : "school-outline"}
+                    size={20}
+                    color={loginMode === "school" ? "#001a1a" : "#8a8a8a"}
+                  />
+                  <Text
+                    style={[
+                      styles.modeSegmentTitle,
+                      loginMode === "school" && styles.modeSegmentTitleActive,
+                    ]}
+                  >
+                    School
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modeSegmentSubtitle,
+                      loginMode === "school" && styles.modeSegmentSubtitleActive,
+                    ]}
+                  >
+                    Partner schools
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {loginMode === "school" ? (
               <View style={styles.schoolHint}>
-                <Ionicons name="information-circle-outline" size={20} color="#00ffff" style={styles.schoolHintIcon} />
-                <Text style={styles.schoolHintText}>
-                  Use the same school-issued email your district uses with BetterU. Personal inboxes
-                  (Gmail, iCloud, etc.) are not accepted in this mode—switch to Personal account instead.
-                </Text>
+                <View style={styles.schoolHintBadge}>
+                  <Ionicons name="mail-outline" size={16} color="#00ffff" />
+                </View>
+                <View style={styles.schoolHintContent}>
+                  <Text style={styles.schoolHintTitle}>School email + password</Text>
+                  <Text style={styles.schoolHintText}>
+                    Enter your school-issued email and the password for your BetterU account.
+                    Apple Sign In is not used for partner school login.
+                  </Text>
+                </View>
               </View>
             ) : null}
 
@@ -711,23 +796,24 @@ const LoginScreen = () => {
               </View>
             )}
 
-            {/* Apple Sign In Button */}
-            {Platform.OS === 'ios' && (
-              <AppleAuthentication.AppleAuthenticationButton
-                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
-                cornerRadius={10}
-                style={[styles.appleButton, { height: 50, marginBottom: 16 }]}
-                onPress={handleAppleSignIn}
-                disabled={isLoading}
-              />
+            {/* Apple Sign In — personal accounts only (school mode requires password). */}
+            {Platform.OS === 'ios' && loginMode !== "school" && (
+              <>
+                <AppleAuthentication.AppleAuthenticationButton
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                  cornerRadius={10}
+                  style={[styles.appleButton, { height: 50, marginBottom: 16 }]}
+                  onPress={handleAppleSignIn}
+                  disabled={isLoading}
+                />
+                <View style={styles.dividerContainer}>
+                  <View style={styles.divider} />
+                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.divider} />
+                </View>
+              </>
             )}
-
-            <View style={styles.dividerContainer}>
-              <View style={styles.divider} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.divider} />
-            </View>
 
             <View style={styles.inputContainer}>
               <Ionicons name="mail-outline" size={22} color="#888" style={styles.inputIcon} />
@@ -904,55 +990,93 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: "center",
   },
-  modeRow: {
-    flexDirection: "row",
-    marginBottom: 16,
+  modeSwitcherWrap: {
+    marginBottom: 18,
   },
-  modeChip: {
-    flex: 1,
+  modeSwitcherLabel: {
+    color: "#7a7a7a",
+    fontSize: 12,
+    fontWeight: "600",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  modeTrack: {
     flexDirection: "row",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderRadius: 16,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    gap: 4,
+  },
+  modeSegment: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12,
+    paddingVertical: 14,
     paddingHorizontal: 8,
     borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.15)",
-    marginHorizontal: 5,
+    minHeight: 88,
   },
-  modeChipActive: {
+  modeSegmentActive: {
     backgroundColor: "#00ffff",
-    borderColor: "#00ffff",
+    shadowColor: "#00ffff",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  modeChipIcon: {
-    marginRight: 6,
+  modeSegmentTitle: {
+    color: "#d4d4d4",
+    fontSize: 15,
+    fontWeight: "700",
+    marginTop: 6,
   },
-  modeChipText: {
-    color: "#ccc",
-    fontSize: 13,
-    fontWeight: "600",
+  modeSegmentTitleActive: {
+    color: "#001a1a",
   },
-  modeChipTextActive: {
-    color: "#000",
+  modeSegmentSubtitle: {
+    color: "#666",
+    fontSize: 11,
+    fontWeight: "500",
+    marginTop: 2,
+    textAlign: "center",
+  },
+  modeSegmentSubtitleActive: {
+    color: "rgba(0,26,26,0.65)",
   },
   schoolHint: {
     flexDirection: "row",
     alignItems: "flex-start",
-    backgroundColor: "rgba(0,255,255,0.08)",
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
+    backgroundColor: "rgba(0,255,255,0.06)",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 18,
     borderWidth: 1,
-    borderColor: "rgba(0,255,255,0.2)",
+    borderColor: "rgba(0,255,255,0.22)",
   },
-  schoolHintIcon: {
-    marginRight: 10,
-    marginTop: 2,
+  schoolHintBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "rgba(0,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  schoolHintContent: {
+    flex: 1,
+  },
+  schoolHintTitle: {
+    color: "#e8ffff",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
   },
   schoolHintText: {
-    flex: 1,
-    color: "#b8e8e8",
+    color: "#9ecfcf",
     fontSize: 13,
     lineHeight: 19,
   },

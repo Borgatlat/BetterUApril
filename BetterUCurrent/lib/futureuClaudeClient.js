@@ -2,10 +2,13 @@ import { getAnthropicApiKey, getAnthropicApiKeyAsync } from '../utils/apiConfig'
 
 const CLAUDE_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 
-/** Haiku first for speed; Sonnet when Haiku is unavailable on the account. */
+/** Haiku first for speed; Sonnet fallbacks when Haiku is unavailable on the account. */
 export const CLAUDE_MODELS = [
+  'claude-haiku-4-5-20251001',
+  'claude-haiku-4-5',
   'claude-3-5-haiku-20241022',
   'claude-3-haiku-20240307',
+  'claude-sonnet-4-6',
   'claude-sonnet-4-20250514',
   'claude-3-5-sonnet-20241022',
 ];
@@ -48,9 +51,16 @@ function extractClaudeText(data) {
   return null;
 }
 
-function isModelNotFoundError(message) {
+/** True when Anthropic rejected the model id — try the next entry in CLAUDE_MODELS. */
+function shouldTryNextClaudeModel(message, status) {
+  if (status === 404) return true;
   const msg = String(message || '').toLowerCase();
-  return msg.includes('model') && (msg.includes('not_found') || msg.includes('not found') || msg.includes('invalid'));
+  if (!msg) return false;
+  if (msg.includes('not_found') || msg.includes('not found')) return true;
+  if (msg.includes('deprecated') || msg.includes('retired')) return true;
+  // API often returns bare `model: claude-…` when a snapshot was removed.
+  if (/^model:\s*claude-/i.test(String(message || '').trim())) return true;
+  return msg.includes('model') && msg.includes('invalid');
 }
 
 /**
@@ -83,7 +93,9 @@ async function callClaudeDirect(apiKey, systemPrompt, messages, maxTokens = 2500
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         const message = data?.error?.message || data?.error?.type || `HTTP ${response.status}`;
-        throw new Error(message);
+        const err = new Error(message);
+        err.status = response.status;
+        throw err;
       }
 
       const text = extractClaudeText(data);
@@ -91,7 +103,7 @@ async function callClaudeDirect(apiKey, systemPrompt, messages, maxTokens = 2500
       throw new Error('Unexpected response format from Claude');
     } catch (err) {
       lastError = err;
-      if (!isModelNotFoundError(err?.message)) break;
+      if (!shouldTryNextClaudeModel(err?.message, err?.status)) break;
     }
   }
 
@@ -136,6 +148,9 @@ export function formatFutureUClaudeError(err) {
   }
   if (msg.includes('429') || msg.includes('rate_limit')) {
     return 'Too many AI requests. Wait a minute and try again.';
+  }
+  if (msg.includes('model') && (msg.includes('not found') || msg.includes('not_found') || msg.includes('deprecated'))) {
+    return 'Claude model unavailable. Update the app or check your Anthropic account access.';
   }
   if (msg.includes('network request failed') || msg.includes('failed to fetch')) {
     return 'Network error. Check your connection and try again.';

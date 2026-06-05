@@ -35,6 +35,13 @@ export default function ModalLayout() {
         }}
       />
       <Stack.Screen
+        name="plan-your-week"
+        options={{
+          presentation: 'modal',
+          animation: 'slide_from_bottom',
+        }}
+      />
+      <Stack.Screen
         name="emmaus-request"
         options={{
           presentation: 'modal',

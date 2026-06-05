@@ -1,5 +1,32 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { getLocalDateString } from './dateUtils';
+
+const LOCAL_USAGE_KEY = (userId, featureType, date) =>
+  `ai_gen_usage_${userId}_${featureType}_${date}`;
+
+async function readLocalUsage(userId, featureType) {
+  try {
+    const raw = await AsyncStorage.getItem(
+      LOCAL_USAGE_KEY(userId, featureType, getLocalDateString()),
+    );
+    const n = parseInt(raw || '0', 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeLocalUsage(userId, featureType, count) {
+  try {
+    await AsyncStorage.setItem(
+      LOCAL_USAGE_KEY(userId, featureType, getLocalDateString()),
+      String(Math.max(0, count)),
+    );
+  } catch {
+    /* non-fatal */
+  }
+}
 
 /**
  * AI Generation Daily Limits
@@ -89,17 +116,24 @@ export async function checkAIGenerationLimit(featureType, isPremium) {
 
     if (error) {
       console.error('Error checking AI generation usage:', error);
-      // On error, allow generation (fail open) but log it
+      const localUsage = await readLocalUsage(user.id, featureType);
+      const remaining = Math.max(0, limit - localUsage);
       return {
-        canGenerate: true,
-        currentUsage: 0,
-        limit: limit,
-        remaining: limit,
-        error: error.message
+        canGenerate: localUsage < limit,
+        currentUsage: localUsage,
+        limit,
+        remaining,
+        error: error.message,
+        source: 'local',
       };
     }
 
-    const currentUsage = usageData || 0;
+    const remoteUsage = usageData || 0;
+    const localUsage = await readLocalUsage(user.id, featureType);
+    const currentUsage = Math.max(remoteUsage, localUsage);
+    if (localUsage > remoteUsage) {
+      await writeLocalUsage(user.id, featureType, currentUsage);
+    }
     const remaining = Math.max(0, limit - currentUsage);
     const canGenerate = currentUsage < limit;
 
@@ -147,27 +181,41 @@ export async function incrementAIGenerationUsage(featureType) {
     }
 
     // Call the database function to increment usage (use local date)
-    const { data: newCount, error } = await supabase.rpc('increment_ai_generation_usage', {
+    // Always bump local counter so the UI updates even if Supabase RPC skips future_u.
+    const localNext = (await readLocalUsage(user.id, featureType)) + 1;
+    await writeLocalUsage(user.id, featureType, localNext);
+
+    const { data: rpcCount, error } = await supabase.rpc('increment_ai_generation_usage', {
       p_user_id: user.id,
       p_feature_type: featureType,
       p_usage_date: getLocalDateString()
     });
 
     if (error) {
-      console.error('Error incrementing AI generation usage:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      console.warn('[AI Limits] Remote increment failed, using local count:', error.message || error);
+    } else if (typeof rpcCount === 'number' && rpcCount > localNext) {
+      await writeLocalUsage(user.id, featureType, rpcCount);
+      return { success: true, newCount: rpcCount, source: 'remote' };
     }
 
-    console.log(`[AI Limits] Incremented ${featureType} usage. New count: ${newCount}`);
+    console.log(`[AI Limits] Incremented ${featureType} usage. New count: ${localNext}`);
     return {
       success: true,
-      newCount: newCount || 0
+      newCount: localNext,
+      source: error ? 'local' : 'local+remote',
     };
   } catch (error) {
     console.error('Error in incrementAIGenerationUsage:', error);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const localNext = (await readLocalUsage(user.id, featureType)) + 1;
+        await writeLocalUsage(user.id, featureType, localNext);
+        return { success: true, newCount: localNext, source: 'local' };
+      }
+    } catch {
+      /* ignore */
+    }
     return {
       success: false,
       error: error.message

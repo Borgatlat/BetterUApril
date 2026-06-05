@@ -11,6 +11,7 @@ import {
   getFutureuChecklistByLocalDate,
 } from '../utils/futureuPlanStorage';
 import { NutritionTheme as T } from '../config/NutritionTheme';
+import { openWorkoutDetail } from '../utils/navigateToWorkoutDetail';
 
 const FUTURE_U_ACCENT = '#eab308';
 
@@ -26,7 +27,14 @@ const ACTIVITY_CONFIG = {
  * TodaysScheduleSection - Activity cards for today's scheduled items
  * Renders workout, mental session, run/walk/bike. Tapping starts that activity.
  */
-const TodaysScheduleSection = ({ refreshKey = 0, onFutureuChecklistChanged, accentColor = '#00ffff' }) => {
+const TodaysScheduleSection = ({
+  refreshKey = 0,
+  onFutureuChecklistChanged,
+  accentColor = '#00ffff',
+  compact = false,
+  maxPreviewItems = 2,
+  onSeeMore,
+}) => {
   const router = useRouter();
   const { user } = useAuth();
   const [activities, setActivities] = useState([]);
@@ -85,11 +93,33 @@ const TodaysScheduleSection = ({ refreshKey = 0, onFutureuChecklistChanged, acce
     }, [])
   );
 
+  const handleUndoActivity = async (activity) => {
+    setActivities((prev) =>
+      prev.map((a) =>
+        a.id === activity.id ? { ...a, completed: false, completed_at: null } : a
+      )
+    );
+    try {
+      await supabase
+        .from('scheduled_workouts')
+        .update({ completed: false, completed_at: null })
+        .eq('id', activity.id)
+        .eq('user_id', user.id);
+    } catch (e) {
+      console.error('Error undoing completion:', e);
+      await loadToday();
+    }
+    onFutureuChecklistChanged?.();
+  };
+
   const handleStartActivity = async (activity) => {
     const config = activityConfig[activity.activity_type];
     if (!config) return;
 
-    if (activity.completed) return;
+    if (activity.completed) {
+      await handleUndoActivity(activity);
+      return;
+    }
 
     setActivities(prev =>
       prev.map(a =>
@@ -110,20 +140,16 @@ const TodaysScheduleSection = ({ refreshKey = 0, onFutureuChecklistChanged, acce
     }
 
     if (activity.activity_type === 'workout') {
-      const workoutData = {
+      openWorkoutDetail(router, {
         name: activity.workout_name,
         workout_name: activity.workout_name,
         exercises: activity.workout_exercises || [],
         isScheduled: true,
         scheduledWorkoutId: activity.id,
-        scheduledDate: activity.scheduled_date
-      };
-      router.push({
-        pathname: '/active-workout',
-        params: {
-          custom: 'true',
-          workout: JSON.stringify(workoutData)
-        }
+        scheduledDate: activity.scheduled_date,
+      }, {
+        startMode: 'custom',
+        includeWorkoutId: false,
       });
       return;
     }
@@ -210,6 +236,91 @@ const TodaysScheduleSection = ({ refreshKey = 0, onFutureuChecklistChanged, acce
   if (loading) return null;
   if (activities.length === 0 && futureTodayItems.length === 0) return null;
 
+  const totalCount = activities.length + futureTodayItems.length;
+
+  if (compact) {
+    const previewActivities = activities.slice(0, maxPreviewItems);
+    const remainingSlots = Math.max(0, maxPreviewItems - previewActivities.length);
+    const previewFuture = remainingSlots > 0 ? futureTodayItems.slice(0, remainingSlots) : [];
+    const shownCount = previewActivities.length + previewFuture.length;
+    const hiddenCount = totalCount - shownCount;
+
+    return (
+      <View style={[styles.container, styles.containerCompact]}>
+        <Text style={styles.compactSummary}>
+          Today · {totalCount} scheduled
+        </Text>
+        {previewActivities.map((activity) => {
+          const config = activityConfig[activity.activity_type];
+          if (!config) return null;
+          const isCompleted = activity.completed === true;
+          const title = activity.title || activity.workout_name || config.label;
+
+          return (
+            <TouchableOpacity
+              key={activity.id}
+              style={[styles.card, styles.cardCompact, isCompleted && styles.cardCompleted]}
+              onPress={() => handleStartActivity(activity)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.iconWrap, styles.iconWrapCompact, { backgroundColor: config.color + '25' }]}>
+                <Ionicons
+                  name={isCompleted ? 'checkmark-circle' : config.icon}
+                  size={18}
+                  color={isCompleted ? '#00ff00' : config.color}
+                />
+              </View>
+              <View style={styles.compactContentCol}>
+                <Text style={[styles.title, styles.titleCompact, isCompleted && styles.titleCompleted]} numberOfLines={1}>
+                  {title}
+                </Text>
+                {isCompleted ? (
+                  <Text style={styles.compactUndoHint}>Tap to undo</Text>
+                ) : null}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+        {previewFuture.map((item) => {
+          const label = String(item.text || 'Plan step').trim();
+          const done = !!item.completed;
+          return (
+            <TouchableOpacity
+              key={String(item.id)}
+              style={[styles.card, styles.cardCompact, styles.futureCard, done && styles.cardCompleted]}
+              onPress={() => handleFutureItemPress(item)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.iconWrap, styles.iconWrapCompact, { backgroundColor: FUTURE_U_ACCENT + '25' }]}>
+                <Ionicons
+                  name={done ? 'checkmark-circle' : 'rocket-outline'}
+                  size={18}
+                  color={done ? '#00ff00' : FUTURE_U_ACCENT}
+                />
+              </View>
+              <View style={styles.compactContentCol}>
+                <Text style={[styles.title, styles.titleCompact, done && styles.titleCompleted]} numberOfLines={1}>
+                  {label}
+                </Text>
+                {done ? (
+                  <Text style={styles.compactUndoHint}>Tap to undo</Text>
+                ) : null}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+        {(hiddenCount > 0 || onSeeMore) ? (
+          <TouchableOpacity style={styles.seeMoreBtn} onPress={onSeeMore} activeOpacity={0.75}>
+            <Text style={[styles.seeMoreText, { color: accentColor }]}>
+              {hiddenCount > 0 ? `See ${hiddenCount} more` : 'See full schedule'}
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color={accentColor} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Today's Schedule</Text>
@@ -224,7 +335,6 @@ const TodaysScheduleSection = ({ refreshKey = 0, onFutureuChecklistChanged, acce
             key={activity.id}
             style={[styles.card, isCompleted && styles.cardCompleted]}
             onPress={() => handleStartActivity(activity)}
-            disabled={isCompleted}
             activeOpacity={0.7}
           >
             <View style={[styles.iconWrap, { backgroundColor: config.color + '25' }]}>
@@ -239,12 +349,15 @@ const TodaysScheduleSection = ({ refreshKey = 0, onFutureuChecklistChanged, acce
                 {title}
               </Text>
               <Text style={styles.subtitle}>
-                {isCompleted ? 'Completed' : `Tap to start ${config.label}`}
+                {isCompleted ? 'Completed — tap to undo' : `Tap to start ${config.label}`}
               </Text>
             </View>
             {!isCompleted && (
               <Ionicons name="play-circle" size={28} color={config.color} />
             )}
+            {isCompleted ? (
+              <Ionicons name="arrow-undo-outline" size={24} color={config.color} />
+            ) : null}
           </TouchableOpacity>
         );
       })}
@@ -297,6 +410,25 @@ const styles = StyleSheet.create({
     marginTop: T.sectionGap,
     marginBottom: T.sectionGap,
   },
+  containerCompact: {
+    marginTop: 8,
+    marginBottom: 0,
+  },
+  compactSummary: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: T.textMuted,
+    marginBottom: 8,
+  },
+  compactUndoHint: {
+    fontSize: 11,
+    color: T.textMuted,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  compactContentCol: {
+    flex: 1,
+  },
   header: {
     fontSize: 18,
     fontWeight: '700',
@@ -321,6 +453,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: T.cardBorder,
   },
+  cardCompact: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 6,
+    borderRadius: 12,
+  },
   cardCompleted: {
     opacity: 0.75,
     borderColor: 'rgba(0, 255, 0, 0.25)',
@@ -334,6 +472,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 14,
   },
+  iconWrapCompact: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    marginRight: 10,
+  },
   content: {
     flex: 1,
   },
@@ -342,6 +486,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: T.text,
   },
+  titleCompact: {
+    fontSize: 14,
+  },
   titleCompleted: {
     color: T.textMuted,
   },
@@ -349,6 +496,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: T.textMuted,
     marginTop: 4,
+  },
+  seeMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    marginTop: 2,
+  },
+  seeMoreText: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginRight: 2,
   },
 });
 

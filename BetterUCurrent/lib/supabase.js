@@ -1,3 +1,5 @@
+// Must load before @supabase/supabase-js — PKCE auth calls crypto.getRandomValues.
+import 'react-native-get-random-values';
 import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';

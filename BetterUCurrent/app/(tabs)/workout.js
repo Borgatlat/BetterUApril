@@ -48,6 +48,13 @@ try {
   Sharing = null;
 }
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storePendingActivitySummary } from '../../utils/pendingActivitySummary';
+import {
+  loadPendingActiveWorkout,
+  workoutHasProgress,
+  formatPendingWorkoutElapsed,
+  promptResumeOrStartNew,
+} from '../../utils/pendingActiveWorkout';
 import { getExerciseInfo } from '../../utils/exerciseLibrary';
 import {
   injuredMusclesOptions,
@@ -73,6 +80,11 @@ import ScheduledWorkoutModal from '../../components/ScheduledWorkoutModal';
 import TrainingSplitModal from '../../components/TrainingSplitModal';
 import RecoveryMap from '../../components/RecoveryMap';
 import { PREMIUM_WORKOUTS } from '../../utils/workoutCatalog';
+import {
+  isPremiumCatalogWorkout,
+  openWorkoutDetail,
+  shouldUseWorkoutIdForDetail,
+} from '../../utils/navigateToWorkoutDetail';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 import WorkoutLogs from './workout-logs';
 // Live Activities - shows real-time stats on lock screen during cardio
@@ -118,7 +130,7 @@ const formatGoalType = (goalType) => {
  * React.memo skips re-rendering when props are the same by reference, so when the parent
  * re-renders (e.g. from unrelated state), only cards whose workout or isFavorite changed re-render.
  */
-const RecommendedWorkoutCard = memo(function RecommendedWorkoutCard({ workout, isFavorite, onStart, onFavorite, styles }) {
+const RecommendedWorkoutCard = memo(function RecommendedWorkoutCard({ workout, isFavorite, onOpen, onFavorite, styles }) {
   return (
     <View style={styles.workoutCard}>
       <View style={styles.workoutHeader}>
@@ -148,9 +160,9 @@ const RecommendedWorkoutCard = memo(function RecommendedWorkoutCard({ workout, i
       </View>
       <TouchableOpacity
         style={styles.startButton}
-        onPress={() => onStart(workout)}
+        onPress={() => onOpen(workout)}
       >
-        <Text style={styles.startButtonText}>Start Workout</Text>
+        <Text style={styles.startButtonText}>View Workout</Text>
       </TouchableOpacity>
     </View>
   );
@@ -220,6 +232,7 @@ const WorkoutScreen = () => {
   const [favoriteWorkoutsIds, setFavoriteWorkoutsIds] = useState([]);
   const [recoveryMapRefreshKey, setRecoveryMapRefreshKey] = useState(0);
   const [workoutUsage, setWorkoutUsage] = useState({ currentUsage: 0, limit: 1, remaining: 1 });
+  const [pendingActiveWorkout, setPendingActiveWorkout] = useState(null);
   // daySkippedBecauseOfInjury and reccomendedWorkouts are now derived via useMemo below (no separate state)
  // Countdown timer state (3, 2, 1, null)
   
@@ -746,6 +759,41 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     }, [refreshWorkoutData])
   );
 
+  const refreshPendingActiveWorkout = useCallback(async () => {
+    const pending = await loadPendingActiveWorkout();
+    if (pending?.workout && workoutHasProgress(pending.workout, pending.elapsedTime)) {
+      setPendingActiveWorkout(pending);
+    } else {
+      setPendingActiveWorkout(null);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshPendingActiveWorkout();
+    }, [refreshPendingActiveWorkout])
+  );
+
+  const resumePendingWorkout = useCallback(() => {
+    router.push({ pathname: '/active-workout', params: { resume: 'true' } });
+  }, [router]);
+
+  const startWorkoutWithPendingCheck = useCallback(
+    (startNewWorkout) => {
+      promptResumeOrStartNew({
+        onResume: () => {
+          resumePendingWorkout();
+          refreshPendingActiveWorkout();
+        },
+        onStartNew: () => {
+          setPendingActiveWorkout(null);
+          startNewWorkout();
+        },
+      });
+    },
+    [resumePendingWorkout, refreshPendingActiveWorkout]
+  );
+
   const fetchWorkoutUsage = useCallback(async () => {
     if (isPremium !== undefined) {
       const usageInfo = await getAIGenerationUsageInfo(FEATURE_TYPES.WORKOUT, isPremium);
@@ -805,17 +853,28 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     );
   };
 
-  const startWorkout = (workout) => {
-    const exercises = Array.isArray(workout.exercises) ? workout.exercises : [];
+  const openWorkoutPreview = useCallback((workout, options = {}) => {
+    const exercises = Array.isArray(workout.exercises)
+      ? workout.exercises
+      : workout.workout_exercises || [];
     const filteredExercises = filterExercisesByInjury(exercises, injuredMuscleIds);
-    router.push({
-      pathname: '/active-workout',
-      params: {
-        custom: 'true',
-        workout: JSON.stringify({ ...workout, exercises: filteredExercises }),
-      },
+    const payload = {
+      ...workout,
+      exercises: filteredExercises,
+      workout_exercises: filteredExercises,
+    };
+    const premiumTemplate = isPremiumCatalogWorkout(workout);
+
+    openWorkoutDetail(router, payload, {
+      startMode: 'custom',
+      locked: premiumTemplate && !isPremium,
+      includeWorkoutId: shouldUseWorkoutIdForDetail(workout),
+      ...options,
     });
-  };
+  }, [router, injuredMuscleIds, isPremium]);
+
+  // Back-compat alias used by shared-workout flows on this screen.
+  const startWorkout = openWorkoutPreview;
 
   const handleGenerateWorkout = async () => {
     if (workoutUsage.currentUsage >= workoutUsage.limit) {
@@ -971,10 +1030,13 @@ const filterExercisesByInjury = (exercises, injuredIds) => {
     });
   }, []);
 
-  /** Stable callback for starting a recommended workout so RecommendedWorkoutCard (memo) can skip re-renders. */
-  const handleStartRecommended = useCallback((workout) => {
-    startWorkout({ name: workout.workout_name || workout.name, workout_name: workout.workout_name || workout.name, exercises: workout.exercises });
-  }, [router, injuredMuscleIds]);
+  /** Opens workout-detail (muscle map + exercise list) before active workout. */
+  const handleOpenRecommended = useCallback(
+    (workout) => {
+      openWorkoutPreview(workout);
+    },
+    [openWorkoutPreview]
+  );
 
   /**
    * Handles successful workout sharing
@@ -3003,23 +3065,27 @@ const startSprintStepTracking = async () => {
         setCardioLiveActivityId(null);
       }
 
-      // Navigate to activity summary (handles run, walk, bike, and timed distance)
-      // Convert distance to the correct unit for display
+      // Navigate to activity summary — store GPS path in AsyncStorage instead of
+      // the URL (large location arrays truncate and crash JSON.parse on summary).
       const displayDistance = useImperial ? distance * 0.621371 : distance;
-      
+      const endTime = Date.now();
+      const resolvedStartTime = startTime ?? startTimeRef.current ?? endTime - elapsed;
+
+      await storePendingActivitySummary({
+        locations,
+        distance: displayDistance,
+        duration: elapsed / 1000,
+        pace: averagePace,
+        unit: useImperial ? 'miles' : 'km',
+        activityType: wasSprintMode ? 'timed_distance' : activityType,
+        startTime: resolvedStartTime,
+        endTime,
+        sprintDistance: wasSprintMode ? distanceNeededToTravel : null,
+      });
+
       router.push({
         pathname: '/(modals)/activity-summary',
-        params: {
-          locations: JSON.stringify(locations),
-          distance: displayDistance,
-          duration: elapsed / 1000,
-          pace: averagePace,
-          unit: useImperial ? 'miles' : 'km',
-          activityType: wasSprintMode ? 'timed_distance' : activityType,
-          startTime: startTime,
-          endTime: Date.now(),
-          sprintDistance: wasSprintMode ? distanceNeededToTravel : null
-        }
+        params: { usePending: 'true' },
       });
       
       // Reset state
@@ -3212,6 +3278,24 @@ const startSprintStepTracking = async () => {
               </TouchableOpacity>
             </View>
 
+        {pendingActiveWorkout ? (
+          <View style={styles.resumeWorkoutBanner}>
+            <View style={styles.resumeWorkoutBannerContent}>
+              <Ionicons name="play-circle" size={28} color="#00ffff" />
+              <View style={styles.resumeWorkoutBannerText}>
+                <Text style={styles.resumeWorkoutBannerTitle}>Resume workout</Text>
+                <Text style={styles.resumeWorkoutBannerSubtitle} numberOfLines={1}>
+                  {pendingActiveWorkout.workout?.name || 'Workout'} ·{' '}
+                  {formatPendingWorkoutElapsed(pendingActiveWorkout.elapsedTime)}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity style={styles.resumeWorkoutButton} onPress={resumePendingWorkout}>
+              <Text style={styles.resumeWorkoutButtonText}>Resume</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* Quick Actions */}
         <View style={styles.quickActions}>
           {/*
@@ -3225,7 +3309,11 @@ const startSprintStepTracking = async () => {
           */}
           <TouchableOpacity
             style={styles.actionButton}
-            onPress={() => router.push({ pathname: '/active-workout', params: { freeform: 'true' } })}
+            onPress={() =>
+              startWorkoutWithPendingCheck(() =>
+                router.push({ pathname: '/active-workout', params: { freeform: 'true' } })
+              )
+            }
           >
             <View style={styles.actionButtonContent}>
               <Ionicons name="fitness-outline" size={26} color="#00ffff" />
@@ -3403,7 +3491,7 @@ const startSprintStepTracking = async () => {
                   style={styles.startButton}
                   onPress={() => handleStartSharedWorkout(workout)}
                 >
-                  <Text style={styles.startButtonText}>Start Workout</Text>
+                  <Text style={styles.startButtonText}>View Workout</Text>
                 </TouchableOpacity>
               </View>
               ))}
@@ -3547,18 +3635,18 @@ const startSprintStepTracking = async () => {
                     <TouchableOpacity
                       style={styles.startScheduledButton}
                       onPress={() =>
-                        startWorkout({
-                          id: todayScheduledWorkout.id,
+                        openWorkoutPreview({
                           name: todayScheduledWorkout.workout_name,
                           workout_name: todayScheduledWorkout.workout_name,
                           exercises: todayScheduledWorkout.workout_exercises,
                           isScheduled: true,
+                          scheduledWorkoutId: todayScheduledWorkout.id,
                         })
                       }
                     >
-                      <Ionicons name="play" size={20} color="#000" />
+                      <Ionicons name="eye-outline" size={20} color="#000" />
                       <Text style={styles.startScheduledButtonText}>
-                        Start Scheduled Workout
+                        View Scheduled Workout
                       </Text>
                     </TouchableOpacity>
                   </View>
@@ -3622,7 +3710,7 @@ const startSprintStepTracking = async () => {
                           isFavorite={favoriteWorkoutsIds.includes(
                             getFavoriteKey(workout)
                           )}
-                          onStart={handleStartRecommended}
+                          onOpen={handleOpenRecommended}
                           onFavorite={handleFavoriteWorkout}
                           styles={styles}
                         />
@@ -4988,6 +5076,49 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  resumeWorkoutBanner: {
+    marginHorizontal: 20,
+    marginTop: 12,
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 255, 255, 0.25)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  resumeWorkoutBannerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  resumeWorkoutBannerText: {
+    flex: 1,
+  },
+  resumeWorkoutBannerTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  resumeWorkoutBannerSubtitle: {
+    color: '#9aa0a6',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  resumeWorkoutButton: {
+    backgroundColor: '#00ffff',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  resumeWorkoutButtonText: {
+    color: '#000',
+    fontWeight: '700',
+    fontSize: 14,
   },
   quickActions: {
     flexDirection: 'column',

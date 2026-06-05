@@ -59,6 +59,25 @@ const saveUserTimezone = async (userId) => {
   }
 };
 
+// On login: forfeit any active bonds when the user's activity streak is 0.
+const checkAndForfeitBondsWhenStreakZero = async (userId) => {
+  if (!userId) return;
+  try {
+    const { data: count, error } = await supabase.rpc('forfeit_active_bonds_when_streak_zero', {
+      p_user_id: userId,
+    });
+    if (error) {
+      console.warn('[AuthContext] forfeit_active_bonds_when_streak_zero:', error.message);
+      return;
+    }
+    if (count > 0) {
+      console.log(`[AuthContext] Forfeited ${count} bond(s) on login (streak was 0).`);
+    }
+  } catch (e) {
+    console.warn('[AuthContext] checkAndForfeitBondsWhenStreakZero:', e);
+  }
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -194,6 +213,7 @@ export const AuthProvider = ({ children }) => {
       setProfile(normalized);
       setIsOnboardingComplete(!!normalized?.onboarding_completed);
       saveUserTimezone(userId);
+      checkAndForfeitBondsWhenStreakZero(userId);
     };
 
     const initializeAuth = async () => {

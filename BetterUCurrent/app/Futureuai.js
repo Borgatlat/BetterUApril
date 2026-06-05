@@ -10,15 +10,15 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  SafeAreaView,
+  Keyboard,
   Modal,
   Pressable,
+  BackHandler,
 } from 'react-native';
 import { Haptics } from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets, SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useUser } from '../context/UserContext';
 import { supabase } from '../lib/supabase';
@@ -27,12 +27,24 @@ import {
   incrementAIGenerationUsage,
   FEATURE_TYPES,
   getAIGenerationUsageInfo,
+  AI_GENERATION_LIMITS,
 } from '../utils/aiGenerationLimits';
 import { LoadingDots } from '../components/LoadingDots';
-import { extractPlanTasksAndDisplayText, appendAiDailyTasks } from '../utils/appendAiDailyTasks';
+import { extractPlanTasksAndDisplayText, appendAiDailyTasks, buildFallbackPlan, formatAssistantDisplayText, formatPlanMessageIntro } from '../utils/appendAiDailyTasks';
 import Markdown from 'react-native-markdown-display';
 import UserPlan from '../components/UserPlan';
 import { loadFutureuPlanArtifact, saveFutureuPlanArtifact } from '../utils/futureuPlanStorage';
+import {
+  listFutureuChatSessions,
+  createFutureuChatSession,
+  touchFutureuChatSession,
+  listFutureuChatMessages,
+  saveFutureuChatMessage,
+  updateFutureuChatMessage,
+  deleteFutureuChatMessage,
+  getActiveFutureuSessionId,
+  setActiveFutureuSessionId,
+} from '../utils/futureuChatStorage';
 import QuestionsArtifact from '../components/questionsArtifact';
 import {
   PROMPT_MODE,
@@ -44,6 +56,7 @@ import {
 } from '../lib/futureuPromptEngine';
 import { callFutureUClaude, isFutureUClaudeAvailable, formatFutureUClaudeError } from '../lib/futureuClaudeClient';
 import { useFutureUVoiceInput } from '../hooks/useFutureUVoiceInput';
+import { navigateToHome } from '../utils/safeNavigation';
 
 /** Keeps prompts under rough context limits and controls cost. */
 const MAX_MESSAGES_IN_CONTEXT = 44;
@@ -79,11 +92,11 @@ function isPersistedChatMessageId(id) {
 }
 
 const PRESET_PROMPTS = [
-  'I want to become a software engineer at a strong tech company',
-  'I want to get into Harvard for my intended major',
-  'I want to become a registered nurse',
-  'I want to build a startup with real revenue',
-  'I want to grow as a confident team leader',
+  { text: 'I want to become a software engineer at a strong tech company', icon: 'code-slash' },
+  { text: 'I want to get into Harvard for my intended major', icon: 'school' },
+  { text: 'I want to become a registered nurse', icon: 'medkit' },
+  { text: 'I want to build a startup with real revenue', icon: 'rocket' },
+  { text: 'I want to grow as a confident team leader', icon: 'people' },
 ];
 
 const Futureuai = () => {
@@ -91,12 +104,11 @@ const Futureuai = () => {
   const insets = useSafeAreaInsets();
   const { userProfile, isPremium } = useUser();
   const displayName = userProfile?.name?.trim() || 'friend';
-  /** Same UUID as auth.uid() — required for futureu_chat_* RLS (prefer profiles.id). */
+  /** Must match auth.uid() for Supabase RLS on futureu_chat_* tables. */
   const resolveChatUserId = useCallback(async () => {
-    const fromProfile = userProfile?.id || userProfile?.user_id;
-    if (fromProfile) return fromProfile;
     const { data: { user } } = await supabase.auth.getUser();
-    return user?.id ?? null;
+    if (user?.id) return user.id;
+    return userProfile?.id || userProfile?.user_id || null;
   }, [userProfile?.id, userProfile?.user_id]);
 
   const [input, setInput] = useState('');
@@ -124,6 +136,49 @@ const Futureuai = () => {
   const flatListRef = useRef(null);
   const currentSessionIdRef = useRef(null);
   const editingUserMessageIdRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  const { listening: voiceListening, toggleListening: toggleVoiceInput, stopListening } =
+    useFutureUVoiceInput({
+      onTranscript: setInput,
+      disabled: loading,
+    });
+
+  const handleGoBack = useCallback(() => {
+    Keyboard.dismiss();
+    setSidebarOpen(false);
+    setMessageActionTarget(null);
+    stopListening();
+    if (router.canGoBack?.()) {
+      router.back();
+    } else {
+      navigateToHome(router);
+    }
+  }, [router, stopListening]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (sidebarOpen) {
+        setSidebarOpen(false);
+        return true;
+      }
+      if (messageActionTarget) {
+        setMessageActionTarget(null);
+        return true;
+      }
+      handleGoBack();
+      return true;
+    });
+    return () => sub.remove();
+  }, [sidebarOpen, messageActionTarget, handleGoBack]);
 
   const { listening: voiceListening, toggleListening: toggleVoiceInput } = useFutureUVoiceInput({
     onTranscript: setInput,
@@ -141,14 +196,22 @@ const Futureuai = () => {
     };
   }, []);
 
+  const formatUsageHint = useCallback((info) => {
+    const used = info?.currentUsage ?? 0;
+    const limit = info?.limit ?? 0;
+    const remaining = info?.remaining ?? Math.max(0, limit - used);
+    return `${remaining} of ${limit} replies left today · ${used} used`;
+  }, []);
+
   const refreshFutureuUsage = useCallback(async () => {
     try {
       const info = await getAIGenerationUsageInfo(FEATURE_TYPES.FUTURE_U, isPremium);
-      setUsageHint(`Daily replies: ${info.remaining} of ${info.limit} left`);
+      if (!isMountedRef.current) return;
+      setUsageHint(formatUsageHint(info));
     } catch {
-      setUsageHint('');
+      if (isMountedRef.current) setUsageHint('');
     }
-  }, [isPremium]);
+  }, [isPremium, formatUsageHint]);
 
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId;
@@ -159,60 +222,69 @@ const Futureuai = () => {
   }, [editingUserMessageId]);
 
   useEffect(() => {
-    if (chatItems.length > 0) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
-    }
+    if (chatItems.length === 0) return undefined;
+    const timer = setTimeout(() => {
+      if (!isMountedRef.current) return;
+      try {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      } catch {
+        /* list may have unmounted */
+      }
+    }, 80);
+    return () => clearTimeout(timer);
   }, [chatItems, loading]);
 
   const loadSessions = useCallback(async () => {
     const uid = await resolveChatUserId();
+    if (!isMountedRef.current) return;
     if (!uid) {
       setChatSessions([]);
       setSessionsLoading(false);
       return;
     }
     setSessionsLoading(true);
-    const { data, error } = await supabase
-      .from('futureu_chat_sessions')
-      .select('id, title, created_at, updated_at')
-      .eq('user_id', uid)
-      .order('updated_at', { ascending: false })
-      .limit(100);
-    if (error) {
-      console.error('[FutureU] load sessions', error);
-      setChatSessions([]);
-    } else {
-      setChatSessions(data || []);
+    try {
+      const sessions = await listFutureuChatSessions(uid);
+      if (!isMountedRef.current) return;
+      setChatSessions(sessions);
+    } catch (err) {
+      console.error('[FutureU] load sessions', err);
+      if (isMountedRef.current) setChatSessions([]);
     }
-    setSessionsLoading(false);
+    if (isMountedRef.current) setSessionsLoading(false);
   }, [resolveChatUserId]);
 
   const loadSessionMessages = useCallback(
-    async (sessionId) => {
+    async (sessionId, { setActive = true } = {}) => {
       const uid = await resolveChatUserId();
-      if (!uid || !sessionId) return;
-      const { data, error } = await supabase
-        .from('futureu_chat_messages')
-        .select('id, role, content, suggested_tasks, tasks_added, created_at')
-        .eq('user_id', uid)
-        .eq('session_id', sessionId)
-        .order('created_at', { ascending: true });
-      if (error) {
-        console.error('[FutureU] load messages', error);
-        Alert.alert('Error', 'Could not load this chat session.');
-        return;
+      if (!isMountedRef.current || !uid || !sessionId) return;
+      try {
+        const mapped = await listFutureuChatMessages(uid, sessionId);
+        if (!isMountedRef.current) return;
+        const storedPlan = await loadFutureuPlanArtifact();
+        if (!isMountedRef.current) return;
+        if (storedPlan) {
+          setLatestPlanArtifact(storedPlan);
+          for (let i = mapped.length - 1; i >= 0; i -= 1) {
+            if (mapped[i].role === 'assistant' && !mapped[i].planArtifact) {
+              mapped[i].planArtifact = storedPlan;
+              break;
+            }
+          }
+        }
+        if (setActive) {
+          setCurrentSessionId(sessionId);
+          await setActiveFutureuSessionId(uid, sessionId);
+        }
+        if (!isMountedRef.current) return;
+        setChatItems(mapped);
+        setPlanIntakeComplete(mapped.length > 0);
+      } catch (err) {
+        console.error('[FutureU] load messages', err);
+        if (isMountedRef.current) {
+          Alert.alert('Error', 'Could not load this chat session.');
+        }
       }
-      const mapped = (data || []).map((m) => ({
-        id: m.id,
-        role: m.role,
-        text: m.content,
-        suggestedTasks: Array.isArray(m.suggested_tasks) ? m.suggested_tasks : undefined,
-        tasksAdded: !!m.tasks_added,
-      }));
-      setCurrentSessionId(sessionId);
-      setChatItems(mapped);
-      // Existing threads already have context in history; don’t force the intake card again.
-      setPlanIntakeComplete(mapped.length > 0);
     },
     [resolveChatUserId]
   );
@@ -223,13 +295,22 @@ const Futureuai = () => {
 
   useFocusEffect(
     useCallback(() => {
-      loadSessions();
-      refreshFutureuUsage();
-      const sid = currentSessionIdRef.current;
-      if (sid) {
-        loadSessionMessages(sid);
-      }
-    }, [loadSessions, loadSessionMessages, refreshFutureuUsage])
+      let cancelled = false;
+      (async () => {
+        await loadSessions();
+        await refreshFutureuUsage();
+        const uid = await resolveChatUserId();
+        if (!uid || cancelled) return;
+        const sid =
+          currentSessionIdRef.current || (await getActiveFutureuSessionId(uid));
+        if (sid && !cancelled) {
+          await loadSessionMessages(sid);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [loadSessions, loadSessionMessages, refreshFutureuUsage, resolveChatUserId])
   );
 
   const createSessionIfNeeded = async (firstText) => {
@@ -237,54 +318,40 @@ const Futureuai = () => {
     const uid = await resolveChatUserId();
     if (!uid) return null;
     const title = buildSessionTitle(firstText);
-    const { data, error } = await supabase
-      .from('futureu_chat_sessions')
-      .insert({ user_id: uid, title })
-      .select('id, title, updated_at, created_at')
-      .single();
-    if (error) {
-      console.error('[FutureU] create session', error);
-      return null;
-    }
+    const data = await createFutureuChatSession(uid, title);
     if (data) {
       setCurrentSessionId(data.id);
+      await setActiveFutureuSessionId(uid, data.id);
       setChatSessions((prev) => [data, ...prev.filter((s) => s.id !== data.id)]);
       return data.id;
     }
     return null;
   };
 
-  const saveMessage = async ({ sessionId, role, content, suggestedTasks = null, tasksAdded = false }) => {
+  const saveMessage = async ({
+    sessionId,
+    role,
+    content,
+    suggestedTasks = null,
+    tasksAdded = false,
+    planSnapshot = null,
+  }) => {
     const uid = await resolveChatUserId();
     if (!uid || !sessionId) return null;
-    const { data, error } = await supabase
-      .from('futureu_chat_messages')
-      .insert({
-        session_id: sessionId,
-        user_id: uid,
-        role,
-        content,
-        suggested_tasks: suggestedTasks,
-        tasks_added: tasksAdded,
-      })
-      .select('id')
-      .single();
-    if (error) {
-      console.error('[FutureU] save message', error);
-      return null;
-    }
-    return data?.id || null;
+    return saveFutureuChatMessage(uid, sessionId, {
+      role,
+      content,
+      suggestedTasks,
+      tasksAdded,
+      planSnapshot,
+    });
   };
 
   const touchSession = async (sessionId) => {
     const uid = await resolveChatUserId();
     if (!uid || !sessionId) return;
+    await touchFutureuChatSession(uid, sessionId);
     const nowIso = new Date().toISOString();
-    await supabase
-      .from('futureu_chat_sessions')
-      .update({ updated_at: nowIso })
-      .eq('id', sessionId)
-      .eq('user_id', uid);
     setChatSessions((prev) =>
       [...prev]
         .map((s) => (s.id === sessionId ? { ...s, updated_at: nowIso } : s))
@@ -298,9 +365,11 @@ const Futureuai = () => {
       {
         text: 'Clear',
         style: 'destructive',
-        onPress: () => {
+        onPress: async () => {
           setChatItems([]);
           setCurrentSessionId(null);
+          const uid = await resolveChatUserId();
+          if (uid) await setActiveFutureuSessionId(uid, null);
           setEditingUserMessageId(null);
           setInput('');
           setGoal('');
@@ -318,8 +387,10 @@ const Futureuai = () => {
 
 
 
-  const startNewChat = () => {
+  const startNewChat = async () => {
     setCurrentSessionId(null);
+    const uid = await resolveChatUserId();
+    if (uid) await setActiveFutureuSessionId(uid, null);
     setChatItems([]);
     setSidebarOpen(false);
     setEditingUserMessageId(null);
@@ -379,15 +450,10 @@ const Futureuai = () => {
             setInput('');
           }
           setEditingUserMessageId((cur) => (cur === delId ? null : cur));
-          if (isPersistedChatMessageId(delId)) {
+          if (isPersistedChatMessageId(delId) || String(delId).startsWith('fu_msg_')) {
             const uid = await resolveChatUserId();
             if (uid) {
-              const { error } = await supabase
-                .from('futureu_chat_messages')
-                .delete()
-                .eq('id', delId)
-                .eq('user_id', uid);
-              if (error) console.error('[FutureU] delete message', error);
+              await deleteFutureuChatMessage(uid, delId);
             }
           }
         },
@@ -404,19 +470,10 @@ const Futureuai = () => {
       Alert.alert('Empty message', 'Type something or tap Cancel.');
       return;
     }
-    if (isPersistedChatMessageId(id)) {
+    if (isPersistedChatMessageId(id) || String(id).startsWith('fu_msg_')) {
       const uid = await resolveChatUserId();
       if (uid) {
-        const { error } = await supabase
-          .from('futureu_chat_messages')
-          .update({ content: trimmed })
-          .eq('id', id)
-          .eq('user_id', uid);
-        if (error) {
-          console.error('[FutureU] update message', error);
-          Alert.alert('Error', 'Could not save your edit.');
-          return;
-        }
+        await updateFutureuChatMessage(uid, id, { content: trimmed });
       }
     }
     setChatItems((prev) => prev.map((m) => (m.id === id ? { ...m, text: trimmed } : m)));
@@ -427,6 +484,44 @@ const Futureuai = () => {
   const userMessageCount = useMemo(
     () => chatItems.filter((m) => m.role === 'user').length,
     [chatItems]
+  );
+
+  const isEmptyChat = chatItems.length === 0;
+
+  const activeModeOption = useMemo(
+    () => MODE_OPTIONS.find((o) => o.id === promptMode) || MODE_OPTIONS[0],
+    [promptMode]
+  );
+
+  const renderPathModeSelector = (compact = false) => (
+    <View style={compact ? styles.pathModeBarCompact : styles.pathModeBarInline}>
+      {!compact ? (
+        <Text style={styles.pathModeLabel}>How should Future U guide you?</Text>
+      ) : null}
+      <View style={[styles.pathModeSegment, compact && styles.pathModeSegmentCompact]}>
+        {MODE_OPTIONS.map((option) => {
+          const selected = promptMode === option.id;
+          return (
+            <TouchableOpacity
+              key={option.id}
+              style={[styles.pathModeBtn, selected && styles.pathModeBtnActive]}
+              onPress={() => setPromptMode(option.id)}
+              disabled={loading}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+            >
+              <Text style={[styles.pathModeBtnText, selected && styles.pathModeBtnTextActive]}>
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      {!compact ? (
+        <Text style={styles.pathModeHint}>{activeModeOption.description}</Text>
+      ) : null}
+    </View>
   );
 
   const handlePlanIntakeSubmit = useCallback(() => {
@@ -469,6 +564,13 @@ const Futureuai = () => {
         `Keep each message under ${MAX_USER_MESSAGE_CHARS} characters so the app stays reliable.`
       );
       return;
+    }
+
+    if (!planIntakeComplete) {
+      if (!goal.trim()) setGoal(trimmed);
+      if (!timeFrameDays) setTimeFrameDays('90');
+      if (!hoursPerWeek) setHoursPerWeek('7');
+      setPlanIntakeComplete(true);
     }
 
     const limitCheck = await checkAIGenerationLimit(FEATURE_TYPES.FUTURE_U, isPremium);
@@ -554,18 +656,40 @@ const Futureuai = () => {
         content: `USER_CONTEXT_JSON: ${JSON.stringify(userPayload)}`,
       });
 
-      const maxTokens = responseDepth === RESPONSE_DEPTH.QUICK ? 1400 : 2500;
+      const maxTokens = responseDepth === RESPONSE_DEPTH.QUICK ? 2400 : 4096;
       const raw = await callFutureUClaude({
         systemPrompt,
         messages: historyForModel,
         maxTokens,
       });
-      const { displayText, tasks: suggestedTasks, plan } = extractPlanTasksAndDisplayText(raw);
+      if (!isMountedRef.current) return;
+
+      let { displayText, tasks: suggestedTasks, plan } = extractPlanTasksAndDisplayText(raw);
+      displayText = formatAssistantDisplayText(displayText);
+
+      const goalText = (goal && goal.trim()) || trimmed;
+      if (!plan) {
+        plan = buildFallbackPlan({
+          goal: goalText,
+          timeframeDays: tf,
+          tasks: suggestedTasks,
+          displayText,
+        });
+      }
+      if (plan && suggestedTasks.length === 0 && Array.isArray(plan.checklist)) {
+        suggestedTasks = plan.checklist
+          .map((c) => String(c.text || '').trim())
+          .filter(Boolean)
+          .slice(0, 6);
+      }
 
       if (plan && typeof plan === 'object') {
+        if (!plan.goal) plan = { ...plan, goal: goalText };
         await saveFutureuPlanArtifact(plan, { appendHistory: true });
-        setLatestPlanArtifact(plan);
+        if (isMountedRef.current) setLatestPlanArtifact(plan);
       }
+
+      if (!isMountedRef.current) return;
 
       const tempAiId = `a-${Date.now()}`;
       setChatItems((prev) => [
@@ -573,9 +697,10 @@ const Futureuai = () => {
         {
           id: tempAiId,
           role: 'assistant',
-          text: displayText,
+          text: displayText || 'Your plan is ready — use the checklist below and tap items as you complete them.',
           suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
           tasksAdded: false,
+          planArtifact: plan || undefined,
         },
       ]);
 
@@ -583,9 +708,10 @@ const Futureuai = () => {
         const savedId = await saveMessage({
           sessionId,
           role: 'assistant',
-          content: displayText,
+          content: displayText || 'Your plan is ready — use the checklist below.',
           suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : null,
           tasksAdded: false,
+          planSnapshot: plan || null,
         });
         if (savedId) {
           setChatItems((prev) => prev.map((m) => (m.id === tempAiId ? { ...m, id: savedId } : m)));
@@ -596,16 +722,31 @@ const Futureuai = () => {
       const inc = await incrementAIGenerationUsage(FEATURE_TYPES.FUTURE_U);
       if (!inc.success) {
         console.warn('[FutureU] increment usage failed (limits may be out of sync):', inc.error);
+      } else if (typeof inc.newCount === 'number') {
+        const limit = isPremium
+          ? AI_GENERATION_LIMITS.PREMIUM.FUTURE_U
+          : AI_GENERATION_LIMITS.FREE.FUTURE_U;
+        setUsageHint(
+          formatUsageHint({
+            currentUsage: inc.newCount,
+            limit,
+            remaining: Math.max(0, limit - inc.newCount),
+          }),
+        );
       }
       await refreshFutureuUsage();
     } catch (error) {
       console.error('[FutureU]', error);
-      Alert.alert('Could not reach Future U', formatFutureuUserError(error));
-      setChatItems((prev) => prev.filter((item) => item.id !== userMessageStableId));
+      if (isMountedRef.current) {
+        Alert.alert('Could not reach Future U', formatFutureuUserError(error));
+        setChatItems((prev) => prev.filter((item) => item.id !== userMessageStableId));
+      }
     } finally {
-      setLoading(false);
-      loadSessions();
-      refreshFutureuUsage();
+      if (isMountedRef.current) {
+        setLoading(false);
+        loadSessions();
+        refreshFutureuUsage();
+      }
     }
   };
 
@@ -626,11 +767,7 @@ const Futureuai = () => {
       setChatItems((prev) => prev.map((m) => (m.id === messageId ? { ...m, tasksAdded: true } : m)));
       const uid = await resolveChatUserId();
       if (uid) {
-        await supabase
-          .from('futureu_chat_messages')
-          .update({ tasks_added: true })
-          .eq('id', messageId)
-          .eq('user_id', uid);
+        await updateFutureuChatMessage(uid, messageId, { tasks_added: true });
       }
     } catch (e) {
       console.error('[FutureU] append tasks', e);
@@ -638,160 +775,273 @@ const Futureuai = () => {
     }
   };
   const markdownStyles = {
-    body: { color: '#fff', fontSize: 14, lineHeight: 21 },
-    paragraph: { color: '#fff', fontSize: 14, lineHeight: 21, marginBottom: 6 },
-    strong: { fontWeight: '800', color: '#f5f3ff' },
-    heading1: { fontSize: 22, fontWeight: '900', color: '#fff', marginBottom: 10 },
-    heading2: { fontSize: 20, fontWeight: '900', color: '#fff', marginBottom: 8 },
-    heading3: { fontSize: 17, fontWeight: '800', color: '#e9d5ff', marginBottom: 6 },
-    bullet_list: { marginTop: 6, marginBottom: 8 },
-    list_item: { color: '#e2e8f0', marginBottom: 2 },
-    link: { color: '#22d3ee' },
+    body: { color: '#f1f5f9', fontSize: 16, lineHeight: 26 },
+    paragraph: { color: '#f1f5f9', fontSize: 16, lineHeight: 26, marginTop: 0, marginBottom: 14 },
+    strong: { fontWeight: '800', color: '#fff' },
+    heading1: { fontSize: 22, fontWeight: '900', color: '#fff', marginTop: 6, marginBottom: 12, lineHeight: 28 },
+    heading2: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: '#22d3ee',
+      marginTop: 18,
+      marginBottom: 10,
+      lineHeight: 24,
+      paddingBottom: 6,
+      borderBottomWidth: 1,
+      borderBottomColor: 'rgba(34, 211, 238, 0.2)',
+    },
+    heading3: { fontSize: 16, fontWeight: '800', color: '#e9d5ff', marginTop: 14, marginBottom: 8, lineHeight: 22 },
+    bullet_list: { marginTop: 6, marginBottom: 14 },
+    ordered_list: { marginTop: 6, marginBottom: 14 },
+    list_item: { color: '#e2e8f0', marginBottom: 10, flexDirection: 'row', lineHeight: 24 },
+    link: { color: '#22d3ee', textDecorationLine: 'underline' },
+    blockquote: {
+      backgroundColor: 'rgba(139, 92, 246, 0.12)',
+      borderLeftWidth: 3,
+      borderLeftColor: '#8b5cf6',
+      paddingLeft: 14,
+      paddingVertical: 4,
+      marginVertical: 12,
+    },
+  };
+
+  const planMarkdownStyles = {
+    ...markdownStyles,
+    body: { ...markdownStyles.body, fontSize: 15, lineHeight: 24 },
+    paragraph: { ...markdownStyles.paragraph, fontSize: 15, lineHeight: 24, marginBottom: 10 },
+    heading2: { ...markdownStyles.heading2, fontSize: 16, marginTop: 10 },
+  };
+
+  /** Tasks to offer for Daily Tasks — from TASKS_JSON or week-1 checklist on the plan. */
+  const resolveMessageTasks = (item) => {
+    if (Array.isArray(item.suggestedTasks) && item.suggestedTasks.length > 0) {
+      return item.suggestedTasks;
+    }
+    const checklist = item.planArtifact?.checklist;
+    if (!Array.isArray(checklist)) return [];
+    return checklist
+      .filter((c) => !c.completed && Number(c.due_day) <= 7)
+      .map((c) => String(c.text || '').trim())
+      .filter(Boolean)
+      .slice(0, 6);
   };
 
   const renderMessage = ({ item }) => {
     const isUser = item.role === 'user';
-    const showAddTasks =
-      !isUser &&
-      Array.isArray(item.suggestedTasks) &&
-      item.suggestedTasks.length > 0 &&
-      !item.tasksAdded;
+    const hasPlan = !isUser && !!item.planArtifact;
+    const introText = hasPlan ? formatPlanMessageIntro(item.text) : item.text;
+    const actionableTasks = resolveMessageTasks(item);
+    const showAddTasks = !isUser && actionableTasks.length > 0 && !item.tasksAdded;
 
-    return (
-      <View style={[styles.messageRow, isUser ? styles.userRow : styles.assistantRow]}>
-        {!isUser && (
-          <View style={styles.avatarWrap}>
-            <LinearGradient colors={['#06b6d4', '#00ffff']} style={styles.avatar}>
-              <Ionicons name="rocket" size={16} color="#0f172a" />
-            </LinearGradient>
-          </View>
-        )}
-        {isUser ? (
-          <Pressable
-            onLongPress={() => {
-              if (loading) return;
-              triggerMessageMenuHaptic();
-              setMessageActionTarget(item);
-            }}
-            delayLongPress={380}
-            disabled={loading}
-            accessibilityLabel="Your message. Long press for edit or delete."
-            accessibilityHint="Opens actions for this message"
-            style={({ pressed }) => [
-              styles.userBubblePressable,
-              pressed && !loading && styles.userBubblePressablePressed,
-            ]}
-          >
-            <View
-              style={[
-                styles.bubble,
-                styles.userBubble,
-                editingUserMessageId === item.id && styles.userBubbleEditing,
+    if (isUser) {
+      return (
+        <View style={[styles.messageRow, styles.userRow]}>
+          <View style={styles.userBubbleColumn}>
+            <Pressable
+              onLongPress={() => {
+                if (loading) return;
+                triggerMessageMenuHaptic();
+                setMessageActionTarget(item);
+              }}
+              delayLongPress={380}
+              disabled={loading}
+              accessibilityLabel="Your message. Long press for edit or delete."
+              accessibilityHint="Opens actions for this message"
+              style={({ pressed }) => [
+                styles.userBubblePressable,
+                pressed && !loading && styles.userBubblePressablePressed,
               ]}
             >
-              <Text style={[styles.bubbleText, styles.userBubbleText]}>{item.text}</Text>
-            </View>
-          </Pressable>
-        ) : (
-        <View style={[styles.bubble, styles.assistantBubble]}>
-          <Markdown style={markdownStyles}>{item.text}</Markdown>
-          {showAddTasks && (
-            <View style={styles.suggestedTasksPreview}>
-              <Text style={styles.suggestedTasksLabel}>Suggested for Daily Tasks</Text>
-              {item.suggestedTasks.map((t, idx) => (
-                <Text key={`${item.id}-t-${idx}`} style={styles.suggestedTaskLine}>
-                  • {t}
-                </Text>
-              ))}
-              <TouchableOpacity
-                style={styles.addTasksBtn}
-                onPress={() => handleAddSuggestedTasks(item.id, item.suggestedTasks)}
-                activeOpacity={0.85}
+              <View
+                style={[
+                  styles.bubble,
+                  styles.userBubble,
+                  editingUserMessageId === item.id && styles.userBubbleEditing,
+                ]}
               >
-                <Ionicons name="add-circle-outline" size={18} color="#e9d5ff" />
-                <Text style={styles.addTasksBtnText}>Add to Daily Tasks</Text>
-              </TouchableOpacity>
+                <Text style={[styles.bubbleText, styles.userBubbleText]}>{item.text}</Text>
+              </View>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    if (hasPlan) {
+      return (
+        <View style={styles.assistantPlanMessage}>
+          <View style={styles.assistantPlanHeader}>
+            <LinearGradient colors={['#06b6d4', '#00ffff']} style={styles.avatar}>
+              <Ionicons name="rocket" size={15} color="#0f172a" />
+            </LinearGradient>
+            <Text style={styles.assistantPlanLabel}>Future U</Text>
+          </View>
+
+          {introText ? (
+            <View style={styles.assistantIntroCard}>
+              <Markdown style={planMarkdownStyles}>{introText}</Markdown>
             </View>
-          )}
-          {!isUser && item.tasksAdded && item.suggestedTasks?.length > 0 && (
-            <View style={styles.addedBadge}>
+          ) : null}
+
+          <View style={styles.planCardShell}>
+            <UserPlan
+              externalPlan={item.planArtifact}
+              onPlanChange={(nextPlan) => {
+                setLatestPlanArtifact(nextPlan);
+                setChatItems((prev) =>
+                  prev.map((m) =>
+                    m.id === item.id ? { ...m, planArtifact: nextPlan } : m,
+                  ),
+                );
+                resolveChatUserId().then((uid) => {
+                  if (uid && item.id) {
+                    updateFutureuChatMessage(uid, item.id, { plan_snapshot: nextPlan });
+                  }
+                });
+              }}
+              chatEmbed
+              hideOpenButton
+            />
+          </View>
+
+          {showAddTasks ? (
+            <TouchableOpacity
+              style={styles.addTasksBtnWide}
+              onPress={() => handleAddSuggestedTasks(item.id, actionableTasks)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="add-circle-outline" size={20} color="#22d3ee" />
+              <Text style={styles.addTasksBtnText}>Add this week to Daily Tasks</Text>
+            </TouchableOpacity>
+          ) : null}
+          {item.tasksAdded && actionableTasks.length > 0 ? (
+            <View style={styles.addedBadgePlan}>
               <Ionicons name="checkmark-circle" size={16} color="#34d399" />
               <Text style={styles.addedBadgeText}>Added to Daily Tasks</Text>
             </View>
-          )}
+          ) : null}
         </View>
-        )}
+      );
+    }
+
+    return (
+      <View style={[styles.messageRow, styles.assistantRow]}>
+        <View style={styles.avatarWrap}>
+          <LinearGradient colors={['#06b6d4', '#00ffff']} style={styles.avatar}>
+            <Ionicons name="rocket" size={15} color="#0f172a" />
+          </LinearGradient>
+        </View>
+        <View style={styles.assistantBubbleColumn}>
+          <View style={[styles.bubble, styles.assistantBubble]}>
+            {item.text ? <Markdown style={markdownStyles}>{item.text}</Markdown> : null}
+            {showAddTasks && (
+              <View style={styles.suggestedTasksPreview}>
+                <Text style={styles.suggestedTasksLabel}>Add to Daily Tasks</Text>
+                {actionableTasks.map((t, idx) => (
+                  <Text key={`${item.id}-t-${idx}`} style={styles.suggestedTaskLine}>
+                    • {t}
+                  </Text>
+                ))}
+                <TouchableOpacity
+                  style={styles.addTasksBtn}
+                  onPress={() => handleAddSuggestedTasks(item.id, actionableTasks)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="add-circle-outline" size={18} color="#22d3ee" />
+                  <Text style={styles.addTasksBtnText}>Add this week to Daily Tasks</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {item.tasksAdded && actionableTasks.length > 0 && (
+              <View style={styles.addedBadge}>
+                <Ionicons name="checkmark-circle" size={16} color="#34d399" />
+                <Text style={styles.addedBadgeText}>Added to Daily Tasks</Text>
+              </View>
+            )}
+          </View>
+        </View>
       </View>
     );
   };
 
-  const chatListHeader = useMemo(
-    () => (
-      <View style={styles.chatListHeader}>
-        <UserPlan
-          externalPlan={latestPlanArtifact}
-          onPlanChange={setLatestPlanArtifact}
-          compact
-          chatEmbed
-          hideOpenButton
-        />
-      </View>
-    ),
-    [latestPlanArtifact]
-  );
+  const showPlanIntakeInEmpty = isEmptyChat && !planIntakeComplete && !loading;
 
-  const showPlanQuestions =
-    userMessageCount >= 1 && !planIntakeComplete && !loading;
-
-
-  
   return (
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={0}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
     >
       <LinearGradient colors={['#1a0b2e', '#2d1b4e', '#000']} style={styles.gradient}>
-        <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}> 
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.back()}>
+        <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
+          <View style={[styles.header, { paddingTop: Math.max(insets.top, 8) }]}>
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              onPress={handleGoBack}
+              accessibilityLabel="Go back"
+            >
               <Ionicons name="chevron-back" size={26} color="#fff" />
+            </TouchableOpacity>
+
+            <View style={styles.headerTitles}>
+              <View style={styles.headerTitleRow}>
+                <LinearGradient colors={['#06b6d4', '#00ffff']} style={styles.headerBadge}>
+                  <Ionicons name="rocket" size={14} color="#0f172a" />
+                </LinearGradient>
+                <Text style={styles.title}>Future U</Text>
+              </View>
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {usageHint || 'Your pathfinding coach'}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              onPress={() => setSidebarOpen(true)}
+              accessibilityLabel="Chat history"
+            >
+              <Ionicons name="time-outline" size={22} color="#c4b5fd" />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerIconBtn}
-              onPress={() => setSidebarOpen((v) => !v)}
-              activeOpacity={0.8}
+              onPress={startNewChat}
+              accessibilityLabel="New chat"
             >
-              <Ionicons name={sidebarOpen ? 'close' : 'menu'} size={22} color="#c4b5fd" />
-            </TouchableOpacity>
-            <View style={styles.headerTitles}>
-              <Text style={styles.title}>Future U</Text>
-              <Text style={styles.subtitle}>Pathfinding coach</Text>
-            </View>
-            <TouchableOpacity style={styles.headerIconBtn} onPress={clearChat}>
-              <Ionicons name="trash-outline" size={22} color="#ff6b6b" />
+              <Ionicons name="add-circle-outline" size={24} color="#22d3ee" />
             </TouchableOpacity>
           </View>
-          
 
-          {sidebarOpen && (
-            <View style={styles.sidebarOverlay}>
-              <View style={styles.sidebarPanel}>
+          <Modal
+            visible={sidebarOpen}
+            animationType="slide"
+            transparent
+            onRequestClose={() => setSidebarOpen(false)}
+          >
+            <View style={styles.sidebarModalRoot}>
+              <View style={[styles.sidebarPanel, { paddingTop: insets.top + 12 }]}>
                 <View style={styles.sidebarHeader}>
-                  <Text style={styles.sidebarTitle}>Previous Chats</Text>
-                  <TouchableOpacity style={styles.newChatBtn} onPress={startNewChat}>
-                    <Ionicons name="add" size={16} color="#e9d5ff" />
-                    <Text style={styles.newChatText}>New</Text>
+                  <Text style={styles.sidebarTitle}>Chat history</Text>
+                  <TouchableOpacity
+                    style={styles.sidebarCloseBtn}
+                    onPress={() => setSidebarOpen(false)}
+                  >
+                    <Ionicons name="close" size={22} color="#94a3b8" />
                   </TouchableOpacity>
                 </View>
+                <TouchableOpacity style={styles.newChatBtnWide} onPress={startNewChat}>
+                  <Ionicons name="add" size={18} color="#0f172a" />
+                  <Text style={styles.newChatTextWide}>Start new chat</Text>
+                </TouchableOpacity>
                 {sessionsLoading ? (
                   <View style={styles.sidebarLoading}>
                     <ActivityIndicator color="#22d3ee" size="small" />
+                    <Text style={styles.sidebarLoadingText}>Loading chats…</Text>
                   </View>
                 ) : (
                   <FlatList
                     data={chatSessions}
                     keyExtractor={(item) => item.id}
+                    contentContainerStyle={styles.sidebarListContent}
                     renderItem={({ item }) => (
                       <TouchableOpacity
                         style={[
@@ -803,54 +1053,45 @@ const Futureuai = () => {
                           setSidebarOpen(false);
                         }}
                       >
-                        <Text style={styles.sessionTitle} numberOfLines={1}>
-                          {item.title || 'Untitled chat'}
-                        </Text>
-                        <Text style={styles.sessionTime}>{formatSessionTime(item.updated_at)}</Text>
+                        <Ionicons
+                          name="chatbubble-ellipses-outline"
+                          size={16}
+                          color={currentSessionId === item.id ? '#22d3ee' : '#64748b'}
+                          style={styles.sessionIcon}
+                        />
+                        <View style={styles.sessionTextWrap}>
+                          <Text style={styles.sessionTitle} numberOfLines={2}>
+                            {item.title || 'Untitled chat'}
+                          </Text>
+                          <Text style={styles.sessionTime}>{formatSessionTime(item.updated_at)}</Text>
+                        </View>
                       </TouchableOpacity>
                     )}
                     ListEmptyComponent={
-                      <Text style={styles.sidebarEmpty}>No previous chats yet.</Text>
+                      <View style={styles.sidebarEmptyWrap}>
+                        <Ionicons name="chatbubbles-outline" size={36} color="#475569" />
+                        <Text style={styles.sidebarEmptyTitle}>No saved chats yet</Text>
+                        <Text style={styles.sidebarEmpty}>
+                          Send a message to start. Your conversations will show up here.
+                        </Text>
+                      </View>
                     }
                   />
                 )}
+                {!isEmptyChat ? (
+                  <TouchableOpacity style={styles.sidebarClearBtn} onPress={clearChat}>
+                    <Ionicons name="trash-outline" size={16} color="#fda4af" />
+                    <Text style={styles.sidebarClearText}>Clear current chat</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
-              <TouchableOpacity
+              <Pressable
                 style={styles.sidebarBackdrop}
                 onPress={() => setSidebarOpen(false)}
-                activeOpacity={1}
+                accessibilityLabel="Close chat history"
               />
             </View>
-          )}
-
-          <View style={styles.pathModeBar}>
-            <Text style={styles.pathModeLabel}>Path style</Text>
-            <View style={styles.pathModeSegment}>
-              {MODE_OPTIONS.map((option) => {
-                const selected = promptMode === option.id;
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    style={[styles.pathModeBtn, selected && styles.pathModeBtnActive]}
-                    onPress={() => setPromptMode(option.id)}
-                    disabled={loading}
-                    activeOpacity={0.85}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                  >
-                    <Text style={[styles.pathModeBtnText, selected && styles.pathModeBtnTextActive]}>
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <Text style={styles.pathModeHint}>
-              {promptMode === PROMPT_MODE.SPECIFIC
-                ? MODE_OPTIONS[0].description
-                : MODE_OPTIONS[1].description}
-            </Text>
-          </View>
+          </Modal>
 
           <FlatList
             ref={flatListRef}
@@ -859,23 +1100,25 @@ const Futureuai = () => {
             keyExtractor={(item) => item.id}
             renderItem={renderMessage}
             contentContainerStyle={styles.listContent}
-            ListHeaderComponent={chatListHeader}
             ListEmptyComponent={
               <View style={styles.emptyWrap}>
-                <Text style={styles.emptyTitle}>Who do you want to become?</Text>
-                <Text style={styles.emptyBody}>
-                  Choose Role model for one real exemplar, or General path for a typical playbook. Be
-                  specific (school, role, sport) so answers match your target—not a nearby substitute.
-                </Text>
-                <Text style={styles.emptyDisclaimer}>
-                  Planning & motivation only — not medical, legal, or financial advice.
-                </Text>
-                <Text style={styles.emptyHint}>Starter prompts below · menu icon for past chats</Text>
-              </View>
-            }
-            ListFooterComponent={
-              <>
-                {showPlanQuestions ? (
+                <LinearGradient
+                  colors={['rgba(34, 211, 238, 0.18)', 'rgba(139, 92, 246, 0.12)']}
+                  style={styles.emptyHero}
+                >
+                  <View style={styles.emptyHeroIcon}>
+                    <Ionicons name="sparkles" size={28} color="#22d3ee" />
+                  </View>
+                  <Text style={styles.emptyTitle}>Hey {displayName}, who do you want to become?</Text>
+                  <Text style={styles.emptyBody}>
+                    Future U builds a timed plan with milestones and a checklist you can tick off. Pick a
+                    path style, optionally set your timeline, then send your goal.
+                  </Text>
+                </LinearGradient>
+
+                {renderPathModeSelector(false)}
+
+                {showPlanIntakeInEmpty ? (
                   <QuestionsArtifact
                     goal={goal}
                     timeFrameDays={timeFrameDays}
@@ -888,25 +1131,55 @@ const Futureuai = () => {
                     disabled={loading}
                   />
                 ) : null}
-                {loading ? (
-                  <View style={[styles.messageRow, styles.assistantRow]}>
-                    <View style={styles.avatarWrap}>
-                      <LinearGradient colors={['#06b6d4', '#00ffff']} style={styles.avatar}>
-                        <Ionicons name="rocket" size={16} color="#0f172a" />
-                      </LinearGradient>
+
+                <Text style={styles.emptySectionLabel}>Or try a starter</Text>
+                {PRESET_PROMPTS.map((preset) => (
+                  <TouchableOpacity
+                    key={preset.text}
+                    style={styles.emptyPresetCard}
+                    onPress={() => sendText(preset.text)}
+                    disabled={loading || !!editingUserMessageId}
+                    activeOpacity={0.88}
+                  >
+                    <View style={styles.emptyPresetIconWrap}>
+                      <Ionicons name={preset.icon} size={18} color="#22d3ee" />
                     </View>
-                    <View style={[styles.bubble, styles.assistantBubble]}>
-                      <LoadingDots size={10} color="#22d3ee" />
-                    </View>
+                    <Text style={styles.emptyPresetText}>{preset.text}</Text>
+                    <Ionicons name="arrow-forward" size={16} color="#64748b" />
+                  </TouchableOpacity>
+                ))}
+
+                <Text style={styles.emptyDisclaimer}>
+                  Planning and motivation only — not medical, legal, or financial advice.
+                </Text>
+              </View>
+            }
+            ListFooterComponent={
+              loading ? (
+                <View style={[styles.messageRow, styles.assistantRow]}>
+                  <View style={styles.avatarWrap}>
+                    <LinearGradient colors={['#06b6d4', '#00ffff']} style={styles.avatar}>
+                      <Ionicons name="rocket" size={16} color="#0f172a" />
+                    </LinearGradient>
                   </View>
-                ) : null}
-              </>
+                  <View style={[styles.bubble, styles.assistantBubble, styles.thinkingBubble]}>
+                    <LoadingDots size={10} color="#22d3ee" />
+                    <Text style={styles.thinkingLabel}>Building your plan…</Text>
+                  </View>
+                </View>
+              ) : null
             }
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
           />
-          <BlurView intensity={40} tint="dark" style={[styles.inputBar, { paddingBottom: 12 + insets.bottom }]}>
+
+          <View style={[styles.inputBar, { paddingBottom: 12 + insets.bottom }]}>
+            {!isEmptyChat ? renderPathModeSelector(true) : null}
             <View style={styles.composerMetaRow}>
-              {usageHint ? <Text style={styles.usageHint}>{usageHint}</Text> : <View />}
+              <Text style={styles.composerHint} numberOfLines={1}>
+                {isEmptyChat ? 'Or type your goal below' : activeModeOption.label}
+              </Text>
               <TouchableOpacity
                 style={[
                   styles.depthChip,
@@ -943,29 +1216,14 @@ const Futureuai = () => {
             {editingUserMessageId ? (
               <View style={styles.editBanner}>
                 <Text style={styles.editBannerText}>Editing your message</Text>
-                <TouchableOpacity onPress={cancelEditingUserMessage} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <TouchableOpacity
+                  onPress={cancelEditingUserMessage}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
                   <Text style={styles.editBannerCancel}>Cancel</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
-            <FlatList
-              data={PRESET_PROMPTS}
-              horizontal
-              keyExtractor={(item, index) => `preset-${index}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.presetList}
-              renderItem={({ item: preset }) => (
-                <TouchableOpacity
-                  style={styles.presetChip}
-                  onPress={() => sendText(preset)}
-                  disabled={loading || !!editingUserMessageId}
-                >
-                  <Text style={styles.presetChipText} numberOfLines={2}>
-                    {preset}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            />
             <View style={styles.inputRow}>
               <TouchableOpacity
                 style={[
@@ -993,29 +1251,32 @@ const Futureuai = () => {
                       ? 'Edit your message…'
                       : 'Who do you want to become?'
                 }
-                placeholderTextColor="#666"
+                placeholderTextColor="#64748b"
                 value={input}
                 onChangeText={setInput}
                 multiline
-                maxLength={500}
+                maxLength={MAX_USER_MESSAGE_CHARS}
                 editable={!loading && !voiceListening}
               />
               <TouchableOpacity
-                style={[styles.sendBtn, (!input.trim() || loading) && styles.sendBtnDisabled]}
+                style={[
+                  styles.sendBtn,
+                  input.trim() && !loading ? styles.sendBtnActive : styles.sendBtnDisabled,
+                ]}
                 onPress={() => sendText(input)}
                 disabled={!input.trim() || loading}
                 accessibilityLabel={editingUserMessageId ? 'Save edited message' : 'Send message'}
               >
                 {loading ? (
-                  <ActivityIndicator color="#a855f7" size="small" />
+                  <ActivityIndicator color="#0f172a" size="small" />
                 ) : editingUserMessageId ? (
-                  <Ionicons name="checkmark" size={22} color="#86efac" />
+                  <Ionicons name="checkmark" size={22} color="#0f172a" />
                 ) : (
-                  <Ionicons name="send" size={20} color="#c4b5fd" />
+                  <Ionicons name="send" size={20} color={input.trim() ? '#0f172a' : '#64748b'} />
                 )}
               </TouchableOpacity>
             </View>
-          </BlurView>
+          </View>
 
           <Modal
             visible={!!messageActionTarget}
@@ -1082,86 +1343,167 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(139, 92, 246, 0.2)',
     zIndex: 5,
   },
   headerIconBtn: { padding: 8 },
-  headerTitles: { flex: 1, marginHorizontal: 4 },
-  title: { fontSize: 20, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
-  subtitle: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
-  usageHint: { fontSize: 11, color: '#86efac', fontWeight: '600', flex: 1 },
-  sidebarOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 20,
+  headerTitles: { flex: 1, marginHorizontal: 2, minWidth: 0 },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerBadge: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: { fontSize: 19, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
+  subtitle: { fontSize: 12, color: '#86efac', marginTop: 2, fontWeight: '600' },
+  sidebarModalRoot: {
+    flex: 1,
     flexDirection: 'row',
   },
-  sidebarBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.35)' },
+  sidebarBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
   sidebarPanel: {
-    width: 280,
-    backgroundColor: 'rgba(10, 10, 18, 0.97)',
+    width: '86%',
+    maxWidth: 320,
+    backgroundColor: '#0c0a14',
     borderRightWidth: 1,
     borderRightColor: 'rgba(139, 92, 246, 0.25)',
-    // Keep controls comfortably inside safe area and below top edge.
-    paddingTop: 32,
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 24,
   },
   sidebarHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 6,
-    marginTop: 24,
-    marginBottom: 8,
+    marginBottom: 14,
   },
-  sidebarTitle: { color: '#f5f3ff', fontSize: 16, fontWeight: '700' },
-  newChatBtn: {
+  sidebarTitle: { color: '#f5f3ff', fontSize: 18, fontWeight: '800' },
+  sidebarCloseBtn: { padding: 6 },
+  newChatBtnWide: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(196, 181, 253, 0.45)',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: 'rgba(139, 92, 246, 0.25)',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#22d3ee',
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginBottom: 16,
   },
-  newChatText: { color: '#e9d5ff', fontWeight: '700', fontSize: 12 },
-  sidebarLoading: { padding: 16, alignItems: 'center' },
-  sidebarEmpty: { color: '#94a3b8', fontSize: 13, padding: 12 },
+  newChatTextWide: { color: '#0f172a', fontWeight: '800', fontSize: 14 },
+  sidebarLoading: { padding: 24, alignItems: 'center', gap: 10 },
+  sidebarLoadingText: { color: '#94a3b8', fontSize: 13 },
+  sidebarListContent: { paddingBottom: 16 },
+  sidebarEmptyWrap: { paddingVertical: 32, paddingHorizontal: 8, alignItems: 'center' },
+  sidebarEmptyTitle: { color: '#e2e8f0', fontSize: 16, fontWeight: '700', marginTop: 12 },
+  sidebarEmpty: { color: '#94a3b8', fontSize: 13, textAlign: 'center', marginTop: 8, lineHeight: 19 },
+  sidebarClearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 8,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.35)',
+    backgroundColor: 'rgba(244, 63, 94, 0.08)',
+  },
+  sidebarClearText: { color: '#fda4af', fontWeight: '700', fontSize: 13 },
   sessionRow: {
-    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(139, 92, 246, 0.2)',
     backgroundColor: 'rgba(139, 92, 246, 0.07)',
-    paddingHorizontal: 10,
-    paddingVertical: 9,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
     marginBottom: 8,
   },
   sessionRowActive: {
     borderColor: '#22d3ee',
     backgroundColor: 'rgba(34, 211, 238, 0.12)',
   },
-  sessionTitle: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  sessionIcon: { marginTop: 2, marginRight: 10 },
+  sessionTextWrap: { flex: 1, minWidth: 0 },
+  sessionTitle: { color: '#fff', fontSize: 14, fontWeight: '600', lineHeight: 19 },
   sessionTime: { color: '#94a3b8', fontSize: 11, marginTop: 4 },
   chatListHeader: {
-    paddingBottom: 4,
+    paddingBottom: 8,
+    marginBottom: 4,
   },
-  pathModeBar: {
+  planEmbedWrap: {
+    marginTop: 14,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(34, 211, 238, 0.2)',
+  },
+  assistantPlanMessage: {
+    width: '100%',
+    marginVertical: 10,
+    gap: 12,
+  },
+  assistantPlanHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 2,
+  },
+  assistantPlanLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  assistantIntroCard: {
+    backgroundColor: 'rgba(14, 14, 22, 0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.22)',
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  planCardShell: {
+    width: '100%',
+  },
+  addTasksBtnWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
     paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(139, 92, 246, 0.18)',
+    borderRadius: 14,
+    backgroundColor: 'rgba(34, 211, 238, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(34, 211, 238, 0.35)',
+  },
+  addedBadgePlan: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+  },
+  pathModeBarInline: {
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  pathModeBarCompact: {
+    marginBottom: 10,
   },
   pathModeLabel: {
-    color: '#64748b',
-    fontSize: 11,
+    color: '#94a3b8',
+    fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
     marginBottom: 8,
   },
   pathModeSegment: {
@@ -1172,23 +1514,25 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(139, 92, 246, 0.25)',
     padding: 3,
   },
+  pathModeSegmentCompact: {
+    borderRadius: 10,
+  },
   pathModeBtn: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 9,
     borderRadius: 9,
     alignItems: 'center',
   },
   pathModeBtnActive: {
-    backgroundColor: 'rgba(34, 211, 238, 0.2)',
+    backgroundColor: 'rgba(34, 211, 238, 0.22)',
   },
-  pathModeBtnText: { color: '#94a3b8', fontSize: 13, fontWeight: '700' },
+  pathModeBtnText: { color: '#94a3b8', fontSize: 12, fontWeight: '700' },
   pathModeBtnTextActive: { color: '#e0f2fe' },
   pathModeHint: {
     color: '#64748b',
     fontSize: 12,
     lineHeight: 17,
     marginTop: 8,
-    paddingHorizontal: 2,
   },
   composerMetaRow: {
     flexDirection: 'row',
@@ -1196,6 +1540,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
     gap: 8,
+  },
+  composerHint: {
+    flex: 1,
+    color: '#64748b',
+    fontSize: 12,
+    fontWeight: '600',
   },
   depthChip: {
     flexDirection: 'row',
@@ -1215,19 +1565,71 @@ const styles = StyleSheet.create({
   depthChipText: { color: '#c4b5fd', fontSize: 11, fontWeight: '700' },
   depthChipTextActive: { color: '#0f172a' },
   listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 240,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 220,
     flexGrow: 1,
   },
-  emptyWrap: { paddingVertical: 20, paddingHorizontal: 4 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 10 },
+  emptyWrap: { paddingVertical: 8, paddingHorizontal: 2 },
+  emptyHero: {
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(34, 211, 238, 0.2)',
+  },
+  emptyHeroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  emptyTitle: { fontSize: 20, fontWeight: '800', color: '#fff', marginBottom: 8, lineHeight: 26 },
   emptyBody: { fontSize: 14, lineHeight: 22, color: '#cbd5e1' },
-  emptyDisclaimer: { fontSize: 12, color: '#64748b', marginTop: 12, lineHeight: 18 },
-  emptyHint: { fontSize: 13, color: '#22d3ee', marginTop: 14 },
-  messageRow: { flexDirection: 'row', marginVertical: 8, maxWidth: '92%' },
-  userRow: { alignSelf: 'flex-end' },
-  assistantRow: { alignSelf: 'flex-start' },
+  emptySectionLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginTop: 16,
+    marginBottom: 10,
+  },
+  emptyPresetCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.22)',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 8,
+  },
+  emptyPresetIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(34, 211, 238, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyPresetText: { flex: 1, color: '#e2e8f0', fontSize: 14, lineHeight: 20, fontWeight: '500' },
+  emptyDisclaimer: { fontSize: 11, color: '#64748b', marginTop: 16, lineHeight: 17 },
+  messageRow: {
+    flexDirection: 'row',
+    marginVertical: 8,
+    width: '100%',
+    paddingHorizontal: 0,
+  },
+  userRow: { justifyContent: 'flex-end' },
+  assistantRow: { justifyContent: 'flex-start', alignItems: 'flex-start' },
+  userBubbleColumn: { maxWidth: '88%', alignItems: 'flex-end' },
+  assistantBubbleColumn: { flex: 1, minWidth: 0, maxWidth: '92%' },
   userBubblePressable: {
     maxWidth: '100%',
     borderRadius: 20,
@@ -1235,55 +1637,72 @@ const styles = StyleSheet.create({
   userBubblePressablePressed: {
     opacity: 0.92,
   },
-  avatarWrap: { marginRight: 8, alignSelf: 'flex-start' },
+  avatarWrap: { marginRight: 10, alignSelf: 'flex-start', marginTop: 2 },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  bubble: { padding: 14, borderRadius: 20, maxWidth: '100%' },
-  userBubble: { backgroundColor: '#8b5cf6', borderTopRightRadius: 6 },
+  bubble: { paddingHorizontal: 18, paddingVertical: 16, borderRadius: 22, maxWidth: '100%' },
+  userBubble: {
+    backgroundColor: '#8b5cf6',
+    borderTopRightRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(196, 181, 253, 0.35)',
+  },
   userBubbleEditing: {
     borderWidth: 2,
     borderColor: '#22d3ee',
   },
   assistantBubble: {
-    backgroundColor: 'rgba(24, 24, 32, 0.92)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(139, 92, 246, 0.35)',
-    borderTopLeftRadius: 6,
+    backgroundColor: 'rgba(14, 14, 22, 0.98)',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.28)',
+    borderTopLeftRadius: 8,
+    width: '100%',
   },
-  bubbleText: { fontSize: 14, lineHeight: 21, color: '#fff' },
+  thinkingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    width: 'auto',
+    minWidth: 180,
+  },
+  thinkingLabel: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
+  bubbleText: { fontSize: 16, lineHeight: 24, color: '#f8fafc' },
   userBubbleText: { fontWeight: '500' },
   suggestedTasksPreview: {
     marginTop: 12,
-    paddingTop: 10,
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: 'rgba(34, 211, 238, 0.25)',
   },
   suggestedTasksLabel: {
-    color: '#c4b5fd',
+    color: '#22d3ee',
     fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 6,
+    fontWeight: '800',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
-  suggestedTaskLine: { color: '#e2e8f0', fontSize: 13, lineHeight: 20, marginBottom: 2 },
+  suggestedTaskLine: { color: '#e2e8f0', fontSize: 13, lineHeight: 20, marginBottom: 4 },
   addTasksBtn: {
     marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    alignSelf: 'flex-start',
-    paddingVertical: 10,
+    alignSelf: 'stretch',
+    paddingVertical: 12,
     paddingHorizontal: 14,
     borderRadius: 12,
-    backgroundColor: 'rgba(139, 92, 246, 0.25)',
+    backgroundColor: 'rgba(34, 211, 238, 0.14)',
     borderWidth: 1,
-    borderColor: 'rgba(196, 181, 253, 0.45)',
+    borderColor: 'rgba(34, 211, 238, 0.45)',
   },
-  addTasksBtnText: { color: '#f5f3ff', fontSize: 13, fontWeight: '700' },
+  addTasksBtnText: { color: '#e0f2fe', fontSize: 14, fontWeight: '800' },
   addedBadge: { marginTop: 10, flexDirection: 'row', alignItems: 'center', gap: 6 },
   addedBadgeText: { color: '#6ee7b7', fontSize: 12, fontWeight: '600' },
   inputBar: {
@@ -1292,9 +1711,10 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingTop: 12,
+    backgroundColor: 'rgba(8, 6, 16, 0.98)',
     borderTopWidth: 1,
-    borderTopColor: 'rgba(139, 92, 246, 0.2)',
+    borderTopColor: 'rgba(139, 92, 246, 0.25)',
   },
   editBanner: {
     flexDirection: 'row',
@@ -1305,34 +1725,23 @@ const styles = StyleSheet.create({
   },
   editBannerText: { color: '#a5f3fc', fontSize: 13, fontWeight: '700' },
   editBannerCancel: { color: '#fda4af', fontSize: 14, fontWeight: '700' },
-  presetList: { paddingBottom: 10, gap: 8 },
-  presetChip: {
-    backgroundColor: 'rgba(139, 92, 246, 0.12)',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginRight: 8,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(34, 211, 238, 0.35)',
-    maxWidth: 260,
-  },
-  presetChipText: { color: '#e2e8f0', fontSize: 12, fontWeight: '500' },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: 24,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 6,
     borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.25)',
+    borderColor: 'rgba(139, 92, 246, 0.28)',
   },
   input: {
     flex: 1,
     color: '#fff',
     fontSize: 16,
     maxHeight: 120,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
     marginHorizontal: 6,
   },
   micBtn: {
@@ -1350,11 +1759,15 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     padding: 12,
     borderRadius: 22,
-    backgroundColor: 'rgba(139, 92, 246, 0.35)',
+    backgroundColor: 'rgba(139, 92, 246, 0.25)',
     borderWidth: 1,
-    borderColor: 'rgba(196, 181, 253, 0.5)',
+    borderColor: 'rgba(139, 92, 246, 0.35)',
   },
-  sendBtnDisabled: { opacity: 0.35 },
+  sendBtnActive: {
+    backgroundColor: '#22d3ee',
+    borderColor: '#22d3ee',
+  },
+  sendBtnDisabled: { opacity: 0.4 },
   messageActionModalRoot: {
     flex: 1,
   },

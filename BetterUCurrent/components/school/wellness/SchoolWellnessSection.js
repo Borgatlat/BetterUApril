@@ -4,8 +4,9 @@ import { schoolWellnessTheme as T } from "../schoolWellnessTheme";
 
 /**
  * Groups related hub content with a titled section (same pattern as Spiritual tab).
+ * @param {boolean} [inCard] — wrap content in a rounded card surface
  */
-export function SchoolWellnessSection({ title, subtitle, children, last = false }) {
+export function SchoolWellnessSection({ title, subtitle, children, last = false, inCard = false }) {
   return (
     <View style={[styles.group, last && styles.groupLast]}>
       <View style={styles.header}>
@@ -14,36 +15,40 @@ export function SchoolWellnessSection({ title, subtitle, children, last = false 
         </Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       </View>
-      <View style={styles.body}>{children}</View>
+      <View style={[styles.body, inCard && styles.bodyCard]}>{children}</View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   group: {
-    marginBottom: T.spacing.xl,
-    paddingBottom: T.spacing.lg,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: T.border,
+    marginBottom: T.spacing.lg,
   },
   groupLast: {
-    borderBottomWidth: 0,
     marginBottom: T.spacing.sm,
-    paddingBottom: 0,
   },
-  header: { marginBottom: 14 },
+  header: { marginBottom: 12, paddingHorizontal: 2 },
   title: {
     color: T.text,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
-    letterSpacing: 1.1,
+    letterSpacing: 1.2,
     textTransform: "uppercase",
   },
   subtitle: {
     color: T.sub,
-    fontSize: 13,
-    marginTop: 4,
-    lineHeight: 18,
+    fontSize: 14,
+    marginTop: 5,
+    lineHeight: 20,
+    fontWeight: "500",
   },
-  body: { gap: 14 },
+  body: { gap: 12 },
+  bodyCard: {
+    backgroundColor: T.cardBg,
+    borderRadius: T.radiusXl,
+    borderWidth: 1,
+    borderColor: T.border,
+    padding: 14,
+    gap: 14,
+  },
 });

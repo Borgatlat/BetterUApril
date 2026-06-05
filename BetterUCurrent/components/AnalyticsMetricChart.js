@@ -23,9 +23,12 @@ export default function AnalyticsMetricChart({
 }) {
   const nums = useMemo(() => values.map((v) => Number(v) || 0), [values]);
   const max = useMemo(() => Math.max(1, ...nums), [nums]);
+  // Five evenly spaced tick positions (0 → max). Values are kept unrounded so
+  // grid lines stay evenly spaced; labels round separately. Small max values can
+  // round to duplicate labels — keys use index, not tick value.
   const gridTicks = useMemo(() => {
     const steps = 4;
-    return Array.from({ length: steps + 1 }, (_, i) => Math.round((max * (steps - i)) / steps));
+    return Array.from({ length: steps + 1 }, (_, i) => (max * (steps - i)) / steps);
   }, [max]);
 
   if (!labels.length) {
@@ -49,17 +52,22 @@ export default function AnalyticsMetricChart({
 
       <View style={styles.chartBody}>
         <View style={styles.yAxis}>
-          {gridTicks.map((tick) => (
-            <Text key={tick} style={styles.yTick}>
-              {formatValue(tick)}
-            </Text>
-          ))}
+          {gridTicks.map((tick, i) => {
+            const label = formatValue(Math.round(tick));
+            const prevLabel =
+              i > 0 ? formatValue(Math.round(gridTicks[i - 1])) : null;
+            return (
+              <Text key={`y-${i}`} style={styles.yTick}>
+                {label !== prevLabel ? label : ''}
+              </Text>
+            );
+          })}
         </View>
 
         <View style={styles.plotArea}>
           <View style={styles.grid}>
-            {gridTicks.map((tick) => (
-              <View key={`g-${tick}`} style={styles.gridLine} />
+            {gridTicks.map((_, i) => (
+              <View key={`g-${i}`} style={styles.gridLine} />
             ))}
           </View>
 

@@ -1,3 +1,6 @@
+// Supabase PKCE (password reset, OAuth) needs Web Crypto getRandomValues — not built into React Native.
+import 'react-native-get-random-values';
+
 // Register LiveKit WebRTC globals so livekit-client can use native WebRTC (RTCPeerConnection, etc.).
 // Required before any Room.connect() on native (iOS/Android). On web we skip because the browser
 // provides WebRTC. Try/catch so the app still loads if the native module isn't linked (e.g. Expo Go).

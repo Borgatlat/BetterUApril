@@ -19,6 +19,7 @@ import {
   deleteScheduledWorkout,
   addRestDay,
 } from '../utils/scheduledWorkoutHelpers';
+import { openWorkoutDetail } from '../utils/navigateToWorkoutDetail';
 
 /**
  * ScheduledWorkoutModal Component
@@ -253,18 +254,15 @@ const ScheduledWorkoutModal = ({
   const handleStartWorkout = () => {
     if (!existingWorkout) return;
 
-    router.push({
-      pathname: '/active-workout',
-      params: {
-        custom: 'true',
-        workout: JSON.stringify({
-          id: existingWorkout.id,
-          name: existingWorkout.workout_name,
-          workout_name: existingWorkout.workout_name,
-          exercises: existingWorkout.workout_exercises,
-          isScheduled: true
-        })
-      }
+    openWorkoutDetail(router, {
+      name: existingWorkout.workout_name,
+      workout_name: existingWorkout.workout_name,
+      exercises: existingWorkout.workout_exercises || [],
+      isScheduled: true,
+      scheduledWorkoutId: existingWorkout.id,
+    }, {
+      startMode: 'custom',
+      includeWorkoutId: false,
     });
     onClose();
   };
@@ -450,7 +448,7 @@ const ScheduledWorkoutModal = ({
                     onPress={handleStartWorkout}
                   >
                     <Ionicons name="play-circle" size={24} color="#000" />
-                    <Text style={styles.primaryButtonText}>Start Workout</Text>
+                    <Text style={styles.primaryButtonText}>View Workout</Text>
                   </TouchableOpacity>
 
                   <View style={styles.secondaryButtonsRow}>

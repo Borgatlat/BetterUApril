@@ -4,6 +4,10 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuthSession } from '../../hooks/useAuthSession';
+import {
+  fetchSchoolDisplayName,
+  formatOrgIdAsDisplayName,
+} from '../../lib/schoolOrgDisplay';
 import { useHomePageCustomization } from '../../hooks/useHomePageCustomization';
 import { hexToRgba } from '../../utils/homePageCustomization';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,7 +43,24 @@ const motivationalQuotes = [
 
 const HomeScreen = () => {
   const router = useRouter();
-  const { workspace } = useAuthSession();
+  const { workspace, orgId } = useAuthSession();
+  const [schoolDisplayName, setSchoolDisplayName] = useState(() =>
+    formatOrgIdAsDisplayName(orgId)
+  );
+
+  useEffect(() => {
+    if (!orgId) {
+      setSchoolDisplayName('Your school');
+      return undefined;
+    }
+    let cancelled = false;
+    fetchSchoolDisplayName(orgId).then((name) => {
+      if (!cancelled) setSchoolDisplayName(name);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
   const { userProfile } = useUser();
   // Toggles from “Change your home page” — reload when returning from that modal so switches apply immediately
   const { prefs: homePrefs, reload: reloadHomePrefs } = useHomePageCustomization();
@@ -167,20 +188,29 @@ const HomeScreen = () => {
         <View style={styles.section}>
           <TouchableOpacity
             style={[
-              styles.seeActivityCard,
-              { backgroundColor: hexToRgba(accent, 0.06), borderColor: hexToRgba(accent, 0.1) },
+              styles.schoolHubCard,
+              { backgroundColor: hexToRgba(accent, 0.06), borderColor: hexToRgba(accent, 0.14) },
             ]}
             onPress={() => router.replace('/(tabs)/school-wellness')}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${schoolDisplayName} school wellness hub`}
           >
-            <View style={[styles.analyticsEntryIcon, { backgroundColor: hexToRgba(accent, 0.12) }]}>
-              <Ionicons name="school" size={22} color={accent} />
+            <View style={[styles.schoolHubIconWrap, { backgroundColor: hexToRgba(accent, 0.14) }]}>
+              <Ionicons name="school" size={24} color={accent} />
             </View>
-            <View style={styles.analyticsEntryTextCol}>
-              <Text style={styles.analyticsEntryTitle}>School wellness hub</Text>
-              <Text style={styles.analyticsEntryHint}>Pulse check-ins, spiritual life, campus resources</Text>
+            <View style={styles.schoolHubTextCol}>
+              <View style={[styles.schoolHubBadge, { borderColor: hexToRgba(accent, 0.35) }]}>
+                <Text style={[styles.schoolHubBadgeText, { color: accent }]}>PARTNER SCHOOL</Text>
+              </View>
+              <Text style={styles.schoolHubTitle} numberOfLines={2}>
+                {schoolDisplayName}
+              </Text>
+              <Text style={styles.schoolHubHint}>
+                Open your campus wellness hub — daily pulse, spiritual life, counselor support & more
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#666" />
+            <Ionicons name="chevron-forward" size={20} color={accent} style={styles.schoolHubChevron} />
           </TouchableOpacity>
         </View>
       )}
@@ -259,14 +289,26 @@ const HomeScreen = () => {
       )}
 
       <View style={styles.section}>
-        <Text style={styles.sectionLabel}>Plan Your Week</Text>
-        <WeeklyWellnessCalendar accentColor={accent} />
+        <View style={styles.planWeekHeader}>
+          <Text style={styles.sectionLabel}>Plan Your Week</Text>
+          <TouchableOpacity
+            onPress={() => router.push('/(modals)/plan-your-week')}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.planWeekSeeMore, { color: accent }]}>See more</Text>
+          </TouchableOpacity>
+        </View>
+        <WeeklyWellnessCalendar accentColor={accent} compact hideHeader />
         <TodaysScheduleSection
+          compact
+          maxPreviewItems={2}
           refreshKey={scheduleRefreshKey}
           accentColor={accent}
           onFutureuChecklistChanged={notifyScheduleUpdated}
+          onSeeMore={() => router.push('/(modals)/plan-your-week')}
         />
-            </View>
+      </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Wellness</Text>
@@ -455,12 +497,79 @@ const styles = StyleSheet.create({
   recoveryMapLinkRow: { flexDirection: 'row', alignItems: 'center' },
   recoveryMapLink: { fontSize: 13, fontWeight: '600', marginRight: 2 },
   sectionLabel: { fontSize: 13, fontWeight: '600', color: '#666', marginBottom: 0, letterSpacing: 0.5 },
+  planWeekHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  planWeekSeeMore: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  sectionSubLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94a3b8',
+    marginTop: 12,
+    marginBottom: 8,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
   actionRow: { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
   actionCard: { flex: 1, minWidth: 100, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', padding: 16, alignItems: 'center' },
   actionIconWrap: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   actionLabel: { fontSize: 14, fontWeight: '600', color: '#fff' },
   seeActivityCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,255,255,0.06)', borderRadius: 16, borderWidth: 1, borderColor: 'rgba(0,255,255,0.1)', padding: 16 },
   seeActivityText: { flex: 1, fontSize: 16, fontWeight: '600', color: '#fff', marginLeft: 12 },
+  schoolHubCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
+    gap: 12,
+  },
+  schoolHubIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  schoolHubTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  schoolHubBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginBottom: 6,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  schoolHubBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  schoolHubTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#fff',
+    marginBottom: 4,
+    letterSpacing: -0.2,
+  },
+  schoolHubHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#9ca3af',
+  },
+  schoolHubChevron: {
+    marginLeft: 4,
+  },
   homeNavCard: {
     flexDirection: 'row',
     alignItems: 'center',

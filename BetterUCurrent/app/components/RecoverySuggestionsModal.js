@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 // app/components is one folder deeper than root components, so we need ../../ for utils.
 import { addScheduledWorkout, getScheduledActivitiesForDate } from '../../utils/scheduledWorkoutHelpers';
+import { openWorkoutDetail } from '../../utils/navigateToWorkoutDetail';
 
 const SUGGESTIONS = [
   {
@@ -109,7 +110,16 @@ export function RecoverySuggestionsModal({ visible, onClose, userId, onRestDayAd
     }
     onClose?.();
     if (item.action === 'workout') {
-      router.push({ pathname: '/active-workout', params: { type: item.workoutType } });
+      openWorkoutDetail(router, {
+        name: item.workoutType,
+        workout_name: item.workoutType,
+        exercises: [],
+        description: item.subtitle,
+        duration: item.duration,
+      }, {
+        startMode: 'type',
+        title: item.title,
+      });
     } else if (item.action === 'run') {
       router.push({
         pathname: '/(tabs)/workout',
