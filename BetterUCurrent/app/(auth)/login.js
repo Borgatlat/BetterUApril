@@ -26,6 +26,7 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import TurnstileCaptcha from "../../components/TurnstileCaptcha";
 import { consumerDomainFromEmail, isPersonalConsumerEmail } from "../../lib/schoolEmailDomains";
+import { signInWithSchoolSso, schoolDomainFromEmail } from "../../lib/schoolSso";
 import { TURNSTILE_CONFIG } from "../../config/turnstile";
 // Initialize WebBrowser for auth
 WebBrowser.maybeCompleteAuthSession();
@@ -361,6 +362,58 @@ const LoginScreen = () => {
       }
     } catch (e) {
       console.warn("apply_school_domain_on_profile (login):", e?.message ?? e);
+    }
+  };
+
+  const finishAuthNavigation = async (userId, userEmail) => {
+    await syncSchoolDomainOnLogin(userId, userEmail);
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("onboarding_completed, account_type")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profileError && profileError.code !== "PGRST116") {
+      setError("Failed to check onboarding status");
+      return;
+    }
+
+    await resetBotProtection();
+    if (profile?.account_type === "parent") {
+      router.replace("/(parent)/dashboard");
+      return;
+    }
+    if (!profile?.onboarding_completed) {
+      router.replace("/(auth)/onboarding/welcome");
+    } else {
+      router.replace("/");
+    }
+  };
+
+  const handleSchoolGoogleSso = async () => {
+    try {
+      setIsLoading(true);
+      setError("");
+      const hd = schoolDomainFromEmail(email.trim()) || undefined;
+      const session = await signInWithSchoolSso("google", { loginHint: email.trim() || undefined, hd });
+      await finishAuthNavigation(session.user.id, session.user.email);
+    } catch (e) {
+      setError(e?.message ?? "Google sign-in failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSchoolMicrosoftSso = async () => {
+    try {
+      setIsLoading(true);
+      setError("");
+      const session = await signInWithSchoolSso("azure", { loginHint: email.trim() || undefined });
+      await finishAuthNavigation(session.user.id, session.user.email);
+    } catch (e) {
+      setError(e?.message ?? "Microsoft sign-in failed");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -932,6 +985,30 @@ const LoginScreen = () => {
               )}
             </TouchableOpacity>
 
+            {loginMode === "school" ? (
+              <View style={styles.ssoBlock}>
+                <Text style={styles.ssoHint}>Or sign in with your school SSO (Google / Microsoft)</Text>
+                <TouchableOpacity
+                  style={[styles.ssoBtn, isLoading && styles.buttonDisabled]}
+                  onPress={handleSchoolGoogleSso}
+                  disabled={isLoading}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="logo-google" size={18} color="#fff" />
+                  <Text style={styles.ssoBtnText}>Continue with Google</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.ssoBtn, styles.ssoBtnMs, isLoading && styles.buttonDisabled]}
+                  onPress={handleSchoolMicrosoftSso}
+                  disabled={isLoading}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="logo-microsoft" size={18} color="#fff" />
+                  <Text style={styles.ssoBtnText}>Continue with Microsoft</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
             <View style={styles.signupContainer}>
               <Text style={styles.signupText}>Don't have an account?</Text>
               <TouchableOpacity onPress={() => router.push("/signup")} disabled={isLoading}>
@@ -1124,6 +1201,34 @@ const styles = StyleSheet.create({
     color: "black",
     fontSize: 16,
     fontWeight: "bold",
+  },
+  ssoBlock: {
+    marginTop: 16,
+    gap: 10,
+    width: "100%",
+  },
+  ssoHint: {
+    color: "#94a3b8",
+    fontSize: 12,
+    textAlign: "center",
+    marginBottom: 4,
+  },
+  ssoBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#4285f4",
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  ssoBtnMs: {
+    backgroundColor: "#0078d4",
+  },
+  ssoBtnText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 15,
   },
   signupContainer: {
     flexDirection: "row",

@@ -141,6 +141,16 @@ export default function AccountabilityScreen() {
       <FlatList
         data={partners}
         keyExtractor={(item) => item.id}
+        ListHeaderComponent={
+          partners.length > 0 ? (
+            <View style={styles.weeklyBanner}>
+              <Ionicons name="calendar-outline" size={18} color="#00ffff" />
+              <Text style={styles.weeklyBannerText}>
+                Weekly check-ins keep you both honest — tap a partner when it&apos;s due.
+              </Text>
+            </View>
+          ) : null
+        }
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#00ffff']} />
         }
@@ -228,6 +238,18 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   addButtonText: { marginLeft: 10, color: '#000', fontWeight: '600' },
+  weeklyBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 12,
+    marginBottom: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,255,255,0.15)',
+  },
+  weeklyBannerText: { flex: 1, color: '#ccc', fontSize: 13, lineHeight: 18 },
   card: {
     backgroundColor: '#1a1a1a',
     borderRadius: 12,

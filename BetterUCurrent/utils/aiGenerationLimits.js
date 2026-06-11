@@ -39,7 +39,7 @@ export const AI_GENERATION_LIMITS = {
     WORKOUT: 20,
     MEAL: 20,
     MENTAL_SESSION: 20,
-    PHOTO_MEAL: 5,
+    PHOTO_MEAL: 10,
     /** Future U (Claude) long-form planning — counts each successful assistant reply per day */
     FUTURE_U: 15,
   },

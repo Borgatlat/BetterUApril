@@ -16,24 +16,26 @@ export function PremiumAvatar({ userId, size = 40, style, isPremium: propIsPremi
       isUserPremium(userId).then(setIsPremium);
     }
 
-    // Create pulsing animation for premium users - commented out
-    // if (isPremium) {
-    //   Animated.loop(
-    //     Animated.sequence([
-    //       Animated.timing(glowAnim, {
-    //         toValue: 1,
-    //         duration: 2000,
-    //         useNativeDriver: true,
-    //       }),
-    //       Animated.timing(glowAnim, {
-    //         toValue: 0.3,
-    //         duration: 2000,
-    //         useNativeDriver: true,
-    //       }),
-    //     ])
-    //   ).start();
-    // }
-  }, [userId, isPremium, propIsPremium]);
+    // Subtle gold pulse — premium status users only (useNativeDriver = smooth GPU animation)
+    if (isPremium) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(glowAnim, {
+            toValue: 1,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(glowAnim, {
+            toValue: 0.35,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    } else {
+      glowAnim.setValue(0);
+    }
+  }, [userId, isPremium, propIsPremium, glowAnim]);
 
   const glowStyle = {
     opacity: glowAnim,
@@ -49,8 +51,7 @@ export function PremiumAvatar({ userId, size = 40, style, isPremium: propIsPremi
 
   return (
     <View style={[styles.container, { width: size, height: size }, style]}>
-      {/* Glow effect commented out */}
-      {/* {isPremium && (
+      {isPremium && (
         <>
           <Animated.View
             style={[
@@ -75,7 +76,7 @@ export function PremiumAvatar({ userId, size = 40, style, isPremium: propIsPremi
             ]}
           />
         </>
-      )} */}
+      )}
       {props.source ? (
         <Image
           {...props}
@@ -85,9 +86,7 @@ export function PremiumAvatar({ userId, size = 40, style, isPremium: propIsPremi
               width: size,
               height: size,
               borderRadius: size / 2,
-              // Gold outline commented out
-              // borderColor: isPremium ? '#FFD700' : '#ffffff',
-              borderColor: '#ffffff',
+              borderColor: isPremium ? '#FFD700' : '#ffffff',
               borderWidth: 2,
             },
           ]}
@@ -100,9 +99,7 @@ export function PremiumAvatar({ userId, size = 40, style, isPremium: propIsPremi
               width: size,
               height: size,
               borderRadius: size / 2,
-              // Gold outline commented out
-              // borderColor: isPremium ? '#FFD700' : '#ffffff',
-              borderColor: '#ffffff',
+              borderColor: isPremium ? '#FFD700' : '#ffffff',
               borderWidth: 2,
             },
           ]}

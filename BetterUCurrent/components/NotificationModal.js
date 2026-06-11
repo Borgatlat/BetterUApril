@@ -14,6 +14,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNotifications } from '../context/NotificationContext';
 import { useRouter } from 'expo-router';
+import { navigateFromNotification } from '../utils/notificationNavigation';
+import { recordNotificationOpen } from '../utils/notificationOpenTracking';
 
 const { width, height } = Dimensions.get('window');
 
@@ -55,7 +57,15 @@ const getNotificationIcon = (type) => {
     nudge_workout: 'megaphone',
     nudge_run: 'megaphone',
     nudge_mental: 'leaf',
-    daily_reminder: 'alarm'
+    daily_reminder: 'alarm',
+    accountability_partner_request: 'people',
+    accountability_check_in_reminder: 'calendar',
+    accountability_check_in_received: 'chatbubble-ellipses',
+    team_join_request: 'people',
+    team_join_request_accepted: 'checkmark-circle',
+    team_trophy_awarded: 'trophy',
+    team_challenge_started: 'flag',
+    motivation_after_streak_failure: 'heart',
   };
   return iconMap[type] || 'notifications';
 };
@@ -86,22 +96,13 @@ const formatTimeAgo = (timestamp) => {
 const NotificationItem = React.memo(({ notification, onPress, onDelete, onMarkAsRead }) => {
   const router = useRouter();
   
-  const handlePress = useCallback(() => {
-    // Mark as read if not already read
+  const handlePress = useCallback(async () => {
     if (!notification.is_read) {
       onMarkAsRead([notification.id]);
     }
 
-    // Handle navigation based on action_type
-    if (notification.action_type === 'navigate' && notification.action_data?.screen) {
-      const { screen, params } = notification.action_data;
-      if (params) {
-        router.push({ pathname: screen, params });
-      } else {
-        router.push(screen);
-      }
-    }
-    
+    await recordNotificationOpen();
+    navigateFromNotification(router, notification);
     onPress?.(notification);
   }, [notification, onPress, onMarkAsRead, router]);
 

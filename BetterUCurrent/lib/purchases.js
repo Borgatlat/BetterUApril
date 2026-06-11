@@ -2,6 +2,13 @@ import Purchases from 'react-native-purchases';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 import { triggerPremiumRefresh } from './premiumRefresh';
+import {
+  getPreferredDefaultPackage,
+  getSubscriptionDurationDays,
+  isMonthlyPackage,
+  pickActiveSubscriptionProduct,
+  sortPackagesForDisplay,
+} from './subscriptionProducts';
 
 // RevenueCat Paywall UI – design your paywall in RevenueCat dashboard, then present it here.
 // Requires a native dev build (expo run:ios / EAS build). In Expo Go the native module is missing
@@ -195,21 +202,25 @@ export const getOfferings = async () => {
       }
     });
 
-    // If we're in preview mode, create a yearly package from the monthly one
+    // Weekly is primary; sort so paywall shows it first
+    offerings.current.availablePackages = sortPackagesForDisplay(
+      offerings.current.availablePackages
+    );
+
+    // Dev/preview fallback: if only monthly exists, synthesize a yearly option for comparison
     if (offerings.current.availablePackages.length === 1) {
-      const monthlyPackage = offerings.current.availablePackages[0];
-      if (monthlyPackage.product.subscriptionPeriod === 'P1M' || monthlyPackage.packageType === 'MONTHLY') {
-        console.log('Creating yearly package from monthly package');
+      const only = offerings.current.availablePackages[0];
+      if (isMonthlyPackage(only)) {
         const yearlyPackage = {
-          ...monthlyPackage,
-          identifier: `${monthlyPackage.identifier}_yearly`,
+          ...only,
+          identifier: `${only.identifier}_yearly`,
           packageType: 'ANNUAL',
           product: {
-            ...monthlyPackage.product,
+            ...only.product,
             subscriptionPeriod: 'P1Y',
-            priceString: `$${(parseFloat(monthlyPackage.product.priceString.replace('$', '')) * 10).toFixed(2)}`,
-            title: 'Yearly Premium'
-          }
+            priceString: `$${(parseFloat(String(only.product.priceString).replace('$', '')) * 10).toFixed(2)}`,
+            title: 'Yearly Premium',
+          },
         };
         offerings.current.availablePackages.push(yearlyPackage);
         console.log('Added yearly package:', yearlyPackage);
@@ -268,9 +279,26 @@ const PREMIUM_OFFERING_ID = 'premium_offering';
  * @returns {Promise<boolean>} - true if user purchased or restored, false otherwise.
  */
 export const presentPremiumPaywall = async () => {
-  const offerings = await getOfferings();
-  const offering = offerings?.all?.[PREMIUM_OFFERING_ID] ?? offerings?.current;
-  return presentPaywall(offering ? { offering } : {});
+  if (Platform.OS !== 'ios') {
+    return false;
+  }
+  if (RevenueCatUI && PAYWALL_RESULT) {
+    const offerings = await getOfferings();
+    const offering = offerings?.all?.[PREMIUM_OFFERING_ID] ?? offerings?.current;
+    return presentPaywall(offering ? { offering } : {});
+  }
+  try {
+    const offerings = await getOfferings();
+    const pkg = getPreferredDefaultPackage(offerings?.current?.availablePackages);
+    if (!pkg) {
+      return false;
+    }
+    const { success } = await purchasePackage(pkg);
+    return Boolean(success);
+  } catch (e) {
+    console.error('presentPremiumPaywall fallback:', e);
+    return false;
+  }
 };
 
 /**
@@ -749,12 +777,8 @@ const handlePurchaseUpdate = async (customerInfo) => {
       
       // If not found in entitlements, get from subscriptionsByProductIdentifier
       if (!productId && Object.keys(subscriptionsByProduct).length > 0) {
-        // Prefer yearly over monthly
-        const yearlySub = subscriptionsByProduct['betteru_premium_yearly'];
-        const monthlySub = subscriptionsByProduct['betteru_premium_monthly'];
-        const sub = yearlySub || monthlySub;
-        
-        if (sub && sub.isActive) {
+        const sub = pickActiveSubscriptionProduct(subscriptionsByProduct);
+        if (sub) {
           productId = sub.productIdentifier;
           // Use storeTransactionId as original_transaction_id
           transactionId = sub.storeTransactionId || sub.originalTransactionId;
@@ -777,10 +801,8 @@ const handlePurchaseUpdate = async (customerInfo) => {
       if (!productId && activeSubscriptions.length > 0) {
         const allPurchaseDates = customerInfo.allPurchaseDates || {};
         const allExpirationDates = customerInfo.allExpirationDates || {};
-        // Prefer yearly then monthly to match logic above
-        productId = activeSubscriptions.includes('betteru_premium_yearly')
-          ? 'betteru_premium_yearly'
-          : activeSubscriptions[0];
+        const priority = ['betteru_premium_weekly', 'betteru_premium_yearly', 'betteru_premium_monthly'];
+        productId = priority.find((id) => activeSubscriptions.includes(id)) || activeSubscriptions[0];
         const purchaseStr = allPurchaseDates[productId];
         const expirationStr = allExpirationDates[productId];
         purchaseDate = purchaseStr ? new Date(purchaseStr) : new Date();
@@ -808,9 +830,7 @@ const handlePurchaseUpdate = async (customerInfo) => {
       // If no expiration date, calculate it based on product identifier
       // Monthly subscriptions are typically 30 days, yearly are 365 days
       if (!expirationDate) {
-        const isYearly = productId?.includes('yearly') || 
-                         productId?.includes('annual');
-        const daysToAdd = isYearly ? 365 : 30;
+        const daysToAdd = getSubscriptionDurationDays(productId);
         expirationDate = new Date(purchaseDate.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
         console.log('⚠️ No expiration date from RevenueCat, calculated:', expirationDate.toISOString());
       }

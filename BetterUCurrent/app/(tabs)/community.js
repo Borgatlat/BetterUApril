@@ -29,6 +29,7 @@ import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 import { CommunityTabBar } from '../../components/community/CommunityTabBar';
 import { CommunityFeedToolbar } from '../../components/community/CommunityFeedToolbar';
 import { shareActivityLink } from '../../lib/shareLinks';
+import { LeagueDiscoverBanner } from '../../components/community/LeagueDiscoverBanner';
 
 /** Design tokens for Community styles — same object everywhere so the screen matches Feed/League. */
 const T = COMMUNITY_THEME;
@@ -2351,6 +2352,9 @@ const CommunityScreen = () => {
               </View>
             ) : (
               <>
+              {!schoolClassmatesOnly ? (
+                <LeagueDiscoverBanner onOpenLeague={() => setActiveTab('league')} />
+              ) : null}
               {showParticipationNudge ? (
                 <TouchableOpacity
                   style={styles.storiesNudge}

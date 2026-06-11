@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAuthSession } from '../../hooks/useAuthSession';
 import {
   fetchSchoolDisplayName,
@@ -27,6 +27,16 @@ import WeeklyWellnessCalendar from '../../components/WeeklyWellnessCalendar';
 import TodaysScheduleSection from '../../components/TodaysScheduleSection';
 import { useScheduleRefresh } from '../../context/ScheduleRefreshContext';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
+import { useHomeScroll } from '../../context/HomeScrollContext';
+import { TutorialAnchor } from '../../components/TutorialAnchor';
+import { HOME_TUTORIAL_ANCHORS } from '../../utils/homeTutorialSteps';
+import { ProgressWinsPanel } from '../../components/retention/ProgressWinsPanel';
+import { EasyModeBanner } from '../../components/retention/EasyModeBanner';
+import { WeeklyWellnessReport } from '../../components/premium/WeeklyWellnessReport';
+import { StreakShieldBanner } from '../../components/premium/StreakShieldBanner';
+import { PremiumDailyFocus } from '../../components/premium/PremiumDailyFocus';
+import { UsageLimitBanner } from '../../components/premium/UsageLimitBanner';
+import { useSharedMessageLimit } from '../../context/SharedMessageLimitContext';
 
 const motivationalQuotes = [
   { text: "The only bad workout is the one that didn't happen", author: 'Unknown' },
@@ -43,6 +53,8 @@ const motivationalQuotes = [
 
 const HomeScreen = () => {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const showEasyMode = params?.showEasyMode === '1' || params?.showEasyMode === 1;
   const { workspace, orgId } = useAuthSession();
   const [schoolDisplayName, setSchoolDisplayName] = useState(() =>
     formatOrgIdAsDisplayName(orgId)
@@ -61,7 +73,8 @@ const HomeScreen = () => {
       cancelled = true;
     };
   }, [orgId]);
-  const { userProfile } = useUser();
+  const { userProfile, isPremium } = useUser();
+  const { sharedMessageCount, MAX_DAILY_MESSAGES } = useSharedMessageLimit();
   // Toggles from “Change your home page” — reload when returning from that modal so switches apply immediately
   const { prefs: homePrefs, reload: reloadHomePrefs } = useHomePageCustomization();
   useFocusEffect(
@@ -81,6 +94,21 @@ const HomeScreen = () => {
   const [streakRefreshKey, setStreakRefreshKey] = useState(0);
   const { refreshKey: scheduleRefreshKey, notifyScheduleUpdated } = useScheduleRefresh();
   const { scrollPaddingBottom } = useBottomChromeInsets();
+  const homeScroll = useHomeScroll();
+
+  const attachScrollRef = React.useCallback(
+    (node) => {
+      homeScroll?.registerScrollRef?.(node);
+    },
+    [homeScroll],
+  );
+
+  const attachScrollContentRef = React.useCallback(
+    (node) => {
+      homeScroll?.registerScrollContentRef?.(node);
+    },
+    [homeScroll],
+  );
   const [recoveryScore, setRecoveryScore] = useState(null);
   const [recoveryHoursLabel, setRecoveryHoursLabel] = useState('Fully recovered');
   const [recoveryBreakdown, setRecoveryBreakdown] = useState({ draggingDown: [], bringingUp: [] });
@@ -151,11 +179,16 @@ const HomeScreen = () => {
 
   return (
     <ScrollView
+      ref={attachScrollRef}
       style={[styles.container, { backgroundColor: homeBg }]}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}
+      onContentSizeChange={() => homeScroll?.remeasureAllAnchors?.()}
+      onScrollEndDrag={() => homeScroll?.remeasureAllAnchors?.()}
+      onMomentumScrollEnd={() => homeScroll?.remeasureAllAnchors?.()}
     >
-      <View style={styles.header}>
+      <View ref={attachScrollContentRef} collapsable={false}>
+      <TutorialAnchor anchorKey={HOME_TUTORIAL_ANCHORS.HEADER} style={styles.header}>
         <View style={styles.headerLeft}>
           <Text style={styles.greeting}>Hello, {userProfile?.full_name?.split(' ')[0] || userProfile?.username || 'there'}! 👋</Text>
           <Text style={styles.subtitle}>Let's crush your goals today</Text>
@@ -182,7 +215,7 @@ const HomeScreen = () => {
             <PremiumAvatar userId={userProfile?.id} source={userProfile?.avatar_url ? { uri: userProfile.avatar_url } : null} size={40} />
           </TouchableOpacity>
         </View>
-      </View>
+      </TutorialAnchor>
 
       {workspace === 'student' && (
         <View style={styles.section}>
@@ -236,10 +269,32 @@ const HomeScreen = () => {
       {homePrefs.showStreaks && userProfile?.id && (
         <View style={styles.streakContainer}>
           <StreakDisplay userId={userProfile.id} size="medium" onPress={() => setShowStreakModal(true)} refreshKey={streakRefreshKey} />
+          <StreakShieldBanner userId={userProfile.id} />
         </View>
       )}
 
-      <View style={styles.section}>
+      {userProfile?.id && workspace !== 'student' && (
+        <View style={styles.section}>
+          <UsageLimitBanner
+            isPremium={isPremium}
+            messageCount={sharedMessageCount}
+            maxMessages={MAX_DAILY_MESSAGES}
+          />
+          <PremiumDailyFocus
+            userId={userProfile.id}
+            isPremium={isPremium}
+            messageCount={sharedMessageCount}
+            maxMessages={MAX_DAILY_MESSAGES}
+            onOpenTherapist={() => setShowTherapistModal(true)}
+            onOpenTrainer={() => setShowTrainerModal(true)}
+          />
+          <WeeklyWellnessReport userId={userProfile.id} isPremium={isPremium} accentColor="#FFD700" />
+          <EasyModeBanner userId={userProfile.id} accentColor={accent} forceVisible={showEasyMode} />
+          <ProgressWinsPanel userId={userProfile.id} accentColor={accent} compact />
+        </View>
+      )}
+
+      <TutorialAnchor anchorKey={HOME_TUTORIAL_ANCHORS.RECOVERY} style={styles.section}>
         <View style={styles.recoverySectionHeader}>
           <Text style={styles.sectionLabel}>Recovery</Text>
           <TouchableOpacity
@@ -266,7 +321,7 @@ const HomeScreen = () => {
           onPress={() => setShowRecoveryBreakdown(true)}
           onWhatShouldIDo={() => setShowRecoverySuggestions(true)}
           />
-        </View>
+      </TutorialAnchor>
 
       {showNutritionSection && (
         <View style={styles.section}>
@@ -288,7 +343,7 @@ const HomeScreen = () => {
         </View>
       )}
 
-      <View style={styles.section}>
+      <TutorialAnchor anchorKey={HOME_TUTORIAL_ANCHORS.SCHEDULE} style={styles.section}>
         <View style={styles.planWeekHeader}>
           <Text style={styles.sectionLabel}>Plan Your Week</Text>
           <TouchableOpacity
@@ -308,7 +363,7 @@ const HomeScreen = () => {
           onFutureuChecklistChanged={notifyScheduleUpdated}
           onSeeMore={() => router.push('/(modals)/plan-your-week')}
         />
-      </View>
+      </TutorialAnchor>
 
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Wellness</Text>
@@ -349,7 +404,7 @@ const HomeScreen = () => {
       )}
 
       {showAiSection && (
-        <View style={styles.section}>
+        <TutorialAnchor anchorKey={HOME_TUTORIAL_ANCHORS.AI} style={styles.section}>
           <Text style={styles.sectionLabel}>AI Assistants</Text>
           <View style={styles.actionRow}>
             {homePrefs.showAIServices && (
@@ -371,9 +426,9 @@ const HomeScreen = () => {
               </TouchableOpacity>
             )}
           </View>
-        </View>
+        </TutorialAnchor>
       )}
-        
+
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Customize</Text>
         <View style={styles.actionRow}>
@@ -390,7 +445,7 @@ const HomeScreen = () => {
         </View>
       </View>
             
-      <View style={styles.section}>
+      <TutorialAnchor anchorKey={HOME_TUTORIAL_ANCHORS.COMMUNITY} style={styles.section}>
         <Text style={styles.sectionLabel}>Community</Text>
         <View style={styles.actionRow}>
           {/* `tab` + `openSearch`: Community screen switches to Friends and opens discover search once */}
@@ -419,8 +474,25 @@ const HomeScreen = () => {
             </View>
             <Text style={styles.actionLabel}>Accountability</Text>
           </TouchableOpacity>
+          {workspace !== 'student' && (
+            <TouchableOpacity
+              style={styles.actionCard}
+              onPress={() =>
+                router.push({
+                  pathname: '/(tabs)/community',
+                  params: { tab: 'league' },
+                })
+              }
+              activeOpacity={0.85}
+            >
+              <View style={[styles.actionIconWrap, { backgroundColor: 'rgba(255,200,0,0.15)' }]}>
+                <Ionicons name="trophy" size={22} color="#ffc800" />
+              </View>
+              <Text style={styles.actionLabel}>League</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      </View>
+      </TutorialAnchor>
 
       <View style={styles.section}>
         <TouchableOpacity
@@ -468,6 +540,7 @@ const HomeScreen = () => {
           userId={userProfile.id}
         />
       )}
+      </View>
     </ScrollView>
   );
 };

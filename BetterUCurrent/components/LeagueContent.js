@@ -16,6 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../context/UserContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
+import PremiumLeagueCircuitCard from './premium/PremiumLeagueCircuitCard';
+import { PREMIUM_LEAGUE_BADGE } from '../lib/premiumLeagueCircuit';
 
 /**
  * League hub UI (teams, challenges) used in two places:
@@ -38,7 +40,7 @@ function LeagueRoot({ embedded, children }) {
 
 export default function LeagueContent({ embedded = false }) {
   const router = useRouter();
-  const { userProfile } = useUser();
+  const { userProfile, isPremium } = useUser();
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [hasTeam, setHasTeam] = useState(false);
@@ -305,6 +307,15 @@ export default function LeagueContent({ embedded = false }) {
             <Text style={styles.viewTeamButtonText}>View Team →</Text>
           </TouchableOpacity>
         </View>
+
+        <PremiumLeagueCircuitCard userId={userProfile?.id} isPremium={isPremium} />
+
+        {isPremium && (
+          <View style={styles.premiumLeagueBadgeRow}>
+            <Ionicons name={PREMIUM_LEAGUE_BADGE.icon} size={16} color={PREMIUM_LEAGUE_BADGE.color} />
+            <Text style={styles.premiumLeagueBadgeText}>{PREMIUM_LEAGUE_BADGE.label} Member — priority league badge</Text>
+          </View>
+        )}
 
         {challenge && (
           <View style={styles.challengeCard}>
@@ -603,6 +614,25 @@ const styles = StyleSheet.create({
   viewTeamButtonText: {
     color: '#00ffff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  premiumLeagueBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 215, 0, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.2)',
+  },
+  premiumLeagueBadgeText: {
+    color: '#FFD700',
+    fontSize: 13,
     fontWeight: '600',
   },
   challengeCard: {

@@ -1,22 +1,63 @@
 import React, { createContext, useContext, useRef, useState, useCallback } from 'react';
 
-/**
- * HomeScrollContext lets the tutorial overlay scroll the home screen to the right section.
- * Home screen registers its ScrollView ref and scroll offsets per tutorial step;
- * TutorialOverlay calls scrollToY(offset) when the user advances to a step.
- *
- * To customize scroll positions: edit the scrollOffsets array below.
- * - Index 0 = step 1 (Daily Nutrition), index 1 = step 2 (AI Coach), index 2 = step 3 (Calorie Tracker).
- * - Values are in pixels. Increase a value if the spotlight is above the target; decrease if it's below.
- */
 const HomeScrollContext = createContext(null);
 
+/**
+ * Connects the Home ScrollView to the tutorial overlay.
+ * Anchors report screen coordinates via `measureInWindow`; the overlay draws
+ * the spotlight from those bounds instead of guessing with percentages.
+ */
 export function HomeScrollProvider({ children }) {
   const scrollRef = useRef(null);
-  // Scroll position (in pixels) for each tutorial step so the right section is in view.
-  // [Step 0: Daily Nutrition, Step 1: AI Coach/Atlas, Step 2: Calorie Tracker]
-  // If a step highlights the wrong area: increase = scroll further down, decrease = scroll less.
-  const [scrollOffsets, setScrollOffsets] = useState([0, 280, 780]);
+  const scrollContentRef = useRef(null);
+  const anchorsRef = useRef({});
+  const [anchorBounds, setAnchorBounds] = useState({});
+
+  const registerScrollRef = useCallback((ref) => {
+    scrollRef.current = ref;
+  }, []);
+
+  const registerScrollContentRef = useCallback((ref) => {
+    scrollContentRef.current = ref;
+  }, []);
+
+  const reportAnchorBounds = useCallback((key, bounds) => {
+    setAnchorBounds((prev) => {
+      const existing = prev[key];
+      if (
+        existing &&
+        Math.abs(existing.x - bounds.x) < 1 &&
+        Math.abs(existing.y - bounds.y) < 1 &&
+        Math.abs(existing.width - bounds.width) < 1 &&
+        Math.abs(existing.height - bounds.height) < 1
+      ) {
+        return prev;
+      }
+      return { ...prev, [key]: bounds };
+    });
+  }, []);
+
+  const registerAnchor = useCallback((key, viewRef, measureFn) => {
+    anchorsRef.current[key] = { viewRef, measure: measureFn };
+    measureFn();
+    return () => {
+      delete anchorsRef.current[key];
+      setAnchorBounds((prev) => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    };
+  }, []);
+
+  const remeasureAnchor = useCallback((key) => {
+    anchorsRef.current[key]?.measure?.();
+  }, []);
+
+  const remeasureAllAnchors = useCallback(() => {
+    Object.values(anchorsRef.current).forEach((entry) => entry.measure?.());
+  }, []);
 
   const scrollToY = useCallback((y) => {
     if (scrollRef.current && typeof y === 'number') {
@@ -24,25 +65,39 @@ export function HomeScrollProvider({ children }) {
     }
   }, []);
 
-  const registerScrollRef = useCallback((ref) => {
-    scrollRef.current = ref;
+  /** Scroll so the anchored section sits below the tutorial top bar (~120px). */
+  const scrollToAnchor = useCallback((key) => {
+    const entry = anchorsRef.current[key];
+    const content = scrollContentRef.current;
+    const scroll = scrollRef.current;
+    const anchorNode = entry?.viewRef?.current;
+
+    if (!anchorNode?.measureLayout || !content) {
+      entry?.measure?.();
+      return;
+    }
+
+    anchorNode.measureLayout(content, (_x, y) => {
+      scroll?.scrollTo({ y: Math.max(0, y - 120), animated: true });
+    });
   }, []);
 
   const value = {
-    scrollToY,
-    scrollOffsets,
-    setScrollOffsets,
+    scrollRef,
+    anchorBounds,
     registerScrollRef,
+    registerScrollContentRef,
+    reportAnchorBounds,
+    registerAnchor,
+    remeasureAnchor,
+    remeasureAllAnchors,
+    scrollToY,
+    scrollToAnchor,
   };
 
-  return (
-    <HomeScrollContext.Provider value={value}>
-      {children}
-    </HomeScrollContext.Provider>
-  );
+  return <HomeScrollContext.Provider value={value}>{children}</HomeScrollContext.Provider>;
 }
 
 export function useHomeScroll() {
-  const ctx = useContext(HomeScrollContext);
-  return ctx;
+  return useContext(HomeScrollContext);
 }

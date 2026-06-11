@@ -119,7 +119,8 @@ export default function TeamDetailScreen() {
             id,
             username,
             full_name,
-            avatar_url
+            avatar_url,
+            is_premium
           )
         `)
         .eq('team_id', id)
@@ -194,6 +195,7 @@ export default function TeamDetailScreen() {
                 username: m.profiles.username,
                 full_name: m.profiles.full_name,
                 avatar_url: m.profiles.avatar_url,
+                is_premium: m.profiles.is_premium,
                 role: m.role,
                 contributionMinutes: contributionMinutes
               };
@@ -218,6 +220,7 @@ export default function TeamDetailScreen() {
             username: m.profiles.username,
             full_name: m.profiles.full_name,
             avatar_url: m.profiles.avatar_url,
+            is_premium: m.profiles.is_premium,
             role: m.role,
             contributionMinutes: 0
           }));
@@ -599,7 +602,15 @@ export default function TeamDetailScreen() {
                   </View>
                 )}
                 <View style={styles.memberInfo}>
-                  <Text style={styles.memberName}>{item.full_name || item.username}</Text>
+                  <View style={styles.memberNameRow}>
+                    <Text style={styles.memberName}>{item.full_name || item.username}</Text>
+                    {item.is_premium && (
+                      <View style={styles.premiumMemberBadge}>
+                        <Ionicons name="diamond" size={10} color="#000" />
+                        <Text style={styles.premiumMemberBadgeText}>Premium</Text>
+                      </View>
+                    )}
+                  </View>
                   <View style={styles.memberRoleContainer}>
                     <Text style={styles.memberRole}>
                       {item.role === 'owner' ? '👑 Owner' : item.role === 'admin' ? '⭐ Admin' : 'Member'}
@@ -847,11 +858,30 @@ const styles = StyleSheet.create({
   memberInfo: {
     flex: 1,
   },
+  memberNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
   memberName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#ffffff',
-    marginBottom: 4,
+  },
+  premiumMemberBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#FFD700',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  premiumMemberBadgeText: {
+    color: '#000',
+    fontSize: 9,
+    fontWeight: '800',
   },
   memberRoleContainer: {
     flexDirection: 'row',

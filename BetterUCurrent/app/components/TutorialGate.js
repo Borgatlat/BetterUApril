@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import { useAuth } from '../../context/AuthContext';
 import { INTRO_SEEN_KEY, TUTORIAL_SEEN_KEY } from '../../utils/storageKeys';
 import { HomeScrollProvider } from '../../context/HomeScrollContext';
@@ -12,8 +13,15 @@ import TutorialOverlay from './TutorialOverlay';
  */
 export default function TutorialGate({ children }) {
   const { user } = useAuth();
+  const router = useRouter();
   const [tutorialSeen, setTutorialSeen] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Spotlight targets live on Home — open that tab before showing the overlay.
+  useEffect(() => {
+    if (!user || isLoading || tutorialSeen !== false) return;
+    router.replace('/(tabs)/home');
+  }, [user, isLoading, tutorialSeen, router]);
 
   useEffect(() => {
     let cancelled = false;

@@ -16,6 +16,7 @@ export function useAuthSession() {
     if (!user) return "anon";
     const t = normalized?.account_type ?? "public";
     if (t === "admin" || t === "counselor") return "staff";
+    if (t === "parent") return "parent";
     if (t === "student") return "student";
     return "public";
   }, [user, normalized]);

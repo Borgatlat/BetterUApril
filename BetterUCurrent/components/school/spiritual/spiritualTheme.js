@@ -1,22 +1,11 @@
-/** Shared Spiritual + school hub visuals — keeps tabs feeling like one product. */
-export const spiritualTheme = {
-  screenBg: "#050708",
-  accent: "#00e5e5",
-  accentDim: "rgba(0, 229, 229, 0.14)",
-  border: "rgba(255, 255, 255, 0.08)",
-  cardBg: "rgba(255, 255, 255, 0.06)",
-  text: "#ffffff",
-  sub: "#b4bec6",
-  subMuted: "#8a959e",
-  danger: "#ff6b6b",
-  success: "#22c55e",
-  successDim: "rgba(34, 197, 94, 0.14)",
-  textOnAccent: "#050708",
-  textOnDisabled: "#e8ecef",
-  btnDisabledBg: "#3d4a4c",
-  emptyTitle: "#9aa8b2",
-  emptySub: "#8a959e",
-  placeholder: "#7a8790",
-  lockBanner: "#d4b896",
-  radiusLg: 14,
-};
+import { campusThemeDark, campusThemeLight } from "../campusThemeTokens";
+
+/** Shared Spiritual + school hub visuals — light campus default (Tier 2). */
+export const spiritualTheme = { ...campusThemeLight };
+
+/** Pre-Tier-2 dark palette — staff mobile console, etc. */
+export const spiritualThemeDark = { ...campusThemeDark };
+
+export function getSpiritualTheme(mode = "light") {
+  return mode === "dark" ? spiritualThemeDark : spiritualTheme;
+}

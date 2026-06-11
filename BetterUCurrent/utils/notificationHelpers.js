@@ -14,6 +14,11 @@ import { getStreakStatus } from './streakHelpers';
 import { getEngagementLevel } from './engagementService';
 import { getUserContext, getUserState } from './userStateMachine';
 import { selectNotificationTemplate } from './notificationTemplateSelector';
+import {
+  getDailyCaps,
+  isInQuietHours,
+  normalizeRetentionPrefs,
+} from './retentionPreferences';
 
 /**
  * Send push notification directly via Edge Function
@@ -102,6 +107,9 @@ export async function createAccountabilityPartnerNoti(recipientUserId, senderUse
     title: 'Accountability Partner Request',
     message: `${senderName} wants to be your accountability partner for weekly check-ins.`,
     data: { partnership_id: partnershipId, sender_id: senderUserId },
+    isActionable: true,
+    actionType: 'navigate',
+    actionData: { screen: '/accountability' },
     priority: 3,
   });
 }
@@ -113,6 +121,9 @@ export async function weeklyCheckInNoti(tUserId, PartnerName, weekStartDate) {
     title: 'Accountability Partner Check-in',
     message: `Time for your weekly check-in with ${PartnerName}. How did working towards your goal go?`,
     data: { week_start_date: weekStartDate },
+    isActionable: true,
+    actionType: 'navigate',
+    actionData: { screen: '/accountability/check-in' },
     priority: 3,
   });
 }
@@ -124,6 +135,9 @@ export async function createAccountabilityCheckInReceivedNotification(userId, pa
     title: 'Check-in from your partner',
     message: `${partnerName} completed their weekly check-in. Tap to see how their week went.`,
     data: { week_start_date: weekStartDate },
+    isActionable: true,
+    actionType: 'navigate',
+    actionData: { screen: '/accountability' },
     priority: 3,
   });
 }
@@ -256,15 +270,26 @@ async function getActivityDetails(itemType, itemId) {
  */
 async function shouldSendPushNotification({ toUserId, priority }) {
   try {
-    // Quiet hours: 22:00 → 07:00 local device time.
-    // Note: this is imperfect for server-triggered pushes (server doesn't know local time),
-    // but it's still helpful for client-triggered pushes and general suppression.
-    const hour = new Date().getHours();
-    const inQuietHours = hour >= 22 || hour < 7;
-    if (inQuietHours && (priority ?? 1) < 3) {
+    let retentionPrefs = normalizeRetentionPrefs(null);
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('notification_preferences')
+        .eq('id', toUserId)
+        .maybeSingle();
+      retentionPrefs = normalizeRetentionPrefs(profile?.notification_preferences?.retention);
+      if (profile?.notification_preferences?.push_enabled === false) {
+        return { ok: false, reason: 'push_disabled' };
+      }
+    } catch (_) {
+      // Fail open if profile read fails.
+    }
+
+    if (isInQuietHours(retentionPrefs) && (priority ?? 1) < 3) {
       return { ok: false, reason: 'quiet_hours' };
     }
 
+    const caps = getDailyCaps(retentionPrefs);
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
@@ -275,20 +300,17 @@ async function shouldSendPushNotification({ toUserId, priority }) {
       .gte('created_at', startOfDay);
 
     if (error) {
-      // If counting fails, fail open (don't block notifications).
       return { ok: true, reason: null };
     }
 
     const dailyCount = count ?? 0;
-    const DAILY_CAP_LOW_PRIORITY = 3;
-    const DAILY_CAP_HIGH_PRIORITY = 6;
 
     if ((priority ?? 1) >= 3) {
-      if (dailyCount >= DAILY_CAP_HIGH_PRIORITY) return { ok: false, reason: 'daily_cap_high_priority' };
+      if (dailyCount >= caps.dailyCapHigh) return { ok: false, reason: 'daily_cap_high_priority' };
       return { ok: true, reason: null };
     }
 
-    if (dailyCount >= DAILY_CAP_LOW_PRIORITY) return { ok: false, reason: 'daily_cap_low_priority' };
+    if (dailyCount >= caps.dailyCapLow) return { ok: false, reason: 'daily_cap_low_priority' };
     return { ok: true, reason: null };
   } catch (e) {
     return { ok: true, reason: null };
@@ -912,6 +934,13 @@ export async function createMotivationAfterStreakFailureNotification(userId, use
         notification_template_id: picked.templateId,
         channel: 'push',
       }),
+      isActionable: true,
+      actionType: 'navigate',
+      actionData: {
+        screen: '/(tabs)/home',
+        params: { showEasyMode: '1' },
+      },
+      priority: 2,
     });
 
     console.log('✅ Motivation after streak failure - Notification ID:', result.notificationId, 'Push sent:', result.pushSent);

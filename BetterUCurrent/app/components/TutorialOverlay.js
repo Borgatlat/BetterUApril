@@ -6,48 +6,43 @@ import {
   Pressable,
   Modal,
   ScrollView,
-  useWindowDimensions
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useHomeScroll } from '../../context/HomeScrollContext';
+import { HOME_TUTORIAL_STEPS } from '../../utils/homeTutorialSteps';
+import { TAB_BAR_HEIGHT } from '../../utils/bottomChromeInsets';
 
-/**
- * Tutorial steps with spotlight positions as percentages of screen dimensions.
- * - left/top/width/height are 0–1 (e.g. 0.2 = 20% of screen width or height).
- * - Each step uses scrollOffsets in HomeScrollContext to scroll the home screen
- *   so the spotlight rectangle sits over the correct section.
- *
- * HOW TO CUSTOMIZE:
- * - If the spotlight is on the wrong thing: adjust scrollOffsets in context/HomeScrollContext.js
- *   (larger value = scroll further down for that step).
- * - If the highlight box is misaligned: change left/top/width/height here.
- *   top = where the spotlight starts from the top of the screen; height = how tall the cutout is.
- */
-const TUTORIAL_STEPS = [
-  {
-    title: 'Your Daily Nutrition',
-    tooltip: 'Track calories, water, and protein at a glance. Tap the rings for details.',
-    spotlight: { left: 0.15, top: 0.22, width: 0.7, height: 0.18 }
-  },
-  {
-    title: 'AI Coach & Therapist',
-    tooltip: 'Tap Atlas for fitness advice or Eleos for mental wellness. Your AI is always here.',
-    // Spotlight sized to fit just the Atlas/Eleos row (not the Analytics card below)
-    spotlight: { left: 0.05, top: 0.24, width: 0.9, height: 0.12 }
-  },
-  {
-    title: 'Calorie Tracker',
-    tooltip: 'Log meals, use quick add buttons, or generate AI meal suggestions.',
-    // Spotlight over the Calorie Tracker card (scroll offset brings it into view)
-    spotlight: { left: 0.05, top: 0.20, width: 0.9, height: 0.26 }
-  },
-  {
-    title: 'Navigate the App',
-    tooltip: 'Use the tabs below: Workout, Mental, Community, League. Swipe or tap to switch.',
-    spotlight: { left: 0, top: 0.88, width: 1, height: 0.12 }
-  }
-];
+const SPOTLIGHT_PAD = 8;
+const SCROLL_SETTLE_MS = 380;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function boundsFromAnchor(anchorBounds, anchorKey, screenWidth, screenHeight) {
+  const b = anchorBounds?.[anchorKey];
+  if (!b?.width || !b?.height) return null;
+
+  const left = clamp(b.x - SPOTLIGHT_PAD, 0, screenWidth);
+  const top = clamp(b.y - SPOTLIGHT_PAD, 0, screenHeight);
+  const right = clamp(b.x + b.width + SPOTLIGHT_PAD, 0, screenWidth);
+  const bottom = clamp(b.y + b.height + SPOTLIGHT_PAD, 0, screenHeight);
+
+  return {
+    left,
+    top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
+}
+
+function boundsForTabBar(screenWidth, screenHeight) {
+  const height = TAB_BAR_HEIGHT;
+  const top = Math.max(0, screenHeight - height);
+  return { left: 0, top, width: screenWidth, height };
+}
 
 const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -56,30 +51,64 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
   const insets = useSafeAreaInsets();
   const homeScroll = useHomeScroll();
 
-  const step = TUTORIAL_STEPS[currentStep];
-  const s = step.spotlight;
+  const measuredCount = Object.keys(homeScroll?.anchorBounds || {}).length;
 
-  // When step changes, scroll home so the spotlighted section is in view.
-  // scrollOffsets[i] = pixels to scroll for step i (last step = tab bar, no scroll).
+  const activeSteps = useMemo(() => {
+    if (measuredCount === 0) return HOME_TUTORIAL_STEPS;
+    return HOME_TUTORIAL_STEPS.filter((step) => {
+      if (step.type === 'tabs') return true;
+      const b = homeScroll?.anchorBounds?.[step.anchorKey];
+      return b && b.width > 0 && b.height > 0;
+    });
+  }, [homeScroll?.anchorBounds, measuredCount]);
+
+  const step = activeSteps[currentStep] || activeSteps[0];
+  const spotlight = useMemo(() => {
+    if (!step) return null;
+    if (step.type === 'tabs') return boundsForTabBar(width, height);
+    const measured = boundsFromAnchor(homeScroll?.anchorBounds, step.anchorKey, width, height);
+    if (measured) return measured;
+    // Brief fallback while Home anchors finish measuring after scroll.
+    return {
+      left: width * 0.08,
+      top: height * 0.14,
+      width: width * 0.84,
+      height: Math.min(120, height * 0.14),
+    };
+  }, [step, homeScroll?.anchorBounds, width, height]);
+
   useEffect(() => {
     if (!visible) {
       finishingRef.current = false;
-      return;
+      setCurrentStep(0);
+      return undefined;
     }
-    if (!homeScroll?.scrollToY || !homeScroll?.scrollOffsets) return;
-    const isLastStep = currentStep === TUTORIAL_STEPS.length - 1;
-    if (isLastStep) return; // Tab bar is always visible
-    const y = homeScroll.scrollOffsets[currentStep];
-    if (typeof y === 'number') homeScroll.scrollToY(y);
-  }, [visible, currentStep, homeScroll?.scrollToY, homeScroll?.scrollOffsets]);
 
-  // Convert percentage to pixels
-  const spotlightLeft = width * s.left;
-  const spotlightTop = height * s.top;
-  const spotlightWidth = width * s.width;
-  const spotlightHeight = height * s.height;
+    homeScroll?.scrollToY?.(0);
+    const measureTimers = [
+      setTimeout(() => homeScroll?.remeasureAllAnchors?.(), 80),
+      setTimeout(() => homeScroll?.remeasureAllAnchors?.(), 450),
+    ];
 
-  // Responsive sizing: scale down on small screens
+    return () => {
+      measureTimers.forEach(clearTimeout);
+    };
+  }, [visible, homeScroll]);
+
+  useEffect(() => {
+    if (!visible || !step || !homeScroll) return undefined;
+
+    if (step.type === 'tabs') {
+      homeScroll.scrollToY?.(0);
+      const t = setTimeout(() => homeScroll.remeasureAllAnchors?.(), SCROLL_SETTLE_MS);
+      return () => clearTimeout(t);
+    }
+
+    homeScroll.scrollToAnchor?.(step.anchorKey);
+    const t = setTimeout(() => homeScroll.remeasureAnchor?.(step.anchorKey), SCROLL_SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [visible, currentStep, step, homeScroll]);
+
   const isSmallScreen = height < 650;
   const tooltipMaxHeight = useMemo(() => Math.min(180, height * 0.28), [height]);
   const tooltipTitleSize = isSmallScreen ? 16 : 18;
@@ -94,9 +123,9 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
   }, [onComplete, onSkip]);
 
   const handleNext = () => {
-    if (finishingRef.current) return;
-    if (currentStep < TUTORIAL_STEPS.length - 1) {
-      setCurrentStep((step) => step + 1);
+    if (finishingRef.current || activeSteps.length === 0) return;
+    if (currentStep < activeSteps.length - 1) {
+      setCurrentStep((prev) => prev + 1);
     } else {
       finishTutorial();
     }
@@ -106,31 +135,20 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
     finishTutorial();
   };
 
-  if (!visible) return null;
+  if (!visible || !step) return null;
+
+  const { left: spotlightLeft, top: spotlightTop, width: spotlightWidth, height: spotlightHeight } = spotlight;
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-    >
+    <Modal visible={visible} transparent animationType="fade" statusBarTranslucent>
       <View style={styles.overlay} pointerEvents="box-none">
-        {/* Dark overlay with spotlight hole - 4 rectangles framing the cutout */}
         <View style={StyleSheet.absoluteFill} pointerEvents="auto">
-          {/* Top */}
           <View
             style={[
               styles.dim,
-              {
-                top: 0,
-                left: 0,
-                right: 0,
-                height: spotlightTop
-              }
+              { top: 0, left: 0, right: 0, height: spotlightTop },
             ]}
           />
-          {/* Bottom */}
           <View
             style={[
               styles.dim,
@@ -138,11 +156,10 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
                 top: spotlightTop + spotlightHeight,
                 left: 0,
                 right: 0,
-                bottom: 0
-              }
+                bottom: 0,
+              },
             ]}
           />
-          {/* Left */}
           <View
             style={[
               styles.dim,
@@ -150,11 +167,10 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
                 top: spotlightTop,
                 left: 0,
                 width: spotlightLeft,
-                height: spotlightHeight
-              }
+                height: spotlightHeight,
+              },
             ]}
           />
-          {/* Right */}
           <View
             style={[
               styles.dim,
@@ -162,12 +178,10 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
                 top: spotlightTop,
                 left: spotlightLeft + spotlightWidth,
                 right: 0,
-                height: spotlightHeight
-              }
+                height: spotlightHeight,
+              },
             ]}
           />
-
-          {/* Spotlight highlight border */}
           <View
             style={[
               styles.spotlightBorder,
@@ -175,13 +189,12 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
                 left: spotlightLeft,
                 top: spotlightTop,
                 width: spotlightWidth,
-                height: spotlightHeight
-              }
+                height: spotlightHeight,
+              },
             ]}
           />
         </View>
 
-        {/* Top bar: Skip — zIndex keeps it above dim overlay touch targets */}
         <View style={[styles.topBar, { paddingTop: insets.top + 10 }]}>
           <Pressable
             onPress={handleSkip}
@@ -193,12 +206,16 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
             <Text style={styles.skipText}>Skip</Text>
           </Pressable>
           <Text style={styles.stepIndicator}>
-            {currentStep + 1} / {TUTORIAL_STEPS.length}
+            {currentStep + 1} / {activeSteps.length}
           </Text>
         </View>
 
-        {/* Bottom panel: tooltip first, then Next button, then dots - so Next never overlaps text */}
-        <View style={[styles.bottomPanel, { paddingBottom: Math.max(insets.bottom, 16) + (isSmallScreen ? 12 : 20) }]}>
+        <View
+          style={[
+            styles.bottomPanel,
+            { paddingBottom: Math.max(insets.bottom, 16) + (isSmallScreen ? 12 : 20) },
+          ]}
+        >
           <ScrollView
             style={[styles.tooltip, { maxHeight: tooltipMaxHeight, maxWidth: width - 40 }]}
             contentContainerStyle={styles.tooltipContent}
@@ -206,7 +223,14 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
             bounces={false}
           >
             <Text style={[styles.tooltipTitle, { fontSize: tooltipTitleSize }]}>{step.title}</Text>
-            <Text style={[styles.tooltipText, { fontSize: tooltipTextSize, lineHeight: tooltipLineHeight }]}>{step.tooltip}</Text>
+            <Text
+              style={[
+                styles.tooltipText,
+                { fontSize: tooltipTextSize, lineHeight: tooltipLineHeight },
+              ]}
+            >
+              {step.tooltip}
+            </Text>
           </ScrollView>
           <Pressable
             style={({ pressed }) => [
@@ -218,27 +242,21 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
             hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel={
-              currentStep === TUTORIAL_STEPS.length - 1 ? 'Get started' : 'Next tutorial step'
+              currentStep === activeSteps.length - 1 ? 'Get started' : 'Next tutorial step'
             }
           >
             <Text style={styles.nextButtonText}>
-              {currentStep === TUTORIAL_STEPS.length - 1 ? 'Get Started' : 'Next'}
+              {currentStep === activeSteps.length - 1 ? 'Get Started' : 'Next'}
             </Text>
             <Ionicons
-              name={currentStep === TUTORIAL_STEPS.length - 1 ? 'checkmark' : 'arrow-forward'}
+              name={currentStep === activeSteps.length - 1 ? 'checkmark' : 'arrow-forward'}
               size={20}
               color="#000"
             />
           </Pressable>
           <View style={[styles.pagination, isSmallScreen && { paddingTop: 8 }]}>
-            {TUTORIAL_STEPS.map((_, i) => (
-              <View
-                key={i}
-                style={[
-                  styles.dot,
-                  i === currentStep && styles.dotActive
-                ]}
-              />
+            {activeSteps.map((_, i) => (
+              <View key={i} style={[styles.dot, i === currentStep && styles.dotActive]} />
             ))}
           </View>
         </View>
@@ -250,11 +268,11 @@ const TutorialOverlay = ({ visible, onComplete, onSkip }) => {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
   },
   dim: {
     position: 'absolute',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)'
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
   },
   spotlightBorder: {
     position: 'absolute',
@@ -265,7 +283,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.6,
     shadowRadius: 8,
-    elevation: 10
+    elevation: 10,
   },
   bottomPanel: {
     paddingHorizontal: 20,
@@ -278,20 +296,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 255, 0.3)'
+    borderColor: 'rgba(0, 255, 255, 0.3)',
   },
   tooltipContent: {
-    paddingVertical: 4
+    paddingVertical: 4,
   },
   tooltipTitle: {
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 8,
-    textAlign: 'center'
+    textAlign: 'center',
   },
   tooltipText: {
     color: '#00ffff',
-    textAlign: 'center'
+    textAlign: 'center',
   },
   topBar: {
     flexDirection: 'row',
@@ -305,15 +323,15 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   skipButton: {
-    padding: 10
+    padding: 10,
   },
   skipText: {
     color: '#00ffff',
-    fontSize: 16
+    fontSize: 16,
   },
   stepIndicator: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 14
+    fontSize: 14,
   },
   nextButton: {
     flexDirection: 'row',
@@ -327,32 +345,32 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 5
+    elevation: 5,
   },
   nextButtonCompact: {
     paddingVertical: 10,
-    paddingHorizontal: 24
+    paddingHorizontal: 24,
   },
   nextButtonText: {
     color: '#000',
     fontSize: 17,
-    fontWeight: 'bold'
+    fontWeight: 'bold',
   },
   pagination: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 8
+    gap: 8,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(0, 255, 255, 0.3)'
+    backgroundColor: 'rgba(0, 255, 255, 0.3)',
   },
   dotActive: {
     backgroundColor: '#00ffff',
-    width: 24
-  }
+    width: 24,
+  },
 });
 
 export default TutorialOverlay;

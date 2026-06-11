@@ -38,6 +38,7 @@ export default function TabLayout() {
   const { workspace } = useAuthSession();
   const hideNutritionForStudent = workspace === 'student';
   const showSpiritualTab = workspace === 'student';
+  const isCampusStudent = workspace === 'student';
 
   const screenOptions = React.useMemo(() => ({ route }) => {
     const config = tabConfig[route.name];
@@ -50,11 +51,11 @@ export default function TabLayout() {
       tabBarIcon: ({ focused, color, size }) => (
         <Ionicons name={typeof icon === 'function' ? icon(focused) : 'help-circle-outline'} size={size} color={color} />
       ),
-      tabBarActiveTintColor: '#00ffff',
-      tabBarInactiveTintColor: 'gray',
+      tabBarActiveTintColor: isCampusStudent ? '#2563eb' : '#00ffff',
+      tabBarInactiveTintColor: isCampusStudent ? '#94a3b8' : 'gray',
       tabBarStyle: {
-        backgroundColor: '#000000',
-        borderTopColor: 'rgba(255, 255, 255, 0.05)',
+        backgroundColor: isCampusStudent ? '#ffffff' : '#000000',
+        borderTopColor: isCampusStudent ? '#e2e8f0' : 'rgba(255, 255, 255, 0.05)',
         paddingTop: 5,
         paddingBottom: Platform.OS === 'ios' ? (isIphoneX ? 25 : 5) : 5,
         height: Platform.OS === 'ios' ? (isIphoneX ? 80 : 60) : 60,
@@ -67,7 +68,9 @@ export default function TabLayout() {
         flex: 1,
       }
     };
-  }, [t]);
+  }, [t, isCampusStudent]);
+
+  const studentInitialTab = isCampusStudent ? 'spiritual' : 'home';
 
   return (
     <TutorialGate>
@@ -77,7 +80,7 @@ export default function TabLayout() {
         <TherapistProvider>
           <View style={styles.container}>
             <BannerAdProvider>
-            <Tabs screenOptions={screenOptions} initialRouteName="home">
+            <Tabs screenOptions={screenOptions} initialRouteName={studentInitialTab}>
             <Tabs.Screen name="home" />
             <Tabs.Screen name="workout" />
             <Tabs.Screen

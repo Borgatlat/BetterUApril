@@ -37,6 +37,8 @@ import { SpiritualPulseCard } from "../../components/school/spiritual/SpiritualP
 import { IntentionsBoardCard } from "../../components/school/spiritual/IntentionsBoardCard";
 
 import { SpiritualTodaySection } from "../../components/school/spiritual/SpiritualTodaySection";
+import { FormationHeroCard } from "../../components/school/spiritual/FormationHeroCard";
+import { useOrgBranding } from "../../context/OrgBrandingContext";
 
 import { SpiritualTodayProgress } from "../../components/school/spiritual/SpiritualTodayProgress";
 
@@ -170,8 +172,10 @@ export default function SpiritualTab() {
   const scrollRef = useRef(null);
 
   const campusYRef = useRef(0);
+  const todayYRef = useRef(0);
 
   const { orgId, workspace, isLoading: sessionLoading } = useAuthSession();
+  const { labels, branding } = useOrgBranding();
 
   const { refetchProfile } = useAuth();
 
@@ -348,6 +352,12 @@ export default function SpiritualTab() {
 
   }, []);
 
+  const scrollToTodaySection = useCallback(() => {
+    if (todayYRef.current > 0) {
+      scrollRef.current?.scrollTo({ y: todayYRef.current - 24, animated: true });
+    }
+  }, []);
+
 
 
   React.useEffect(() => {
@@ -430,18 +440,11 @@ export default function SpiritualTab() {
     >
 
       <Text style={styles.h1} accessibilityRole="header">
-
-        Spiritual life
-
+        {labels.spiritualTabTitle}
       </Text>
+      <Text style={styles.sub}>{labels.spiritualTabSubtitle}</Text>
 
-      <Text style={styles.sub}>
-
-        Scripture, Ignatian prayer, campus formation, and service — in one place.
-
-      </Text>
-
-
+      <FormationHeroCard labels={labels} onLiveTheFourth={scrollToTodaySection} />
 
       <TouchableOpacity
 
@@ -467,7 +470,7 @@ export default function SpiritualTab() {
 
 
 
-      <SpiritualTodayProgress weekCode={weekCode} onOpenLiveFourth={() => {}} />
+      <SpiritualTodayProgress weekCode={weekCode} onOpenLiveFourth={scrollToTodaySection} />
 
 
 
@@ -493,7 +496,12 @@ export default function SpiritualTab() {
 
 
 
-      <SectionGroup title="Today" subtitle="Prayer · scripture · Live the Fourth · service" defaultExpanded>
+      <View
+        onLayout={(e) => {
+          todayYRef.current = e.nativeEvent.layout.y;
+        }}
+      >
+      <SectionGroup title="Today" subtitle={`${labels.formationHeroKicker} · ${labels.serviceLabel}`} defaultExpanded>
 
         <SpiritualTodaySection
 
@@ -508,6 +516,7 @@ export default function SpiritualTab() {
         />
 
       </SectionGroup>
+      </View>
 
 
 
@@ -531,7 +540,7 @@ export default function SpiritualTab() {
 
       <SectionGroup
 
-        title="Formation"
+        title={labels.valuesSection}
 
         subtitle="Retreat tracks & campus prompts"
 

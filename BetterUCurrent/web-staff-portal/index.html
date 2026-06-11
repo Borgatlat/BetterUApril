@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BetterU School Staff Portal</title>
+    <link rel="stylesheet" href="portal.css" />
+  </head>
+  <body>
+    <!-- NOT part of the mobile app — deploy this folder to your school website -->
+
+    <div id="login-screen" class="hidden">
+      <div class="shell">
+        <div class="card">
+          <h1>BetterU Staff Portal</h1>
+          <p class="muted">Counselors and admins — triage, alerts, exports, and pilot reports.</p>
+          <div id="invite-banner" class="success hidden" style="margin: 12px 0"></div>
+          <form id="login-form" style="margin-top: 16px">
+            <label class="muted">School email</label>
+            <input id="login-email" type="email" required autocomplete="email" style="margin: 6px 0 12px" />
+            <label class="muted">Password</label>
+            <input id="login-password" type="password" required autocomplete="current-password" style="margin: 6px 0 12px" />
+            <button type="submit" style="width: 100%">Sign in</button>
+            <p id="login-error" class="error hidden"></p>
+          </form>
+          <p class="muted" style="margin-top: 16px; font-size: 12px">
+            First time? Open your invite link, create an account in the BetterU app with the same email, then sign in here.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div id="app-screen" class="hidden">
+      <div class="shell no-print">
+        <div class="row-between">
+          <div>
+            <h1>BetterU Staff Portal</h1>
+            <p class="muted"><span id="staff-name"></span> · <span id="staff-org"></span></p>
+          </div>
+          <div class="row">
+            <button id="refresh-btn" class="secondary">Refresh</button>
+            <button id="logout-btn" class="secondary">Sign out</button>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <button type="button" data-panel="dashboard" class="active">Dashboard</button>
+          <button type="button" data-panel="triage">Triage</button>
+          <button type="button" data-panel="alerts">Alerts</button>
+          <button type="button" data-panel="exports">Exports</button>
+          <button type="button" data-panel="invites">Staff invites</button>
+          <button type="button" data-panel="roster">Roster</button>
+          <button type="button" data-panel="parents">Parent links</button>
+          <button type="button" data-panel="pilot">30-day pilot</button>
+        </nav>
+
+        <section id="panel-dashboard" class="panel card">
+          <h2>Campus pulse (7 days)</h2>
+          <div id="dashboard-metrics">Loading…</div>
+        </section>
+
+        <section id="panel-triage" class="panel card hidden">
+          <h2>Counselor triage queue</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Tier</th>
+                <th>Status</th>
+                <th>Student</th>
+                <th>Reason</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="triage-body"></tbody>
+          </table>
+        </section>
+
+        <section id="panel-alerts" class="panel card hidden">
+          <h2>Counselor alerts</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="alerts-body"></tbody>
+          </table>
+        </section>
+
+        <section id="panel-exports" class="panel card hidden">
+          <h2>Board-ready exports</h2>
+          <p class="muted">De-identified cohort data for leadership meetings.</p>
+          <div class="row" style="margin-top: 12px">
+            <button type="button" id="export-json-btn">Download JSON bundle</button>
+            <button type="button" id="export-csv-btn" class="secondary">Download wellness CSV</button>
+          </div>
+        </section>
+
+        <section id="panel-invites" class="panel card hidden">
+          <h2>Invite counselors</h2>
+          <form id="invite-form" class="row" style="align-items: flex-end">
+            <div style="flex: 2; min-width: 200px">
+              <label class="muted">Email</label>
+              <input id="invite-email" type="email" required />
+            </div>
+            <div style="flex: 1; min-width: 120px">
+              <label class="muted">Role</label>
+              <select id="invite-role">
+                <option value="counselor">Counselor</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <button type="submit">Create invite link</button>
+          </form>
+          <p id="invite-error" class="error hidden"></p>
+          <div id="invite-result" style="margin-top: 12px"></div>
+          <table style="margin-top: 16px">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Link</th>
+              </tr>
+            </thead>
+            <tbody id="invites-body"></tbody>
+          </table>
+        </section>
+
+        <section id="panel-roster" class="panel card hidden">
+          <h2>Student roster import</h2>
+          <p class="muted">Paste CSV: email, full_name, grade_level — one student per line. Students get grade/name when they sign in.</p>
+          <textarea id="roster-csv" rows="8" placeholder="jane@school.edu,Jane Doe,11&#10;john@school.edu,John Smith,10"></textarea>
+          <button type="button" id="roster-import-btn" style="margin-top: 12px">Import roster</button>
+          <p id="roster-error" class="error hidden"></p>
+          <p id="roster-result" class="success"></p>
+          <table style="margin-top: 16px">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Name</th>
+                <th>Grade</th>
+                <th>Enrolled</th>
+              </tr>
+            </thead>
+            <tbody id="roster-body"></tbody>
+          </table>
+        </section>
+
+        <section id="panel-parents" class="panel card hidden">
+          <h2>Link parent to student</h2>
+          <p class="muted">Parent creates a BetterU account with this email, then opens the Family portal in the app.</p>
+          <div class="row" style="align-items: flex-end; margin-top: 12px">
+            <div style="flex: 2">
+              <label class="muted">Parent email</label>
+              <input id="parent-email" type="email" />
+            </div>
+            <div style="flex: 2">
+              <label class="muted">Student profile ID (UUID)</label>
+              <input id="parent-student-id" placeholder="from Supabase profiles" />
+            </div>
+            <button type="button" id="parent-link-btn">Link</button>
+          </div>
+          <p id="parent-error" class="error hidden"></p>
+          <p id="parent-result" class="success"></p>
+        </section>
+
+        <section id="panel-pilot" class="panel card hidden">
+          <div class="row-between no-print">
+            <h2>30-day pilot report</h2>
+            <button type="button" id="print-pilot-btn" class="secondary">Print / Save PDF</button>
+          </div>
+          <pre id="pilot-report-print">Loading…</pre>
+        </section>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
+    <script src="portal.js"></script>
+  </body>
+</html>

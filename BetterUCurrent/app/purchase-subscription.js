@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Alert, Linking, StyleSheet, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { LogoImage } from '../utils/imageUtils';
 import { useAuth } from '../context/AuthContext';
@@ -15,6 +15,20 @@ import {
 } from '../lib/purchases';
 import { supabase } from '../lib/supabase';
 import { isExpoGo, nativeFeatureUnavailableMessage } from '../lib/runtimeEnvironment';
+import { getPremiumUpgradeCopy } from '../lib/premiumConversion';
+import PremiumBenefitsShowcase from '../components/premium/PremiumBenefitsShowcase';
+import { PREMIUM_VALUE_ANCHOR } from '../lib/premiumBenefits';
+import {
+  getPackagePeriodLabel,
+  getPackagePlanTitle,
+  getPreferredDefaultPackage,
+  getSubscriptionDurationDays,
+  isMonthlyPackage,
+  isWeeklyPackage,
+  isYearlyPackage,
+  pickActiveSubscriptionProduct,
+  sortPackagesForDisplay,
+} from '../lib/subscriptionProducts';
 
 /**
  * Format a single offer (intro or discount) for display.
@@ -82,12 +96,14 @@ function getPromoDurationText(discount) {
  */
 function getDisplayPrice(product) {
   const isYearly = product?.subscriptionPeriod === 'P1Y' || product?.packageType === 'ANNUAL';
-  const periodLabel = isYearly ? 'year' : 'month';
-  const standardPrice = product?.priceString ?? (isYearly ? '$59.99' : '$5.99');
+  const isWeekly = product?.subscriptionPeriod === 'P1W' || product?.packageType === 'WEEKLY';
+  const periodLabel = isWeekly ? 'week' : isYearly ? 'year' : 'month';
+  const standardPrice = product?.priceString ?? (isWeekly ? '$4.99' : isYearly ? '$59.99' : '$5.99');
   const discount = product?.discounts?.[0];
   if (discount?.priceString) {
     const discountPeriod = (discount.periodUnit || '').toLowerCase();
-    const discountPeriodLabel = discountPeriod === 'year' ? 'year' : discountPeriod === 'month' ? 'month' : periodLabel;
+    const discountPeriodLabel =
+      discountPeriod === 'year' ? 'year' : discountPeriod === 'week' ? 'week' : discountPeriod === 'month' ? 'month' : periodLabel;
     return {
       originalPrice: standardPrice,
       displayPrice: discount.priceString,
@@ -101,14 +117,22 @@ function getDisplayPrice(product) {
   return { originalPrice: standardPrice, displayPrice: standardPrice, periodLabel, isPromo: false };
 }
 
+/** Short billing unit for CTA subtext: wk, mo, yr */
+function shortPeriodLabel(periodLabel) {
+  if (periodLabel === 'week') return 'wk';
+  if (periodLabel === 'year') return 'yr';
+  return 'mo';
+}
+
 function PurchaseSubscriptionScreen() {
   const router = useRouter();
+  const { reason } = useLocalSearchParams();
+  const upgradeCopy = getPremiumUpgradeCopy(typeof reason === 'string' ? reason : undefined);
   const { user, refetchProfile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [offerings, setOfferings] = useState(null);
   const [selectedPackage, setSelectedPackage] = useState(null);
   const [error, setError] = useState(null);
-  const [selectedPlan, setSelectedPlan] = useState('monthly'); // 'monthly' or 'yearly'
   const [hasExistingSubscription, setHasExistingSubscription] = useState(null); // null = loading, true/false after check
 
   useEffect(() => {
@@ -158,8 +182,12 @@ function PurchaseSubscriptionScreen() {
         return;
       }
 
-      console.log('Setting offerings:', offeringsData.current);
-      setOfferings(offeringsData.current);
+      const sortedOffering = {
+        ...offeringsData.current,
+        availablePackages: sortPackagesForDisplay(offeringsData.current.availablePackages),
+      };
+      console.log('Setting offerings:', sortedOffering);
+      setOfferings(sortedOffering);
 
       // Log all available packages
       console.log('All available packages:', offeringsData.current.availablePackages.map(pkg => ({
@@ -169,19 +197,9 @@ function PurchaseSubscriptionScreen() {
         period: pkg.product.subscriptionPeriod
       })));
 
-      // Set default selected package to monthly
-      const monthlyPackage = offeringsData.current.availablePackages.find(
-        pkg => pkg.product.subscriptionPeriod === 'P1M' || pkg.packageType === 'MONTHLY'
-      );
-      console.log('Monthly package found:', monthlyPackage);
-
-      if (monthlyPackage) {
-        console.log('Setting default package to monthly');
-        setSelectedPackage(monthlyPackage);
-      } else {
-        console.log('No monthly package found, using first available package');
-        setSelectedPackage(offeringsData.current.availablePackages[0]);
-      }
+      const defaultPackage = getPreferredDefaultPackage(sortedOffering.availablePackages);
+      console.log('Default package:', defaultPackage?.identifier);
+      setSelectedPackage(defaultPackage);
     } catch (error) {
       console.error('Error loading offerings:', error);
       setError('Failed to load subscription options');
@@ -248,12 +266,8 @@ function PurchaseSubscriptionScreen() {
           
           // Try to get from subscriptionsByProductIdentifier first (more reliable)
           if (Object.keys(subscriptionsByProduct).length > 0) {
-            // Prefer yearly over monthly
-            const yearlySub = subscriptionsByProduct['betteru_premium_yearly'];
-            const monthlySub = subscriptionsByProduct['betteru_premium_monthly'];
-            const sub = yearlySub || monthlySub;
-            
-            if (sub && sub.isActive) {
+            const sub = pickActiveSubscriptionProduct(subscriptionsByProduct);
+            if (sub) {
               productId = sub.productIdentifier;
               transactionId = sub.storeTransactionId || sub.originalTransactionId;
               purchaseDate = new Date(sub.purchaseDate);
@@ -275,9 +289,7 @@ function PurchaseSubscriptionScreen() {
           if (productId) {
             // If no expiration date, calculate it based on product identifier
             if (!expirationDate) {
-              const isYearly = productId?.includes('yearly') || 
-                               productId?.includes('annual');
-              const daysToAdd = isYearly ? 365 : 30;
+              const daysToAdd = getSubscriptionDurationDays(productId);
               expirationDate = new Date(purchaseDate.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
               console.log('⚠️ No expiration date from RevenueCat, calculated:', expirationDate.toISOString());
             }
@@ -483,13 +495,7 @@ function PurchaseSubscriptionScreen() {
       return null;
     }
 
-    const getPeriodText = (pkg) => {
-      if (pkg.packageType === 'MONTHLY') return 'month';
-      if (pkg.packageType === 'ANNUAL') return 'year';
-      if (pkg.product.subscriptionPeriod === 'P1M') return 'month';
-      if (pkg.product.subscriptionPeriod === 'P1Y') return 'year';
-      return 'month';
-    };
+    const getPeriodText = (pkg) => getPackagePeriodLabel(pkg);
     
     // Show 'Monthly' instead of 'Preview Product' for preview mode
     let displayTitle = pkg.product.title;
@@ -540,144 +546,21 @@ function PurchaseSubscriptionScreen() {
       <View style={styles.header}>
         <LogoImage size={120} style={styles.logo} />
         <Text style={styles.title}>
-          {hasExistingSubscription === true ? 'Upgrade Your Experience' : 'Start your one week free trial'}
+          {hasExistingSubscription === true ? 'Upgrade Your Experience' : upgradeCopy.title}
         </Text>
         {hasExistingSubscription !== true && (
-          <Text style={styles.headerSubtitle}>7-day free trial. After the trial, you'll be charged the price below unless you cancel.</Text>
+          <Text style={styles.headerSubtitle}>{upgradeCopy.subtitle}</Text>
         )}
       </View>
 
-      {/* Premium Features Section - Moved to top for better visibility */}
       <View style={styles.featuresContainer}>
-        <Text style={styles.featuresTitle}>Premium Features</Text>
+        <Text style={styles.featuresTitle}>Everything in Premium</Text>
         <Text style={styles.featuresSubtitle}>
           {hasExistingSubscription === true
-            ? 'Unlock advanced features for enhanced fitness and mental wellness'
-            : 'Unlock everything below with your free trial'}
+            ? PREMIUM_VALUE_ANCHOR.subline
+            : `Try it free for 7 days — then ${PREMIUM_VALUE_ANCHOR.weeklyPriceLabel}`}
         </Text>
-        
-        <View style={styles.featuresList}>
-          {/* Most Wanted Features */}
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="chatbubbles" size={20} color="#FFD700" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>100 Daily AI Messages</Text>
-              <Text style={styles.featureDescription}>Unlimited guidance, motivation, and support whenever you need it</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="restaurant" size={20} color="#00ffff" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>More AI Meals Daily</Text>
-              <Text style={styles.featureDescription}>More meal ideas than free users - never run out of inspiration</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="fitness" size={20} color="#00ffff" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>More AI Workouts Daily</Text>
-              <Text style={styles.featureDescription}>More workouts - fresh routines whenever you need them</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="flower" size={20} color="#8b5cf6" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>More AI Mental Sessions Daily</Text>
-              <Text style={styles.featureDescription}>More sessions - meditation, breathing & mindfulness on demand</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="trophy" size={20} color="#00ffff" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Premium Workouts</Text>
-              <Text style={styles.featureDescription}>Expert-designed plans for faster, better results</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="trending-up" size={20} color="#FFD700" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Premium Bond Rates</Text>
-              <Text style={styles.featureDescription}>Earn more rewards with higher returns on your fitness bonds</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="clipboard-outline" size={20} color="#00ffff" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Custom Nutrition Goals</Text>
-              <Text style={styles.featureDescription}>Set your own targets - full control over your nutrition</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="people" size={20} color="#00ffff" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Public Groups</Text>
-              <Text style={styles.featureDescription}>Build communities and connect with fitness enthusiasts worldwide</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="timer" size={20} color="#00ffff" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Custom Rest Times</Text>
-              <Text style={styles.featureDescription}>Optimize your training with personalized rest intervals</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="headset" size={20} color="#8b5cf6" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Guided Audio Sessions</Text>
-              <Text style={styles.featureDescription}>Professional narration for deeper relaxation and focus</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="star" size={20} color="#FFD700" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Gold Profile Glow</Text>
-              <Text style={styles.featureDescription}>Stand out with a stunning gold glow - show your status</Text>
-            </View>
-          </View>
-
-          <View style={styles.featureItem}>
-            <View style={styles.featureIcon}>
-              <Ionicons name="sparkles" size={20} color="#00ffff" />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>And More</Text>
-              <Text style={styles.featureDescription}>Unlock additional premium features and exclusive content</Text>
-            </View>
-          </View>
-        </View>
+        <PremiumBenefitsShowcase />
       </View>
 
       {/* Plans Header */}
@@ -688,7 +571,7 @@ function PurchaseSubscriptionScreen() {
         <Text style={styles.plansSubtitle}>
           {hasExistingSubscription === true
             ? 'Select the subscription that works best for you'
-            : 'Choose monthly or yearly — 7-day free trial, then you can cancel anytime'}
+            : 'Weekly plan — 7-day free trial, then about $5/week. Cancel anytime in Settings.'}
         </Text>
       </View>
 
@@ -719,7 +602,9 @@ function PurchaseSubscriptionScreen() {
         <>
           <View style={styles.pricingContainer}>
             {offerings?.availablePackages?.map((pkg) => {
-              const isMonthly = pkg.product.subscriptionPeriod === 'P1M' || pkg.packageType === 'MONTHLY';
+              const isWeekly = isWeeklyPackage(pkg);
+              const isMonthly = isMonthlyPackage(pkg);
+              const isYearly = isYearlyPackage(pkg);
               const isSelected = selectedPackage?.identifier === pkg.identifier;
               const displayPrice = getDisplayPrice(pkg.product);
               return (
@@ -733,7 +618,7 @@ function PurchaseSubscriptionScreen() {
                 >
                   <View style={styles.pricingHeader}>
                     <Text style={styles.pricingTitle}>
-                      {isMonthly ? 'Monthly' : 'Yearly'}
+                      {getPackagePlanTitle(pkg)}
                     </Text>
                     <View style={styles.pricingPriceRow}>
                       {displayPrice.isPromo ? (
@@ -751,19 +636,24 @@ function PurchaseSubscriptionScreen() {
                       per {displayPrice.periodLabel}
                       {displayPrice.isPromo && displayPrice.promoDurationText ? ` · ${displayPrice.promoDurationText}` : ''}
                       {displayPrice.isPromo && displayPrice.thenPriceString && displayPrice.promoDurationText
-                        ? ` · then ${displayPrice.thenPriceString}/${displayPrice.thenPeriodLabel === 'year' ? 'yr' : 'mo'}`
+                        ? ` · then ${displayPrice.thenPriceString}/${shortPeriodLabel(displayPrice.thenPeriodLabel)}`
                         : ''}
                     </Text>
-                    {!isMonthly && (
+                    {isWeekly && (
                       <View style={styles.savingsBadge}>
-                        <Text style={styles.savingsText}>Save 17%</Text>
+                        <Text style={styles.savingsText}>Most popular</Text>
+                      </View>
+                    )}
+                    {isYearly && (
+                      <View style={styles.savingsBadge}>
+                        <Text style={styles.savingsText}>Best value</Text>
                       </View>
                     )}
                   </View>
                   <View style={styles.pricingFeatures}>
                     <Text style={styles.pricingFeature}>• All Premium Features</Text>
                     <Text style={styles.pricingFeature}>
-                      {isMonthly ? '• Cancel anytime' : '• Best value'}
+                      {isWeekly ? '• Low weekly commitment' : isYearly ? '• Best annual savings' : '• Cancel anytime'}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -785,7 +675,7 @@ function PurchaseSubscriptionScreen() {
             >
               {hasExistingSubscription === true ? (
                 <Text style={styles.subscribeButtonText}>
-                  {loading ? 'Loading...' : `Subscribe ${selectedPackage?.product.subscriptionPeriod === 'P1M' ? 'Monthly' : 'Yearly'}`}
+                  {loading ? 'Loading...' : `Subscribe ${getPackagePlanTitle(selectedPackage)}`}
                 </Text>
               ) : (
                 <>
@@ -801,8 +691,10 @@ function PurchaseSubscriptionScreen() {
                       {(() => {
                         const dp = selectedPackage ? getDisplayPrice(selectedPackage.product) : null;
                         if (!dp) return 'Then choose your plan';
-                        const per = dp.periodLabel === 'year' ? 'yr' : 'mo';
-                        if (dp.isPromo && dp.thenPriceString) return `Then ${dp.displayPrice}/${per} (then ${dp.thenPriceString}/${dp.thenPeriodLabel === 'year' ? 'yr' : 'mo'})`;
+                        const per = shortPeriodLabel(dp.periodLabel);
+                        if (dp.isPromo && dp.thenPriceString) {
+                          return `Then ${dp.displayPrice}/${per} (then ${dp.thenPriceString}/${shortPeriodLabel(dp.thenPeriodLabel)})`;
+                        }
                         return `Then ${dp.displayPrice} per ${dp.periodLabel}`;
                       })()}
                     </Text>
@@ -819,8 +711,8 @@ function PurchaseSubscriptionScreen() {
             const displayPrice = getDisplayPrice(selectedPackage.product);
             const introText = introOffer ? introOffer.introLabel : '7-day free trial';
             const afterText = introOffer ? introOffer.introDurationLabel : 'After 7 days';
-            const perLabel = displayPrice.periodLabel === 'year' ? 'year' : 'month';
-            const thenPerLabel = displayPrice.thenPeriodLabel === 'year' ? 'year' : 'month';
+            const perLabel = displayPrice.periodLabel;
+            const thenPerLabel = displayPrice.thenPeriodLabel || displayPrice.periodLabel;
             return (
               <View style={styles.trialDisclosureBox}>
                 <Text style={styles.trialDisclosureTitle}>Free trial & billing</Text>
@@ -1143,6 +1035,50 @@ const styles = StyleSheet.create({
     opacity: 0.8,
     textAlign: 'center',
     marginBottom: 20,
+  },
+  compareContainer: {
+    marginBottom: 24,
+    backgroundColor: 'rgba(255, 215, 0, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.2)',
+  },
+  compareTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFD700',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  compareHeaderRow: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.15)',
+    paddingBottom: 8,
+    marginBottom: 4,
+  },
+  compareRow: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  compareCell: {
+    flex: 1,
+    fontSize: 12,
+    color: '#ccc',
+    textAlign: 'center',
+  },
+  compareFeatureCol: {
+    flex: 1.6,
+    textAlign: 'left',
+    color: '#fff',
+    fontSize: 11,
+  },
+  comparePremiumCol: {
+    color: '#00ffff',
+    fontWeight: '600',
   },
   plansHeader: {
     alignItems: 'center',

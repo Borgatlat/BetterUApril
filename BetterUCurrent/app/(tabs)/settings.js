@@ -17,7 +17,14 @@ import { useLanguage, SUPPORTED_LOCALES } from '../../context/LanguageContext';
 import { createDailyReminderNotification } from '../../utils/notificationHelpers';
 import { getStreakStatus } from '../../utils/streakHelpers';
 import { getEngagementLevel } from '../../utils/engagementService';
+import {
+  DEFAULT_RETENTION_PREFS,
+  normalizeRetentionPrefs,
+  retentionPrefsFromProfile,
+} from '../../utils/retentionPreferences';
+import { getTypicalOpenHour, formatHourLabel } from '../../utils/notificationOpenTracking';
 import { LinearGradient } from 'expo-linear-gradient';
+import { PREMIUM_SETTINGS_HIGHLIGHTS } from '../../lib/premiumBenefits';
 
 /**
  * Settings always uses the app’s default dark theme (matches useHomeTheme defaults in homePageCustomization).
@@ -77,8 +84,20 @@ const SettingsScreen = () => {
   const [spotifyEnabled, setSpotifyEnabled] = useState(false);
   const [showStrideModal, setShowStrideModal] = useState(false);
   const [strideLengthInput, setStrideLengthInput] = useState('0.75');
+  const [retentionPrefs, setRetentionPrefs] = useState(DEFAULT_RETENTION_PREFS);
+  const [typicalOpenHour, setTypicalOpenHour] = useState(null);
 
   console.warn('[SettingsScreen] isPremium:', isPremium);
+
+  useEffect(() => {
+    getTypicalOpenHour().then(setTypicalOpenHour);
+  }, []);
+
+  useEffect(() => {
+    if (userProfile) {
+      setRetentionPrefs(retentionPrefsFromProfile(userProfile));
+    }
+  }, [userProfile?.notification_preferences?.retention]);
 
   // Load saved settings on mount
   useEffect(() => {
@@ -538,6 +557,19 @@ const SettingsScreen = () => {
     }
   };
 
+  const updateRetentionPreference = async (patch) => {
+    if (!userProfile?.id || typeof updateProfile !== 'function') return;
+    const next = normalizeRetentionPrefs({ ...retentionPrefs, ...patch });
+    setRetentionPrefs(next);
+    const currentPrefs = userProfile.notification_preferences || {};
+    await updateProfile({
+      notification_preferences: {
+        ...currentPrefs,
+        retention: next,
+      },
+    });
+  };
+
   const handleReminderTimeChange = async (selectedDate) => {
     if (!selectedDate) return;
     setReminderTime(selectedDate);
@@ -601,6 +633,12 @@ const SettingsScreen = () => {
                 <Text style={[styles.premiumUpgradeSubtitle, { color: textSecondary }]}>
                   {t('settings.upgradeSubtitle')}
                 </Text>
+                {PREMIUM_SETTINGS_HIGHLIGHTS.map((line) => (
+                  <View key={line} style={styles.premiumHighlightRow}>
+                    <Ionicons name="checkmark-circle" size={14} color={accentColor} />
+                    <Text style={[styles.premiumHighlightText, { color: textSecondary }]}>{line}</Text>
+                  </View>
+                ))}
               </View>
               <TouchableOpacity style={styles.premiumUpgradeButton} onPress={handleSubscriptionManagement} activeOpacity={0.88}>
                 <LinearGradient
@@ -806,6 +844,62 @@ const SettingsScreen = () => {
               }}
             />
           )}
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: accentColor }]}>Retention & alerts</Text>
+        <View style={[styles.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+          <Text style={[styles.settingLabel, { color: textSecondary, marginBottom: 10 }]}>
+            Notification intensity (daily cap for low-priority pushes)
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
+            {['light', 'normal', 'high'].map((level) => {
+              const active = retentionPrefs.intensity === level;
+              return (
+                <TouchableOpacity
+                  key={level}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 10,
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: active ? accentColor : cardBorder,
+                    backgroundColor: active ? `${accentColor}22` : 'transparent',
+                    alignItems: 'center',
+                  }}
+                  onPress={() => updateRetentionPreference({ intensity: level })}
+                >
+                  <Text style={{ color: active ? accentColor : textColor, fontWeight: '700', textTransform: 'capitalize' }}>
+                    {level}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={[styles.settingRow, styles.settingRowWithBorder, { borderBottomColor: cardBorder }]}>
+            <View style={styles.settingInfo}>
+              <Text style={[styles.settingLabel, { color: textColor }]}>Quiet hours</Text>
+              <Text style={[styles.settingValue, { color: textSecondary }]}>
+                {retentionPrefs.quiet_hours_enabled
+                  ? `${retentionPrefs.quiet_hours_start}:00 – ${retentionPrefs.quiet_hours_end}:00`
+                  : 'Off'}
+              </Text>
+            </View>
+            <Switch
+              value={retentionPrefs.quiet_hours_enabled}
+              onValueChange={(v) => updateRetentionPreference({ quiet_hours_enabled: v })}
+              trackColor={{ false: '#333', true: `${accentColor}50` }}
+              thumbColor={retentionPrefs.quiet_hours_enabled ? accentColor : '#666'}
+            />
+          </View>
+
+          {typicalOpenHour != null ? (
+            <Text style={[styles.settingValue, { color: textSecondary, marginTop: 8, paddingHorizontal: 4 }]}>
+              You often open alerts around {formatHourLabel(typicalOpenHour)} — we use this to tune reminder timing.
+            </Text>
+          ) : null}
         </View>
       </View>
 
@@ -2120,6 +2214,18 @@ const styles = StyleSheet.create({
   premiumUpgradeSubtitle: {
     fontSize: 15,
     lineHeight: 22,
+    marginBottom: 8,
+  },
+  premiumHighlightRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 6,
+  },
+  premiumHighlightText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
   },
   premiumUpgradeButton: {
     borderRadius: 14,

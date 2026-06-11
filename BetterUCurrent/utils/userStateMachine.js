@@ -46,7 +46,7 @@ async function getLastActivityAt(userId) {
     supabase
       .from('mental_session_logs')
       .select('completed_at')
-      .eq('user_id', userId)
+      .eq('profile_id', userId)
       .not('completed_at', 'is', null)
       .order('completed_at', { ascending: false })
       .limit(1),

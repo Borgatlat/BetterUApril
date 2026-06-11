@@ -15,7 +15,9 @@ import { FloatingAITherapist } from '../../components/FloatingAITherapist';
 import { MentalSessionShareModal } from '../../components/MentalSessionShareModal';
 import { SharedMentalSessionsList } from '../../components/SharedMentalSessionsList';
 import { VolunteerPromoCard } from '../../components/school/VolunteerPromoCard';
+import { B2CCrisisSupportCard } from '../../components/mental/B2CCrisisSupportCard';
 import { useAuthSession } from '../../hooks/useAuthSession';
+import { spiritualTheme as campusT } from '../../components/school/spiritual/spiritualTheme';
 import { DAILY_EXAMEN_CATEGORY } from '../../lib/dailyExamNavigation';
 import { useBottomChromeInsets } from '../../context/BottomChromeContext';
 
@@ -131,6 +133,7 @@ const MentalScreen = () => {
   const insets = useSafeAreaInsets();
   const { scrollPaddingBottom } = useBottomChromeInsets();
   const { workspace } = useAuthSession();
+  const isCampusStudent = workspace === 'student';
   const { user } = useAuth();
   const { updateMood, incrementStat, mood } = useTracking();
   const [showMoodModal, setShowMoodModal] = useState(false);
@@ -597,57 +600,107 @@ const MentalScreen = () => {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isCampusStudent && { backgroundColor: campusT.screenBg }]}>
       <ScrollView
         style={{ paddingHorizontal: 20, paddingBottom: 20 }}
         contentContainerStyle={{ paddingBottom: scrollPaddingBottom }}
       >
         {/* Title first (safe area) so school pulse card below is fully visible */}
         <View style={[styles.headerSection, { paddingTop: Math.max(insets.top, 12) + 4 }]}>
-          <Text style={styles.title}>Mental Wellness</Text>
+          <Text
+            style={[
+              styles.title,
+              isCampusStudent && { color: campusT.text, textShadowColor: 'transparent' },
+            ]}
+          >
+            {isCampusStudent ? 'Check-in & calm' : 'Mental Wellness'}
+          </Text>
           <View style={styles.quickActionsRow}>
             <TouchableOpacity
-              style={styles.quickActionButton}
+              style={[
+                styles.quickActionButton,
+                isCampusStudent && {
+                  backgroundColor: campusT.cardBg,
+                  borderColor: campusT.border,
+                },
+              ]}
               onPress={() => setShowMoodModal(true)}
               activeOpacity={0.7}
             >
-              <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(0, 255, 255, 0.15)' }]}>
-                <Ionicons name="happy-outline" size={24} color="#00ffff" />
+              <View
+                style={[
+                  styles.quickActionIcon,
+                  { backgroundColor: isCampusStudent ? campusT.accentDim : 'rgba(0, 255, 255, 0.15)' },
+                ]}
+              >
+                <Ionicons
+                  name="happy-outline"
+                  size={24}
+                  color={isCampusStudent ? campusT.accent : '#00ffff'}
+                />
               </View>
-              <Text style={styles.quickActionText}>Track Mood</Text>
+              <Text style={[styles.quickActionText, isCampusStudent && { color: campusT.text }]}>
+                Track Mood
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.quickActionButton}
+              style={[
+                styles.quickActionButton,
+                isCampusStudent && {
+                  backgroundColor: campusT.cardBg,
+                  borderColor: campusT.border,
+                },
+              ]}
               onPress={() => router.push('/mental-session-log')}
               activeOpacity={0.7}
             >
               <View style={[styles.quickActionIcon, { backgroundColor: 'rgba(139, 92, 246, 0.15)' }]}>
                 <Ionicons name="time-outline" size={24} color="#8b5cf6" />
               </View>
-              <Text style={styles.quickActionText}>History</Text>
+              <Text style={[styles.quickActionText, isCampusStudent && { color: campusT.text }]}>
+                History
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {workspace === 'student' ? (
+        {isCampusStudent ? (
           <TouchableOpacity
-            style={styles.schoolWellnessChip}
+            style={[
+              styles.schoolWellnessChip,
+              {
+                backgroundColor: campusT.accentDim,
+                borderColor: campusT.border,
+              },
+            ]}
             onPress={() => router.replace('/(tabs)/school-wellness')}
             activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityLabel="Open School wellness pulse"
           >
-            <Ionicons name="pulse-outline" size={18} color="#00ffff" />
-            <Text style={styles.schoolWellnessChipText}>School wellness pulse → School tab</Text>
-            <Ionicons name="chevron-forward" size={16} color="#666" />
+            <Ionicons name="pulse-outline" size={18} color={campusT.accent} />
+            <Text style={[styles.schoolWellnessChipText, { color: campusT.text }]}>
+              Campus wellness pulse → Wellness hub
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color={campusT.subMuted} />
           </TouchableOpacity>
         ) : null}
 
         {/* AI Wellness Recommendation Banner */}
-        <View style={styles.aiRecommendationBanner}>
+        <View
+          style={[
+            styles.aiRecommendationBanner,
+            isCampusStudent && {
+              backgroundColor: campusT.cardBg,
+              borderColor: campusT.border,
+            },
+          ]}
+        >
           <View style={styles.aiBannerHeader}>
-            <Ionicons name="sparkles" size={24} color="#00ffff" />
-            <Text style={styles.aiBannerTitle}>Eleos, Your AI Therapist</Text>
+            <Ionicons name="sparkles" size={24} color={isCampusStudent ? campusT.accent : '#00ffff'} />
+            <Text style={[styles.aiBannerTitle, isCampusStudent && { color: campusT.text }]}>
+              {isCampusStudent ? 'Guided calm sessions' : 'Eleos, Your AI Therapist'}
+            </Text>
           </View>
           
           {isAnalyzing ? (
@@ -853,30 +906,23 @@ const MentalScreen = () => {
             </View>
           </View>
 
-          {/* Mental Health Resources */}
+          {/* Crisis + resources — Eleos is not emergency care */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Mental Health Resources</Text>
+            <Text style={styles.sectionTitle}>Support & resources</Text>
+            <B2CCrisisSupportCard accentColor="#00ffff" />
             <TouchableOpacity style={styles.resourceCard} onPress={() => Linking.openURL('https://www.who.int/news-room/fact-sheets/detail/adolescent-mental-health')}>
               <Ionicons name="document-text" size={24} color="#00ffff" />
               <View style={styles.resourceContent}>
-                <Text style={styles.resourceTitle}>Mental Health Articles</Text>
-                <Text style={styles.resourceDescription}>Read expert articles on mental wellness topics</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={24} color="#666" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.resourceCard} onPress={() => Linking.openURL('https://www.samhsa.gov/')}>
-              <Ionicons name="call" size={24} color="#ff4444" />
-              <View style={styles.resourceContent}>
-                <Text style={styles.resourceTitle}>Crisis Support</Text>
-                <Text style={styles.resourceDescription}>Access emergency mental health resources</Text>
+                <Text style={styles.resourceTitle}>Mental health articles</Text>
+                <Text style={styles.resourceDescription}>Expert articles on wellness topics</Text>
               </View>
               <Ionicons name="chevron-forward" size={24} color="#666" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.resourceCard} onPress={() => Linking.openURL('https://www.psychologytoday.com/us/therapists')}>
               <Ionicons name="people" size={24} color="#44ff44" />
               <View style={styles.resourceContent}>
-                <Text style={styles.resourceTitle}>Find a Therapist</Text>
-                <Text style={styles.resourceDescription}>Connect with mental health professionals</Text>
+                <Text style={styles.resourceTitle}>Find a therapist</Text>
+                <Text style={styles.resourceDescription}>Connect with licensed professionals</Text>
               </View>
               <Ionicons name="chevron-forward" size={24} color="#666" />
             </TouchableOpacity>

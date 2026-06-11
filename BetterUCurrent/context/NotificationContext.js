@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { AppState } from 'react-native';
+import { useRouter } from 'expo-router';
+import { navigateFromNotification } from '../utils/notificationNavigation';
+import { recordNotificationOpen } from '../utils/notificationOpenTracking';
 import { 
   initializePushNotifications, 
   addNotificationReceivedListener, 
@@ -27,6 +30,7 @@ const NotificationContext = createContext({
 
 export const NotificationProvider = ({ children }) => {
   const { user } = useAuth();
+  const router = useRouter();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -310,43 +314,47 @@ export const NotificationProvider = ({ children }) => {
   // Handle notification responses (when user taps on notifications)
   useEffect(() => {
     const handleNotificationResponse = async (response) => {
-      console.log('Notification response received:', response);
-      
-      // If there's a notification ID in the response, mark it as read
-      if (response?.notification?.request?.content?.data?.notification_id) {
-        const notificationId = response.notification.request.content.data.notification_id;
-        await markAsRead([notificationId]);
+      const contentData = response?.notification?.request?.content?.data || {};
+
+      if (contentData.notification_id) {
+        await markAsRead([contentData.notification_id]);
       }
 
-      // Analytics hook (MVP):
-      // If you later build a full analytics pipeline, this is where you'd log "notification_opened".
-      // For now, we rely on the fact that:
-      // - the notification row exists in `notifications`
-      // - we embed `notification_state` and `notification_template_id` in the row's JSON `data`
-      // That lets you measure: "open → return within 24h" by querying your DB.
-      
-      // You can add more specific handling here based on notification type
-      // For example, navigating to specific screens
-      const notificationType = response?.notification?.request?.content?.data?.type;
-      console.log('Notification type:', notificationType);
-      
-      // TODO: Add navigation logic based on notification type
-      // switch (notificationType) {
-      //   case 'friend_request':
-      //     // Navigate to friends screen
-      //     break;
-      //   case 'like':
-      //     // Navigate to the liked post
-      //     break;
-      //   // etc.
-      // }
+      await recordNotificationOpen();
+
+      let payload = contentData;
+
+      // Enrich from DB when push payload lacks action_data (older notifications).
+      if (contentData.notification_id && !contentData.action_data && !payload.screen) {
+        try {
+          const { data: row } = await supabase
+            .from('notifications')
+            .select('type, action_type, action_data, data')
+            .eq('id', contentData.notification_id)
+            .maybeSingle();
+          if (row) {
+            payload = {
+              ...contentData,
+              type: row.type || contentData.type,
+              action_type: row.action_type,
+              action_data: row.action_data,
+              data: row.data,
+            };
+          }
+        } catch (e) {
+          console.warn('[NotificationContext] Could not load notification row:', e?.message);
+        }
+      }
+
+      const navigated = navigateFromNotification(router, payload);
+      if (!navigated) {
+        console.log('[NotificationContext] No deep link for notification type:', payload?.type);
+      }
     };
 
-    // Set up notification response listener
     const responseSubscription = addNotificationResponseReceivedListener(handleNotificationResponse);
-    
-    // Check for any notification that opened the app
-    getLastNotificationResponse().then(response => {
+
+    getLastNotificationResponse().then((response) => {
       if (response) {
         handleNotificationResponse(response);
       }
@@ -357,7 +365,7 @@ export const NotificationProvider = ({ children }) => {
         responseSubscription.remove();
       }
     };
-  }, [markAsRead]);
+  }, [markAsRead, router]);
 
   // Refresh notifications when app becomes active
   useEffect(() => {

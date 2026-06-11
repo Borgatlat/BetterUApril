@@ -14,7 +14,7 @@ export function normalizeSchoolProfile(raw) {
       : null;
 
   const accountRaw = devOverride?.account_type ?? raw.account_type ?? raw.accountType ?? "public";
-  const allowed = ["public", "student", "counselor", "admin"];
+  const allowed = ["public", "student", "counselor", "admin", "parent"];
   let account_type = allowed.includes(accountRaw) ? accountRaw : "public";
   let org_id = devOverride?.org_id ?? raw.org_id ?? raw.orgId ?? null;
 

@@ -29,7 +29,7 @@ import { SchoolWellnessSection } from "../../components/school/wellness/SchoolWe
 
 import { PulseStatusBanner } from "../../components/school/wellness/PulseStatusBanner";
 
-import { SchoolWellnessQuickRow } from "../../components/school/wellness/SchoolWellnessQuickRow";
+import { SchoolSupportHub } from "../../components/school/wellness/SchoolSupportHub";
 
 import {
 
@@ -58,6 +58,8 @@ import {
 } from "../../lib/schoolOrgDisplay";
 
 import { fetchTodayPulse } from "../../lib/schoolWellnessClient";
+import { checkSchoolFeaturesHealth, checkSchoolOrgLinked } from "../../lib/schoolHealthCheck";
+import { useOrgBranding } from "../../context/OrgBrandingContext";
 import { fetchGradAtGradSummary } from "../../lib/gradAtGradClient";
 import {
   fetchPendingAssignmentForStudent,
@@ -78,6 +80,7 @@ export default function SchoolWellnessHome() {
   const { scrollPaddingBottom } = useBottomChromeInsets();
 
   const { workspace, isPeerMentor, orgId } = useAuthSession();
+  const { branding } = useOrgBranding();
 
   const { refetchProfile, user } = useAuth();
 
@@ -100,6 +103,7 @@ export default function SchoolWellnessHome() {
   const [gradLoading, setGradLoading] = useState(true);
 
   const [schoolName, setSchoolName] = useState(() => formatOrgIdAsDisplayName(orgId));
+  const [setupWarning, setSetupWarning] = useState(null);
 
 
 
@@ -237,7 +241,26 @@ export default function SchoolWellnessHome() {
 
   }, [user?.id, workspace, loadAssignment]);
 
-
+  useFocusEffect(
+    useCallback(() => {
+      if (workspace !== "student") return;
+      (async () => {
+        const orgCheck = await checkSchoolOrgLinked(orgId);
+        if (!orgCheck.ok) {
+          setSetupWarning(orgCheck.message);
+          return;
+        }
+        const health = await checkSchoolFeaturesHealth();
+        if (health.missing.length > 0) {
+          setSetupWarning(
+            `Campus setup incomplete: ${health.missing.join(", ")}. Ask your admin to run school migrations.`,
+          );
+        } else {
+          setSetupWarning(null);
+        }
+      })();
+    }, [workspace, orgId]),
+  );
 
   const onRefresh = useCallback(async () => {
 
@@ -349,7 +372,15 @@ export default function SchoolWellnessHome() {
       <SchoolWellnessHeader
         schoolName={schoolName}
         onBackHome={() => router.replace("/(tabs)/home")}
+        logoUrl={branding?.logo_url}
+        accentColor={branding?.primary_color}
       />
+
+      {setupWarning ? (
+        <View style={styles.setupBanner}>
+          <Text style={styles.setupBannerText}>{setupWarning}</Text>
+        </View>
+      ) : null}
 
       {loadErr ? (
 
@@ -366,7 +397,6 @@ export default function SchoolWellnessHome() {
 
 
       {pendingAssignment ? (
-
         <SchoolWellnessSection title="Needs your attention" subtitle="From your dean or counselor" inCard>
 
           <ReflectiveAssignmentCard
@@ -391,13 +421,6 @@ export default function SchoolWellnessHome() {
           onPress={() => setPulseModalOpen(true)}
         />
 
-        <SchoolWellnessQuickRow
-          onFocusLock={() => router.push("/focus-lock")}
-          onCounselor={() => pulseRef.current?.requestCounselor?.()}
-          onAccountability={() => router.push("/accountability")}
-          onEmmaus={() => router.push("/(modals)/emmaus-request")}
-        />
-
         <StudentDailyPulseCard
 
           ref={pulseRef}
@@ -414,6 +437,17 @@ export default function SchoolWellnessHome() {
 
         />
 
+      </SchoolWellnessSection>
+
+
+
+      <SchoolWellnessSection title="Support" subtitle="Focus · partners · Emmaus · counselor" inCard>
+        <SchoolSupportHub
+          onFocusLock={() => router.push("/focus-lock")}
+          onAccountability={() => router.push("/accountability")}
+          onEmmaus={() => router.push("/(modals)/emmaus-request")}
+          onCounselor={() => pulseRef.current?.requestCounselor?.()}
+        />
       </SchoolWellnessSection>
 
 
@@ -609,6 +643,15 @@ const styles = StyleSheet.create({
 
   link: { color: T.accent, marginTop: 14, fontWeight: "700", textAlign: "center" },
 
+  setupBanner: {
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "rgba(251, 191, 36, 0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(180, 83, 9, 0.35)",
+  },
+  setupBannerText: { color: "#b45309", fontSize: 12, lineHeight: 17 },
   errRow: { marginBottom: 12 },
 
   errText: { color: T.danger, fontSize: 13 },

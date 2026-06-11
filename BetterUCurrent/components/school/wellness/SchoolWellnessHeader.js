@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,11 +13,16 @@ import { hexToRgba } from "../../../utils/homePageCustomization";
 /**
  * Top bar: greeting + your school's name (not generic “whole you” marketing copy).
  */
-export function SchoolWellnessHeader({ schoolName = "Your school", onBackHome }) {
+export function SchoolWellnessHeader({
+  schoolName = "Your school",
+  onBackHome,
+  logoUrl = null,
+  accentColor,
+}) {
   const router = useRouter();
   const { userProfile } = useUser();
   const [showNotifications, setShowNotifications] = useState(false);
-  const accent = T.accent;
+  const accent = accentColor || T.accent;
   const displaySchool = schoolName?.trim() || "Your school";
   const firstName =
     userProfile?.full_name?.split(" ")[0] || userProfile?.username || "there";
@@ -47,6 +52,9 @@ export function SchoolWellnessHeader({ schoolName = "Your school", onBackHome })
         </View>
         <View style={styles.row}>
           <View style={styles.textCol}>
+            {logoUrl ? (
+              <Image source={{ uri: logoUrl }} style={styles.logo} resizeMode="contain" accessibilityLabel="School logo" />
+            ) : null}
             <Text style={styles.greeting}>Hello, {firstName}</Text>
             <Text style={styles.h1} accessibilityRole="header" numberOfLines={2}>
               {displaySchool}
@@ -153,6 +161,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   textCol: { flex: 1 },
+  logo: { width: 120, height: 36, marginBottom: 8 },
   greeting: {
     color: T.sub,
     fontSize: 14,

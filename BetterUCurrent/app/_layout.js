@@ -14,6 +14,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SettingsProvider } from '../context/SettingsContext';
 import { SharedMessageLimitProvider } from '../context/SharedMessageLimitContext';
 import { AIConsentProvider } from '../context/AIConsentContext';
+import { OrgBrandingProvider } from '../context/OrgBrandingContext';
 import LoadingScreen from '../screens/loadingScreen';
 import { initializeAdMob } from '../lib/adMob';
 import { runStartupStep } from '../lib/startupUtils';
@@ -233,7 +234,9 @@ export default function RootLayout() {
                     <SharedMessageLimitProvider>
                       <TrackingProvider>
                         <AIConsentProvider>
-                          <MainContent />
+                          <OrgBrandingProvider>
+                            <MainContent />
+                          </OrgBrandingProvider>
                         </AIConsentProvider>
                       </TrackingProvider>
                     </SharedMessageLimitProvider>

@@ -33,6 +33,7 @@ import { MealRecipeModal } from '../../../components/MealRecipeModal';
 import { getAIGenerationUsageInfo, incrementAIGenerationUsage, FEATURE_TYPES } from '../../../utils/aiGenerationLimits';
 import { getLocalDateString } from '../../../utils/dateUtils';
 import { presentPremiumPaywall } from '../../../lib/purchases';
+import { canUsePhotoMealPreview, markPhotoMealPreviewUsed } from '../../../lib/premiumPerks';
 import * as ImagePicker from 'expo-image-picker';
 import { useBottomChromeInsets } from '../../../context/BottomChromeContext';
 
@@ -547,7 +548,7 @@ export default function NutritionDashboard() {
     }
   };
 
-  const processPhotoAndLog = async (base64) => {
+  const processPhotoAndLog = async (base64, { isPreviewScan = false } = {}) => {
     if (!base64 || !userId) return;
     const allowed = await requestAIConsent();
     if (!allowed) return;
@@ -557,9 +558,18 @@ export default function NutritionDashboard() {
       const saved = await saveGeneratedMeal(mealData, userId);
       await consumeMeal(saved.id, userId, 1);
       addCalories(Math.round(saved.calories || mealData.nutrition?.calories?.value || 0));
-      await incrementAIGenerationUsage(FEATURE_TYPES.PHOTO_MEAL);
+      if (isPreviewScan) {
+        await markPhotoMealPreviewUsed();
+      } else {
+        await incrementAIGenerationUsage(FEATURE_TYPES.PHOTO_MEAL);
+      }
       await loadData();
-      Alert.alert('Logged!', `"${saved.name}" added to today.`);
+      Alert.alert(
+        'Logged!',
+        isPreviewScan
+          ? `"${saved.name}" added. Free scan used — Premium unlocks 10 photo logs/day.`
+          : `"${saved.name}" added to today.`
+      );
     } catch (e) {
       console.error('Photo meal error:', e);
       Alert.alert('Error', e?.message || 'Could not analyze or log meal.');
@@ -568,18 +578,30 @@ export default function NutritionDashboard() {
     }
   };
 
-  const handlePhotoMeal = () => {
+  const handlePhotoMeal = async () => {
     if (!userId) return;
-    // Non-premium users: show paywall directly instead of an alert
+    let isPreviewScan = false;
     if (!isPremium || photoMealUsage.limit === 0) {
-      presentPremiumPaywall();
-      return;
+      isPreviewScan = await canUsePhotoMealPreview();
+      if (!isPreviewScan) {
+        presentPremiumPaywall();
+        return;
+      }
+    } else {
+      if (photoMealUsage.currentUsage >= photoMealUsage.limit) {
+        Alert.alert('Daily Limit Reached', `You've used all ${photoMealUsage.limit} photo logs for today. Resets tomorrow.`);
+        return;
+      }
     }
-    if (photoMealUsage.currentUsage >= photoMealUsage.limit) {
-      Alert.alert('Daily Limit Reached', `You've used all ${photoMealUsage.limit} photo logs for today. Resets tomorrow.`);
-      return;
-    }
-    Alert.alert('Log meal from photo', 'Take a new photo or choose one from your library.', [
+    const launchPhotoMeal = async (base64) => {
+      await processPhotoAndLog(base64, { isPreviewScan });
+    };
+    Alert.alert(
+      isPreviewScan ? 'Free meal scan (one-time)' : 'Log meal from photo',
+      isPreviewScan
+        ? 'Try AI meal logging once free — Premium unlocks 10 scans per day.'
+        : 'Take a new photo or choose one from your library.',
+      [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Take Photo',
@@ -597,7 +619,7 @@ export default function NutritionDashboard() {
             base64: true
           });
           if (result.canceled || !result.assets?.[0]?.base64) return;
-          await processPhotoAndLog(result.assets[0].base64);
+          await launchPhotoMeal(result.assets[0].base64);
         }
       },
       {
@@ -616,7 +638,7 @@ export default function NutritionDashboard() {
             base64: true
           });
           if (result.canceled || !result.assets?.[0]?.base64) return;
-          await processPhotoAndLog(result.assets[0].base64);
+          await launchPhotoMeal(result.assets[0].base64);
         }
       }
     ]);

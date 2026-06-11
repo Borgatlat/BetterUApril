@@ -9,6 +9,7 @@ import { useTrainer } from '../../context/TrainerContext';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { navigateToPremiumPaywall } from '../../lib/premiumConversion';
 import { useTracking } from '../../context/TrackingContext';
 import { LoadingDots } from '../../components/LoadingDots';
 import { ensureApiKeyAvailable } from '../../utils/apiConfig';
@@ -248,6 +249,21 @@ const TrainerModal = ({ visible, onClose }) => {
               </Text>
             </View>
 
+            {!isPremium && messageCount >= MAX_DAILY_MESSAGES && (
+              <TouchableOpacity
+                style={styles.limitUpgradeBanner}
+                onPress={() => {
+                  onClose?.();
+                  navigateToPremiumPaywall(router, 'ai_messages');
+                }}
+              >
+                <Ionicons name="sparkles" size={18} color="#000" />
+                <Text style={styles.limitUpgradeText}>
+                  Daily limit reached — Premium unlocks 100 messages/day (7-day free trial)
+                </Text>
+              </TouchableOpacity>
+            )}
+
             <FlatList
               ref={flatListRef}
               data={conversations}
@@ -436,6 +452,22 @@ const styles = StyleSheet.create({
   },
   messageCountLimit: {
     color: '#ff4444',
+  },
+  limitUpgradeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: '#00ffff',
+  },
+  limitUpgradeText: {
+    flex: 1,
+    color: '#000',
+    fontSize: 13,
+    fontWeight: '600',
   },
   chatContainer: {
     paddingHorizontal: 15,

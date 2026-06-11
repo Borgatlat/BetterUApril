@@ -6,9 +6,12 @@ export function resolvePostAuthRoute(workspace, profile) {
   if (workspace === "staff") {
     return "/(school)/dashboard";
   }
+  if (workspace === "parent") {
+    return "/(parent)/dashboard";
+  }
   if (profile?.onboarding_completed === true) {
     if (workspace === "student") {
-      return "/(tabs)/school-wellness";
+      return "/(tabs)/spiritual";
     }
     return "/(tabs)/home";
   }

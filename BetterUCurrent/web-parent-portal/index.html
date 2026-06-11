@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BetterU Family Portal</title>
+    <link rel="stylesheet" href="portal.css" />
+  </head>
+  <body>
+    <div id="login-screen" class="hidden">
+      <div class="shell">
+        <div class="card">
+          <h1>Family portal</h1>
+          <p class="muted">View your student's service hours and wellness participation.</p>
+          <form id="login-form" style="margin-top: 16px">
+            <label class="muted">Email</label>
+            <input id="login-email" type="email" required style="margin: 6px 0 12px" />
+            <label class="muted">Password</label>
+            <input id="login-password" type="password" required style="margin: 6px 0 12px" />
+            <button type="submit" style="width: 100%">Sign in</button>
+            <p id="login-error" class="error hidden"></p>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div id="app-screen" class="hidden">
+      <div class="shell">
+        <div class="row-between">
+          <div>
+            <h1>Family portal</h1>
+            <p class="muted"><span id="parent-name"></span></p>
+          </div>
+          <button id="logout-btn" class="secondary">Sign out</button>
+        </div>
+        <div id="students-wrap" class="card" style="margin-top: 16px">Loading…</div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
+    <script src="portal.js"></script>
+  </body>
+</html>

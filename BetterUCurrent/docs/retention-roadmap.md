@@ -19,24 +19,24 @@ This file mirrors the plan’s phased roadmap, but written as an implementation 
 ### Phase 2 (Next): Personalization controls
 
 - **User settings (UI)**:
-  - Notification intensity: light / normal / high
-  - Quiet hours window (start/end)
-  - Channel preferences: push vs email summary
+  - Notification intensity: light / normal / high ✅ (`settings.js` + `utils/retentionPreferences.js`)
+  - Quiet hours window (start/end) ✅ (toggle + default 22:00–07:00)
+  - Channel preferences: push vs email summary — push toggle via existing prefs; email summary not yet
 - **Behavior learning**:
-  - Store user’s “best time window” based on open/completion history
-  - Use it to schedule reminders 30–60 minutes before typical completion time
+  - Store user’s “best time window” based on open/completion history ✅ (`utils/notificationOpenTracking.js`)
+  - Use it to schedule reminders 30–60 minutes before typical completion time — hint shown in settings; auto-schedule TBD
 
 ### Phase 3 (Next): Retention features beyond notifications
 
 - **Progress / wins panel**:
-  - Show “you showed up X times this month” and “lifetime sessions”
-  - Default to this view when user is `offTrack_*`
+  - Show “you showed up X times this month” and “lifetime sessions” ✅ (`components/retention/ProgressWinsPanel.js` on Home)
+  - Default to this view when user is `offTrack_*` ✅ (expanded copy + easy-mode CTA)
 - **Habit resizing loop**:
-  - If a user misses repeatedly, automatically offer an easier version
-  - Expose “easy mode” CTA directly from notifications
+  - If a user misses repeatedly, automatically offer an easier version ✅ (`EasyModeBanner` on Home)
+  - Expose “easy mode” CTA directly from notifications ✅ (streak-failure + daily reminder deep links)
 - **Accountability boosters**:
-  - Weekly summary to partner/group
-  - Small group mini-challenges (2–7 day challenges)
+  - Weekly summary to partner/group — weekly banner on accountability screen ✅
+  - Small group mini-challenges (2–7 day challenges) — not yet
 
 ### Phase 4 (Next): Experiments
 

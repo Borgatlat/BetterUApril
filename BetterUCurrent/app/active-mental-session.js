@@ -12,6 +12,7 @@ import Slider from '@react-native-community/slider';
 import PremiumFeature from './components/PremiumFeature';
 import { useUser } from '../context/UserContext';
 import { receivesSchoolPartnershipPremium } from '../lib/premiumSchool';
+import { canUseGuidedAudioPreview, markGuidedAudioPreviewUsed } from '../lib/premiumPerks';
 import { isDailyExamenSession } from '../lib/dailyExamNavigation';
 // Live Activities - shows session progress on lock screen
 import { 
@@ -41,6 +42,21 @@ const ActiveMentalSession = () => {
   const { profile } = useAuth();
   const hasPremiumAccess =
     isPremium || receivesSchoolPartnershipPremium(profile);
+  const [usingAudioPreview, setUsingAudioPreview] = useState(false);
+  const hasAudioAccess = hasPremiumAccess || usingAudioPreview;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (hasPremiumAccess) {
+      setUsingAudioPreview(false);
+      return undefined;
+    }
+    (async () => {
+      const allowed = await canUseGuidedAudioPreview();
+      if (!cancelled) setUsingAudioPreview(allowed);
+    })();
+    return () => { cancelled = true; };
+  }, [hasPremiumAccess]);
 
   // Track actual time spent in session
   const sessionStartTime = useRef(null); // Timestamp when user started the session
@@ -88,7 +104,10 @@ const ActiveMentalSession = () => {
     ]);
     return audioIds.has(session.id);
   }, [session.id]);
-  const showAudioUpsell = !hasPremiumAccess && !isExamenSession && sessionHasGuidedAudio;
+  const showAudioUpsell =
+    !hasAudioAccess && !isExamenSession && sessionHasGuidedAudio;
+  const showPreviewBanner =
+    usingAudioPreview && !hasPremiumAccess && sessionHasGuidedAudio;
 
   console.log('Session object:', session);
 
@@ -138,8 +157,8 @@ const ActiveMentalSession = () => {
         if (soundRef.current) {
           await soundRef.current.unloadAsync();
         }
-        // Only load audio for premium / school-partnership users
-        if (!hasPremiumAccess) {
+        // Premium, school partnership, or one-time free preview
+        if (!hasAudioAccess) {
           soundRef.current = null;
           if (isMounted) {
             setSound(null);
@@ -209,7 +228,7 @@ const ActiveMentalSession = () => {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id, hasPremiumAccess]);
+  }, [session.id, hasAudioAccess]);
 
   // Play audio when session is activated
   useEffect(() => {
@@ -525,6 +544,10 @@ const ActiveMentalSession = () => {
         setMentalLiveActivityId(null);
       }
 
+      if (usingAudioPreview && !hasPremiumAccess && sessionHasGuidedAudio) {
+        await markGuidedAudioPreviewUsed();
+      }
+
       // Navigate to summary with actual duration (both minutes and seconds)
       router.push({
         pathname: '/mental-session-summary',
@@ -639,7 +662,7 @@ const ActiveMentalSession = () => {
                   }
                   
                   setIsActive(willBeActive);
-                  if (hasPremiumAccess && sound) {
+                  if (hasAudioAccess && sound) {
                     if (willBeActive) {
                       sound.playAsync();
                     } else {
@@ -657,16 +680,25 @@ const ActiveMentalSession = () => {
             </TouchableOpacity>
           </View>
         </View>
-          {showAudioUpsell && (
-            <Text style={{ color: '#ff4444', textAlign: 'center', marginTop: 10, fontWeight: 'bold' }}>
-              Upgrade to Premium to access guided audio for this session.
+          {showPreviewBanner && (
+            <Text style={styles.previewBanner}>
+              Free guided audio preview — unlock all sessions with Premium
             </Text>
+          )}
+          {showAudioUpsell && (
+            <TouchableOpacity
+              onPress={() => router.push('/purchase-subscription?reason=guided_audio')}
+            >
+              <Text style={{ color: '#00ffff', textAlign: 'center', marginTop: 10, fontWeight: 'bold' }}>
+                Preview used — tap for Premium guided audio (7-day free trial)
+              </Text>
+            </TouchableOpacity>
           )}
       </View>
 
-        {/* Audio Controls: only for premium users */}
-        {hasPremiumAccess && sound && (
-          <PremiumFeature isPremium={hasPremiumAccess} onPress={() => {}}>
+        {/* Audio controls: premium or one-time preview */}
+        {hasAudioAccess && sound && (
+          <PremiumFeature isPremium={hasPremiumAccess} onPress={() => {}} upgradeReason="guided_audio">
             <View style={styles.audioControls}>
               <TouchableOpacity onPress={toggleMute} style={styles.muteButton}>
                 <Ionicons 
@@ -927,6 +959,13 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 10,
     alignItems: 'center',
+  },
+  previewBanner: {
+    color: '#FFD700',
+    textAlign: 'center',
+    marginTop: 10,
+    fontWeight: '600',
+    fontSize: 13,
   },
   finishButtonText: {
     fontSize: 18,
