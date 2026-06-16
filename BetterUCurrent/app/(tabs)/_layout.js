@@ -8,6 +8,8 @@ import TutorialGate from '../components/TutorialGate';
 import { useLanguage } from '../../context/LanguageContext';
 import NonPremiumBannerAd from '../components/NonPremiumBannerAd';
 import { useAuthSession } from '../../hooks/useAuthSession';
+import { useOrgBranding } from '../../context/OrgBrandingContext';
+import { showNutritionTab, showSpiritualTab } from '../../lib/orgModuleAccess';
 import { ScheduleRefreshProvider } from '../../context/ScheduleRefreshContext';
 import { BottomChromeProvider } from '../../context/BottomChromeContext';
 import { getBannerDockBottom } from '../../utils/bottomChromeInsets';
@@ -36,14 +38,15 @@ const tabConfig = {
 export default function TabLayout() {
   const { t } = useLanguage();
   const { workspace } = useAuthSession();
-  const hideNutritionForStudent = workspace === 'student';
-  const showSpiritualTab = workspace === 'student';
+  const { branding, labels } = useOrgBranding();
+  const nutritionVisible = showNutritionTab(workspace, branding);
+  const spiritualVisible = showSpiritualTab(workspace, branding);
   const isCampusStudent = workspace === 'student';
 
   const screenOptions = React.useMemo(() => ({ route }) => {
     const config = tabConfig[route.name];
     let title = config ? t(`tabs.${config.key}`) : route.name;
-    if (route.name === 'spiritual') title = 'Spiritual';
+    if (route.name === 'spiritual') title = labels.spiritualTabTitle ?? 'Spiritual';
     const icon = config?.icon ?? (() => (focused) => (focused ? 'help-circle' : 'help-circle-outline'));
 
     return {
@@ -51,11 +54,11 @@ export default function TabLayout() {
       tabBarIcon: ({ focused, color, size }) => (
         <Ionicons name={typeof icon === 'function' ? icon(focused) : 'help-circle-outline'} size={size} color={color} />
       ),
-      tabBarActiveTintColor: isCampusStudent ? '#2563eb' : '#00ffff',
-      tabBarInactiveTintColor: isCampusStudent ? '#94a3b8' : 'gray',
+      tabBarActiveTintColor: isCampusStudent ? '#00e5e5' : '#00ffff',
+      tabBarInactiveTintColor: 'gray',
       tabBarStyle: {
-        backgroundColor: isCampusStudent ? '#ffffff' : '#000000',
-        borderTopColor: isCampusStudent ? '#e2e8f0' : 'rgba(255, 255, 255, 0.05)',
+        backgroundColor: '#000000',
+        borderTopColor: 'rgba(255, 255, 255, 0.05)',
         paddingTop: 5,
         paddingBottom: Platform.OS === 'ios' ? (isIphoneX ? 25 : 5) : 5,
         height: Platform.OS === 'ios' ? (isIphoneX ? 80 : 60) : 60,
@@ -68,9 +71,9 @@ export default function TabLayout() {
         flex: 1,
       }
     };
-  }, [t, isCampusStudent]);
+  }, [t, isCampusStudent, labels.spiritualTabTitle]);
 
-  const studentInitialTab = isCampusStudent ? 'spiritual' : 'home';
+  const studentInitialTab = isCampusStudent && spiritualVisible ? 'spiritual' : 'home';
 
   return (
     <TutorialGate>
@@ -85,15 +88,15 @@ export default function TabLayout() {
             <Tabs.Screen name="workout" />
             <Tabs.Screen
               name="nutrition"
-              options={hideNutritionForStudent ? { href: null } : undefined}
+              options={nutritionVisible ? undefined : { href: null }}
             />
             <Tabs.Screen name="mental" />
             <Tabs.Screen name="community" />
             <Tabs.Screen
               name="spiritual"
               options={
-                showSpiritualTab
-                  ? { title: 'Spiritual' }
+                spiritualVisible
+                  ? { title: labels.spiritualTabTitle ?? 'Spiritual' }
                   : { href: null }
               }
             />

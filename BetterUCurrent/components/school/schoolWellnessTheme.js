@@ -5,7 +5,7 @@ export const schoolWellnessTheme = {
   ...spiritualTheme,
   radiusXl: 16,
   radiusChip: 28,
-  heroGradient: ["#f4f6f8", "#ffffff", "#eef2f7"],
+  heroGradient: ["#050708", "#0a1014", "#121a1f"],
   pulseDone: "#22c55e",
   pulseDoneDim: "rgba(34, 197, 94, 0.14)",
   pulsePending: "#f59e0b",

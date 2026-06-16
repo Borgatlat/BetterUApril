@@ -19,6 +19,14 @@ export const restorePurchases = async () => ({
   error: 'In-app purchases are not available on web',
 });
 
+export function customerInfoHasActiveSubscription() {
+  return false;
+}
+
+export async function resolveCustomerInfoAfterPurchase(customerInfo) {
+  return customerInfo;
+}
+
 export const presentPaywall = async () => false;
 
 export const presentPremiumPaywall = async () => false;

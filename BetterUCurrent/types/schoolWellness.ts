@@ -13,11 +13,17 @@ export interface EmergencyContact {
 }
 
 /** organizations.id is the slug (e.g. jesuit-houston) */
+export interface OrgEnabledModules {
+  spiritual?: boolean;
+  nutrition?: boolean;
+}
+
 export interface Organization {
   id: string;
   name: string;
   domain_lock: string;
   emergency_contacts: EmergencyContact[];
+  enabled_modules?: OrgEnabledModules;
   created_at: string;
 }
 

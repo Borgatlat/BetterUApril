@@ -74,11 +74,10 @@ export function EasyModeBanner({ userId, accentColor = '#00ffff', forceVisible =
 
 const styles = StyleSheet.create({
   card: {
-    marginHorizontal: 20,
-    marginBottom: 16,
+    marginBottom: 8,
     borderRadius: 16,
     borderWidth: 1,
-    padding: 14,
+    padding: 12,
   },
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   textCol: { flex: 1 },

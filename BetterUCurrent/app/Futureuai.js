@@ -180,11 +180,6 @@ const Futureuai = () => {
     return () => sub.remove();
   }, [sidebarOpen, messageActionTarget, handleGoBack]);
 
-  const { listening: voiceListening, toggleListening: toggleVoiceInput } = useFutureUVoiceInput({
-    onTranscript: setInput,
-    disabled: loading,
-  });
-
   useEffect(() => {
     let cancelled = false;
     (async () => {

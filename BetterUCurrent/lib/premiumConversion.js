@@ -72,7 +72,7 @@ export const PREMIUM_UPGRADE_REASONS = {
   },
   default: {
     title: PREMIUM_VALUE_ANCHOR.headline,
-    subtitle: `${PREMIUM_VALUE_ANCHOR.trialLabel} · ${PREMIUM_VALUE_ANCHOR.weeklyPriceLabel}`,
+    subtitle: `${PREMIUM_VALUE_ANCHOR.trialLabel} · ${PREMIUM_VALUE_ANCHOR.afterTrialLabel}`,
   },
 };
 

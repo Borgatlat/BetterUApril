@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useRef, useState, useCallback } from 'react';
+import React, { createContext, useContext, useRef, useState, useCallback, useMemo } from 'react';
 
 const HomeScrollContext = createContext(null);
 
@@ -40,14 +40,10 @@ export function HomeScrollProvider({ children }) {
   const registerAnchor = useCallback((key, viewRef, measureFn) => {
     anchorsRef.current[key] = { viewRef, measure: measureFn };
     measureFn();
+    // Cleanup only removes the ref — avoid setState here. setState in effect cleanup
+    // re-ran whenever context value identity changed and caused infinite update loops.
     return () => {
       delete anchorsRef.current[key];
-      setAnchorBounds((prev) => {
-        if (!prev[key]) return prev;
-        const next = { ...prev };
-        delete next[key];
-        return next;
-      });
     };
   }, []);
 
@@ -82,18 +78,31 @@ export function HomeScrollProvider({ children }) {
     });
   }, []);
 
-  const value = {
-    scrollRef,
-    anchorBounds,
-    registerScrollRef,
-    registerScrollContentRef,
-    reportAnchorBounds,
-    registerAnchor,
-    remeasureAnchor,
-    remeasureAllAnchors,
-    scrollToY,
-    scrollToAnchor,
-  };
+  const value = useMemo(
+    () => ({
+      scrollRef,
+      anchorBounds,
+      registerScrollRef,
+      registerScrollContentRef,
+      reportAnchorBounds,
+      registerAnchor,
+      remeasureAnchor,
+      remeasureAllAnchors,
+      scrollToY,
+      scrollToAnchor,
+    }),
+    [
+      anchorBounds,
+      registerScrollRef,
+      registerScrollContentRef,
+      reportAnchorBounds,
+      registerAnchor,
+      remeasureAnchor,
+      remeasureAllAnchors,
+      scrollToY,
+      scrollToAnchor,
+    ],
+  );
 
   return <HomeScrollContext.Provider value={value}>{children}</HomeScrollContext.Provider>;
 }

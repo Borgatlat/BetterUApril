@@ -150,10 +150,9 @@ export function StreakDisplay({ userId, size = 'medium', onPress, refreshKey }) 
       style={[
         styles.container,
         {
-          // Add warning border if streak is at risk
           borderColor: streakData.isAtRisk ? '#ff6b35' : 'transparent',
-          borderWidth: streakData.isAtRisk ? 2 : 0
-        }
+          borderWidth: streakData.isAtRisk ? 2 : 0,
+        },
       ]}
       onPress={onPress}
       activeOpacity={0.7}

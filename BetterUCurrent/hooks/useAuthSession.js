@@ -9,7 +9,7 @@ import { normalizeSchoolProfile } from "../lib/schoolProfileNormalize";
 export { normalizeSchoolProfile };
 
 export function useAuthSession() {
-  const { user, profile, isLoading, session, ...rest } = useAuth();
+  const { user, profile, isLoading, profileLoading, session, ...rest } = useAuth();
   const normalized = useMemo(() => normalizeSchoolProfile(profile), [profile]);
 
   const workspace = useMemo(() => {
@@ -30,6 +30,7 @@ export function useAuthSession() {
     isPeerMentor: Boolean(normalized?.is_peer_mentor),
     workspace,
     isLoading,
+    profileLoading,
     ...rest,
   };
 }

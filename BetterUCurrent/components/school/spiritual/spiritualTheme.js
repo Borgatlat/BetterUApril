@@ -1,11 +1,11 @@
 import { campusThemeDark, campusThemeLight } from "../campusThemeTokens";
 
-/** Shared Spiritual + school hub visuals — light campus default (Tier 2). */
-export const spiritualTheme = { ...campusThemeLight };
+/** Shared Spiritual + school hub visuals — dark campus default (matches BetterU fitness tabs). */
+export const spiritualTheme = { ...campusThemeDark };
 
-/** Pre-Tier-2 dark palette — staff mobile console, etc. */
-export const spiritualThemeDark = { ...campusThemeDark };
+/** Light campus palette — optional for parent portal / print-friendly views. */
+export const spiritualThemeLight = { ...campusThemeLight };
 
-export function getSpiritualTheme(mode = "light") {
-  return mode === "dark" ? spiritualThemeDark : spiritualTheme;
+export function getSpiritualTheme(mode = "dark") {
+  return mode === "light" ? spiritualThemeLight : spiritualTheme;
 }

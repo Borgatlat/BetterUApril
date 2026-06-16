@@ -2,12 +2,14 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import { useAuthSession } from "../hooks/useAuthSession";
 import { fetchOrgBranding, mergeBrandingIntoTheme } from "../lib/orgBranding";
 import { getOrgPackagingLabels } from "../lib/orgPackagingLabels";
-import { campusThemeLight } from "../components/school/campusThemeTokens";
+import { getOrgModuleAccess } from "../lib/orgModuleAccess";
+import { campusThemeDark } from "../components/school/campusThemeTokens";
 import { schoolWellnessTheme as baseWellnessTheme } from "../components/school/schoolWellnessTheme";
 
 const OrgBrandingContext = createContext({
   branding: null,
   labels: getOrgPackagingLabels("jesuit"),
+  modules: getOrgModuleAccess("public", null),
   theme: baseWellnessTheme,
   loading: false,
 });
@@ -45,14 +47,19 @@ export function OrgBrandingProvider({ children }) {
     [branding?.packaging_mode],
   );
 
+  const modules = useMemo(
+    () => getOrgModuleAccess(workspace, branding),
+    [workspace, branding],
+  );
+
   const theme = useMemo(
-    () => mergeBrandingIntoTheme({ ...baseWellnessTheme, ...campusThemeLight }, branding),
+    () => mergeBrandingIntoTheme({ ...baseWellnessTheme, ...campusThemeDark }, branding),
     [branding],
   );
 
   const value = useMemo(
-    () => ({ branding, labels, theme, loading, isSchoolUser }),
-    [branding, labels, theme, loading, isSchoolUser],
+    () => ({ branding, labels, modules, theme, loading, isSchoolUser }),
+    [branding, labels, modules, theme, loading, isSchoolUser],
   );
 
   return <OrgBrandingContext.Provider value={value}>{children}</OrgBrandingContext.Provider>;

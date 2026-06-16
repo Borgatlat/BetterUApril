@@ -27,6 +27,14 @@ import TurnstileCaptcha from "../../components/TurnstileCaptcha";
 import { TURNSTILE_CONFIG } from "../../config/turnstile";
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { consumerDomainFromEmail, isPersonalConsumerEmail } from "../../lib/schoolEmailDomains";
+import {
+  formatAppleSignInError,
+  isAppleSignInCanceled,
+  persistAppleProfileFields,
+  signInWithAppleNative,
+} from "../../utils/appleAuth";
+import { normalizeSchoolProfile } from "../../lib/schoolProfileNormalize";
+import { hasCompletedAppOnboarding, resolvePostAuthRouteForProfile } from "../../lib/onboardingGate";
 
 const { width, height } = Dimensions.get("window");
 const isIphoneX = Platform.OS === "ios" && (height >= 812 || width >= 812);
@@ -152,22 +160,8 @@ const SignupScreen = () => {
     setIsLoading(false);
   };
 
-  /**
-   * Saves name and email from Sign in with Apple to the profile when provided.
-   * Apple only sends fullName and email on the FIRST sign-in; we must persist them
-   * immediately so we never ask the user for them again (App Store Guideline 4.0).
-   */
-  const persistAppleNameEmailIfProvided = async (userId, credential) => {
-    const parts = [];
-    if (credential.fullName?.givenName) parts.push(credential.fullName.givenName);
-    if (credential.fullName?.familyName) parts.push(credential.fullName.familyName);
-    const full_name = parts.length ? parts.join(" ").trim() : null;
-    const email = credential.email || null;
-    if (!full_name && !email) return;
-    const payload = { id: userId };
-    if (full_name) payload.full_name = full_name;
-    if (email) payload.email = email;
-    await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+  const saveAppleProfileFields = async (userId, credential) => {
+    await persistAppleProfileFields(supabase, userId, credential);
   };
 
   // Handle Apple Sign Up - uses native Apple Authentication API
@@ -178,40 +172,17 @@ const SignupScreen = () => {
       setIsLoading(true);
       setError("");
       console.log('Starting Apple Sign Up...');
-      
-      // Request Apple authentication with name and email scopes
-      // This opens the native Apple Sign In dialog
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
 
-      console.log('Apple Sign Up successful, processing credential...');
-      
-      // Sign in/up with Supabase using the identityToken from Apple
-      // If user doesn't exist, Supabase will create a new account
-      // If user exists, Supabase will sign them in
-      const { data, error } = await supabase.auth.signInWithIdToken({
-        provider: 'apple',
-        token: credential.identityToken,
-      });
-
-      if (error) {
-        console.error('Supabase sign up error:', error);
-        throw error;
-      }
+      const { data, credential } = await signInWithAppleNative(supabase);
 
       console.log('Supabase sign up successful:', data);
 
-      // App Store requirement: use name/email from Apple; never ask again.
-      await persistAppleNameEmailIfProvided(data.user.id, credential);
+      await saveAppleProfileFields(data.user.id, credential);
 
       // Check onboarding status to determine where to navigate
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('onboarding_completed')
+        .select('onboarding_completed, account_type, org_id')
         .eq('id', data.user.id)
         .single();
 
@@ -229,18 +200,17 @@ const SignupScreen = () => {
         return;
       }
 
-      // Navigate based on onboarding completion status
-      if (!profile?.onboarding_completed) {
+      if (!hasCompletedAppOnboarding(normalizeSchoolProfile(profile))) {
         router.replace('/(auth)/onboarding/welcome');
       } else {
-        router.replace('/(tabs)/home');
+        router.replace(resolvePostAuthRouteForProfile(profile));
       }
     } catch (error) {
-      // Don't show error if user cancelled the Apple Sign In dialog
-      if (error.code !== 'ERR_CANCELED') {
+      if (!isAppleSignInCanceled(error)) {
         console.error('Apple Sign Up error:', error);
-        setError('Failed to sign up with Apple');
-        Alert.alert('Error', 'Failed to sign up with Apple. Please try again.');
+        const msg = formatAppleSignInError(error, 'sign up with Apple');
+        setError(msg);
+        Alert.alert('Apple Sign In', msg);
       }
     } finally {
       setIsLoading(false);

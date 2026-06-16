@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react"
 import { supabase } from "../lib/supabase"
 import { normalizeSchoolProfile } from "../lib/schoolProfileNormalize"
+import { hasCompletedAppOnboarding } from "../lib/onboardingGate"
 import {
   SIGNUP_EMAIL_IN_USE_MESSAGE,
   isDuplicateSignupAuthError,
@@ -83,6 +84,7 @@ export const AuthProvider = ({ children }) => {
   const [profile, setProfile] = useState(null)
   const [session, setSession] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
   const [isOnboardingComplete, setIsOnboardingComplete] = useState(false)
   const [banStatus, setBanStatus] = useState(null)
 
@@ -190,6 +192,8 @@ export const AuthProvider = ({ children }) => {
 
     /** Ban + profile run after UI is unblocked so TestFlight never spins on slow Supabase. */
     const loadUserMetaInBackground = async (userId) => {
+      setProfileLoading(true);
+      try {
       const banStatus = await runStartupStep(
         () => checkBanStatus(userId),
         5000,
@@ -211,9 +215,12 @@ export const AuthProvider = ({ children }) => {
       if (!mounted) return;
       const normalized = normalizeSchoolProfile(profile);
       setProfile(normalized);
-      setIsOnboardingComplete(!!normalized?.onboarding_completed);
+      setIsOnboardingComplete(hasCompletedAppOnboarding(normalized));
       saveUserTimezone(userId);
       checkAndForfeitBondsWhenStreakZero(userId);
+      } finally {
+        if (mounted) setProfileLoading(false);
+      }
     };
 
     const initializeAuth = async () => {
@@ -239,6 +246,7 @@ export const AuthProvider = ({ children }) => {
         } else {
           setBanStatus(null);
           setProfile(null);
+          setProfileLoading(false);
         }
       } catch (error) {
         console.error("AuthContext: Error in initializeAuth:", error);
@@ -635,7 +643,7 @@ export const AuthProvider = ({ children }) => {
       // If we have a profile, check its onboarding status
       const { data: profile, error } = await supabase
         .from('profiles')
-        .select('onboarding_completed')
+        .select('onboarding_completed, account_type, org_id')
         .eq('id', user.id)
         .single();
 
@@ -645,7 +653,7 @@ export const AuthProvider = ({ children }) => {
         return;
       }
 
-      setIsOnboardingComplete(!!profile.onboarding_completed);
+      setIsOnboardingComplete(hasCompletedAppOnboarding(normalizeSchoolProfile(profile)));
     } catch (error) {
       console.error('Error checking onboarding status:', error);
       setIsOnboardingComplete(false);
@@ -658,6 +666,7 @@ export const AuthProvider = ({ children }) => {
     profile,
     session,
     isLoading,
+    profileLoading,
     isOnboardingComplete,
     banStatus,
     signUp,

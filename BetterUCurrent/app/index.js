@@ -2,19 +2,17 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthSession } from '../hooks/useAuthSession';
-import { resolvePostAuthRoute } from '../lib/resolveInitialRoute';
+import { resolvePostAuthRoute } from '../lib/onboardingGate';
 import WelcomeScreen from './components/WelcomeScreen';
 
-const NAV_FALLBACK_MS = 5000;
-/** Brief wait so background profile fetch can set onboarding_completed before we guess. */
-const PROFILE_HINT_MS = 2000;
+const NAV_FALLBACK_MS = 8000;
 
 /**
  * Signed-out users see Welcome (Sign up / Sign in).
  * Signed-in users go to onboarding, home, or school dashboard based on profile.
  */
 export default function Index() {
-  const { user, workspace, profile, isLoading } = useAuthSession();
+  const { user, workspace, profile, isLoading, profileLoading } = useAuthSession();
   const router = useRouter();
   const [hasNavigated, setHasNavigated] = useState(false);
   const lastTargetRef = useRef(null);
@@ -33,31 +31,15 @@ export default function Index() {
       router.replace(target);
     };
 
-    const go = () => {
-      navigate(resolvePostAuthRoute(workspace, profile));
-    };
-
-    const profileKnown =
-      profile?.onboarding_completed === true ||
-      profile?.onboarding_completed === false;
-
-    if (!isLoading && profileKnown) {
-      go();
-      return;
+    if (isLoading || profileLoading) {
+      const fallbackTimer = setTimeout(() => {
+        navigate(resolvePostAuthRoute(workspace, profile));
+      }, NAV_FALLBACK_MS);
+      return () => clearTimeout(fallbackTimer);
     }
 
-    if (!isLoading) {
-      const hintTimer = setTimeout(go, PROFILE_HINT_MS);
-      const fallbackTimer = setTimeout(go, NAV_FALLBACK_MS);
-      return () => {
-        clearTimeout(hintTimer);
-        clearTimeout(fallbackTimer);
-      };
-    }
-
-    const fallbackTimer = setTimeout(go, NAV_FALLBACK_MS);
-    return () => clearTimeout(fallbackTimer);
-  }, [user, workspace, profile, isLoading, router]);
+    navigate(resolvePostAuthRoute(workspace, profile));
+  }, [user, workspace, profile, isLoading, profileLoading, router]);
 
   if (user && !hasNavigated) {
     return (

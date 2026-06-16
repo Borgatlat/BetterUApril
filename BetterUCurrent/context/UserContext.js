@@ -8,6 +8,8 @@ import { useAuth } from "../context/AuthContext"
 import { preloadFeed } from "../utils/feedPreloader"
 import { setPremiumRefreshCallback } from "../lib/premiumRefresh"
 import { receivesSchoolPartnershipPremium } from "../lib/premiumSchool"
+import { hasCompletedAppOnboarding } from "../lib/onboardingGate"
+import { normalizeSchoolProfile } from "../lib/schoolProfileNormalize"
 import { initializePurchases } from "../lib/purchases"
 
 // Create user context with proper type
@@ -214,7 +216,7 @@ export const UserProvider = ({ children }) => {
       if (profile) {
         console.log('[UserContext] Profile data from Supabase:', profile);
         // Check if the profile has completed onboarding
-        const hasCompletedOnboarding = profile.onboarding_completed === true;
+        const hasCompletedOnboarding = hasCompletedAppOnboarding(normalizeSchoolProfile(profile));
         console.log('[UserContext] Onboarding status:', hasCompletedOnboarding);
         
         // If onboarding is completed, ensure we don't reset it

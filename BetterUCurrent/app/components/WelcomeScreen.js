@@ -5,6 +5,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { supabase } from '../../lib/supabase';
+import {
+  formatAppleSignInError,
+  isAppleSignInCanceled,
+  persistAppleProfileFields,
+  signInWithAppleNative,
+} from '../../utils/appleAuth';
+import { normalizeSchoolProfile } from '../../lib/schoolProfileNormalize';
+import { hasCompletedAppOnboarding, resolvePostAuthRouteForProfile } from '../../lib/onboardingGate';
 // Metro resolves static images at build time — path must match a real file under assets/.
 // This project ships app-icon.png (not app-logo.png), which is the same role: splash/welcome logo.
 import appLogo from '../../assets/images/app-icon.png';
@@ -40,55 +48,32 @@ const WelcomeScreen = () => {
   }, []);
 
   /**
-   * Persist name/email from Apple credential to profile (Apple sends these only on first sign-in).
-   */
-  const persistAppleNameEmailIfProvided = async (userId, credential) => {
-    const parts = [];
-    if (credential.fullName?.givenName) parts.push(credential.fullName.givenName);
-    if (credential.fullName?.familyName) parts.push(credential.fullName.familyName);
-    const full_name = parts.length ? parts.join(' ').trim() : null;
-    const email = credential.email || null;
-    if (!full_name && !email) return;
-    const payload = { id: userId };
-    if (full_name) payload.full_name = full_name;
-    if (email) payload.email = email;
-    await supabase.from('profiles').upsert(payload, { onConflict: 'id' });
-  };
-
-  /**
    * Continue with Apple: sign in or sign up via native Apple ID.
    * Supabase creates an account if the user doesn't exist; then we redirect to onboarding or home.
    */
   const handleContinueWithApple = async () => {
     try {
       setIsAppleLoading(true);
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      const { data, error } = await supabase.auth.signInWithIdToken({
-        provider: 'apple',
-        token: credential.identityToken,
-      });
-      if (error) throw error;
-      await persistAppleNameEmailIfProvided(data.user.id, credential);
+      const { data, credential } = await signInWithAppleNative(supabase);
+      await persistAppleProfileFields(supabase, data.user.id, credential);
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('onboarding_completed')
+        .select('onboarding_completed, account_type, org_id')
         .eq('id', data.user.id)
-        .single();
-      if (profileError && profileError.code !== 'PGRST116') throw profileError;
-      if (!profile?.onboarding_completed) {
+        .maybeSingle();
+      if (profileError) {
+        console.warn('Profile check after Apple sign-in:', profileError.message);
+      }
+      if (!hasCompletedAppOnboarding(normalizeSchoolProfile(profile))) {
         router.replace('/(auth)/onboarding/welcome');
       } else {
-        router.replace('/(tabs)/home');
+        router.replace(resolvePostAuthRouteForProfile(profile));
       }
     } catch (e) {
-      if (e?.code !== 'ERR_CANCELED') {
+      if (!isAppleSignInCanceled(e)) {
         console.error('Continue with Apple error:', e);
-        Alert.alert('Error', 'Failed to sign in with Apple. Please try again.');
+        const msg = formatAppleSignInError(e, 'sign in with Apple');
+        Alert.alert('Apple Sign In', msg);
       }
     } finally {
       setIsAppleLoading(false);

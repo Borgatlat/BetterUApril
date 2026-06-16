@@ -118,6 +118,16 @@ export async function fetchSentinelMetrics(orgId) {
   return data;
 }
 
+/** Anonymized campus pulse for today (student-safe RPC; min 5 opt-in logs). */
+export async function fetchOrgPulseTodayAggregate(orgId) {
+  if (!orgId) return null;
+  const { data, error } = await supabase.rpc("get_org_pulse_today_for_students", {
+    p_org_id: orgId,
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function fetchPendingAlertsForOrg(orgId) {
   const { data, error } = await supabase
     .from("counselor_alerts")

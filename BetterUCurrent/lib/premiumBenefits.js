@@ -14,9 +14,9 @@ export const PREMIUM_WORKOUT_COUNT = PREMIUM_WORKOUTS.length;
 /** Framing for ~$5/week — helps users compare to coffee, not a gym membership */
 export const PREMIUM_VALUE_ANCHOR = {
   headline: 'Your full wellness team for less than a coffee a day',
-  subline: 'AI coach, therapist, meal planner, guided audio & 43+ pro programs — about $0.71/day.',
-  weeklyPriceLabel: '~$5/week after trial',
-  trialLabel: '7-day free trial · cancel anytime',
+  subline: 'AI coach, therapist, meal planner, guided audio & 43+ pro programs.',
+  trialLabel: 'Free trial available on select plans · cancel anytime',
+  afterTrialLabel: 'Pricing shown from the App Store for your selected plan',
 };
 
 /**
@@ -239,7 +239,7 @@ export const PREMIUM_SETTINGS_HIGHLIGHTS = [
 export const PREMIUM_VALUE_COMPARISONS = [
   { label: 'One therapy session', cost: '~$150' },
   { label: 'One personal training session', cost: '~$80' },
-  { label: 'BetterU Premium', cost: '~$5/week', highlight: true },
+  { label: 'BetterU Premium', cost: 'Weekly · Monthly · Yearly', highlight: true },
 ];
 
 export function getPremiumBenefitByReason(reason) {

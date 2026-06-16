@@ -5,9 +5,15 @@ import { triggerPremiumRefresh } from './premiumRefresh';
 import {
   getPreferredDefaultPackage,
   getSubscriptionDurationDays,
-  isMonthlyPackage,
   pickActiveSubscriptionProduct,
   sortPackagesForDisplay,
+  filterKnownSubscriptionPackages,
+  dedupeSubscriptionPackages,
+  createStandaloneSubscriptionPackage,
+  getMissingSubscriptionProductIds,
+  getPackageProductId,
+  isKnownSubscriptionPackage,
+  SUBSCRIPTION_PRODUCT_PRIORITY,
 } from './subscriptionProducts';
 
 // RevenueCat Paywall UI – design your paywall in RevenueCat dashboard, then present it here.
@@ -141,6 +147,57 @@ export const initializePurchases = async (userId) => {
   return initPromise;
 };
 
+/** Gather subscription packages from current + premium_offering + any offering that has our SKUs */
+function collectSubscriptionPackagesFromOfferings(offerings) {
+  const collected = [];
+
+  const addPackages = (list) => {
+    if (!Array.isArray(list)) return;
+    for (const pkg of list) {
+      if (isKnownSubscriptionPackage(pkg)) {
+        collected.push(pkg);
+      }
+    }
+  };
+
+  addPackages(offerings?.current?.availablePackages);
+  addPackages(offerings?.all?.['premium_offering']?.availablePackages);
+
+  if (offerings?.all) {
+    for (const offering of Object.values(offerings.all)) {
+      addPackages(offering?.availablePackages);
+    }
+  }
+
+  return dedupeSubscriptionPackages(collected);
+}
+
+/** Fetch any weekly/monthly/yearly product missing from the offering (e.g. weekly just added in App Store Connect) */
+async function hydrateMissingSubscriptionPackages(packages) {
+  const missingIds = getMissingSubscriptionProductIds(packages);
+  if (!missingIds.length || Platform.OS !== 'ios') {
+    return packages;
+  }
+
+  console.log('[RevenueCat] Hydrating missing subscription products:', missingIds);
+  try {
+    const products = await Purchases.getProducts(missingIds);
+    const standalone = (products || [])
+      .map(createStandaloneSubscriptionPackage)
+      .filter(Boolean);
+    if (standalone.length) {
+      console.log(
+        '[RevenueCat] Loaded standalone products for paywall:',
+        standalone.map((p) => getPackageProductId(p))
+      );
+    }
+    return dedupeSubscriptionPackages([...packages, ...standalone]);
+  } catch (error) {
+    console.warn('[RevenueCat] Could not hydrate missing subscription products:', error?.message);
+    return packages;
+  }
+}
+
 export const getOfferings = async () => {
   try {
     console.log('Getting offerings...');
@@ -178,17 +235,22 @@ export const getOfferings = async () => {
       offerings.current = currentOffering;
     }
 
-    if (!offerings.current.availablePackages?.length) {
-      console.log('No available packages found in current offering');
+    let mergedPackages = collectSubscriptionPackagesFromOfferings(offerings);
+    mergedPackages = await hydrateMissingSubscriptionPackages(mergedPackages);
+
+    if (!mergedPackages.length) {
+      console.log('No subscription packages found after merge/hydrate');
       return null;
     }
 
     // Log detailed package information including intro/promo (so you can verify App Store Connect offers appear)
-    console.log('Number of available packages:', offerings.current.availablePackages.length);
-    offerings.current.availablePackages.forEach((pkg, index) => {
+    console.log('Number of subscription packages (merged):', mergedPackages.length);
+    mergedPackages.forEach((pkg, index) => {
       const prod = pkg.product;
       console.log(`Package ${index + 1}:`, {
         identifier: pkg.identifier,
+        productId: prod?.identifier,
+        standalone: !!pkg.isStandaloneProduct,
         product: {
           title: prod.title,
           priceString: prod.priceString,
@@ -202,29 +264,14 @@ export const getOfferings = async () => {
       }
     });
 
-    // Weekly is primary; sort so paywall shows it first
+    // Weekly → yearly → monthly; only real App Store SKUs
     offerings.current.availablePackages = sortPackagesForDisplay(
-      offerings.current.availablePackages
+      filterKnownSubscriptionPackages(mergedPackages)
     );
 
-    // Dev/preview fallback: if only monthly exists, synthesize a yearly option for comparison
-    if (offerings.current.availablePackages.length === 1) {
-      const only = offerings.current.availablePackages[0];
-      if (isMonthlyPackage(only)) {
-        const yearlyPackage = {
-          ...only,
-          identifier: `${only.identifier}_yearly`,
-          packageType: 'ANNUAL',
-          product: {
-            ...only.product,
-            subscriptionPeriod: 'P1Y',
-            priceString: `$${(parseFloat(String(only.product.priceString).replace('$', '')) * 10).toFixed(2)}`,
-            title: 'Yearly Premium',
-          },
-        };
-        offerings.current.availablePackages.push(yearlyPackage);
-        console.log('Added yearly package:', yearlyPackage);
-      }
+    if (!offerings.current.availablePackages.length) {
+      console.log('No known subscription packages in current offering');
+      return null;
     }
 
     return offerings;
@@ -329,6 +376,58 @@ export const presentPaywallIfNeeded = async (opts = {}) => {
 };
 
 /**
+ * Whether RevenueCat customerInfo reflects an active subscription or premium entitlement.
+ */
+export function customerInfoHasActiveSubscription(customerInfo) {
+  if (!customerInfo) return false;
+
+  const activeSubscriptions = customerInfo.activeSubscriptions || [];
+  const entitlements = customerInfo.entitlements?.active || {};
+  const subscriptionsByProduct = customerInfo.subscriptionsByProductIdentifier || {};
+
+  if (activeSubscriptions.length > 0) return true;
+  if (Object.keys(entitlements).length > 0) return true;
+
+  return Object.values(subscriptionsByProduct).some((sub) => sub?.isActive);
+}
+
+/**
+ * After purchase, Apple/RevenueCat can take a moment to mark the subscription active.
+ * Poll getCustomerInfo() briefly so the paywall does not show a false "not confirmed" alert.
+ */
+export async function resolveCustomerInfoAfterPurchase(
+  initialCustomerInfo,
+  maxAttempts = 5,
+  delayMs = 800
+) {
+  if (customerInfoHasActiveSubscription(initialCustomerInfo)) {
+    return initialCustomerInfo;
+  }
+
+  if (Platform.OS !== 'ios') {
+    return initialCustomerInfo;
+  }
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    try {
+      const customerInfo = await Purchases.getCustomerInfo();
+      if (customerInfoHasActiveSubscription(customerInfo)) {
+        return customerInfo;
+      }
+    } catch (error) {
+      console.warn('[RevenueCat] getCustomerInfo after purchase failed:', error?.message);
+    }
+  }
+
+  try {
+    return (await Purchases.getCustomerInfo()) || initialCustomerInfo;
+  } catch {
+    return initialCustomerInfo;
+  }
+}
+
+/**
  * Purchase a package. If the product has a promotional offer (discount), applies it so the
  * Apple payment sheet shows the promo price (e.g. $2.99 for 12 months) instead of the full price.
  */
@@ -336,6 +435,15 @@ export const purchasePackage = async (pkg) => {
   try {
     if (Platform.OS !== 'ios') {
       return { success: false, error: 'In-app purchases are currently only available on iOS' };
+    }
+
+    // Products fetched via getProducts() (not yet in a RevenueCat offering package)
+    if (pkg?.isStandaloneProduct && pkg?.product) {
+      console.log('Attempting standalone product purchase:', pkg.product.identifier);
+      const { customerInfo, productIdentifier } = await Purchases.purchaseStoreProduct(pkg.product);
+      console.log('Standalone purchase successful:', { customerInfo, productIdentifier });
+      await handlePurchaseUpdate(customerInfo);
+      return { success: true, productIdentifier, customerInfo };
     }
 
     const discount = pkg?.product?.discounts?.[0];
@@ -801,7 +909,7 @@ const handlePurchaseUpdate = async (customerInfo) => {
       if (!productId && activeSubscriptions.length > 0) {
         const allPurchaseDates = customerInfo.allPurchaseDates || {};
         const allExpirationDates = customerInfo.allExpirationDates || {};
-        const priority = ['betteru_premium_weekly', 'betteru_premium_yearly', 'betteru_premium_monthly'];
+        const priority = SUBSCRIPTION_PRODUCT_PRIORITY;
         productId = priority.find((id) => activeSubscriptions.includes(id)) || activeSubscriptions[0];
         const purchaseStr = allPurchaseDates[productId];
         const expirationStr = allExpirationDates[productId];

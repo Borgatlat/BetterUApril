@@ -19,11 +19,14 @@ import { getPremiumUpgradeCopy } from '../lib/premiumConversion';
 import PremiumBenefitsShowcase from '../components/premium/PremiumBenefitsShowcase';
 import { PREMIUM_VALUE_ANCHOR } from '../lib/premiumBenefits';
 import {
+  buildSubscriptionPlansSubtitle,
+  filterKnownSubscriptionPackages,
+  getDisplayPriceFromProduct,
   getPackagePeriodLabel,
   getPackagePlanTitle,
   getPreferredDefaultPackage,
   getSubscriptionDurationDays,
-  isMonthlyPackage,
+  getPackageProductId,
   isWeeklyPackage,
   isYearlyPackage,
   pickActiveSubscriptionProduct,
@@ -90,31 +93,55 @@ function getPromoDurationText(discount) {
 }
 
 /**
- * Price to show on cards and CTA. When a promotional discount exists, returns original (strikethrough) + promo price + duration from offer data.
- * @param {Object} product - RevenueCat StoreProduct (pkg.product)
- * @returns {{ originalPrice: string, displayPrice: string, periodLabel: string, isPromo: boolean, promoDurationText?: string, thenPriceString?: string, thenPeriodLabel?: string }}
+ * Price to show on cards and CTA from StoreKit (via RevenueCat).
  */
-function getDisplayPrice(product) {
-  const isYearly = product?.subscriptionPeriod === 'P1Y' || product?.packageType === 'ANNUAL';
-  const isWeekly = product?.subscriptionPeriod === 'P1W' || product?.packageType === 'WEEKLY';
-  const periodLabel = isWeekly ? 'week' : isYearly ? 'year' : 'month';
-  const standardPrice = product?.priceString ?? (isWeekly ? '$4.99' : isYearly ? '$59.99' : '$5.99');
+function getDisplayPrice(product, pkg) {
+  const base = getDisplayPriceFromProduct(product, pkg);
   const discount = product?.discounts?.[0];
-  if (discount?.priceString) {
-    const discountPeriod = (discount.periodUnit || '').toLowerCase();
-    const discountPeriodLabel =
-      discountPeriod === 'year' ? 'year' : discountPeriod === 'week' ? 'week' : discountPeriod === 'month' ? 'month' : periodLabel;
-    return {
-      originalPrice: standardPrice,
-      displayPrice: discount.priceString,
-      periodLabel: discountPeriodLabel,
-      isPromo: true,
-      promoDurationText: getPromoDurationText(discount),
-      thenPriceString: standardPrice,
-      thenPeriodLabel: periodLabel,
-    };
+  if (base.isPromo && discount) {
+    return { ...base, promoDurationText: getPromoDurationText(discount) };
   }
-  return { originalPrice: standardPrice, displayPrice: standardPrice, periodLabel, isPromo: false };
+  return { ...base, promoDurationText: null };
+}
+
+/** CTA primary label from intro offer or generic subscribe */
+function getSubscribeCtaLabel(selectedPackage) {
+  const offer = selectedPackage ? getIntroOrPromoOffer(selectedPackage.product) : null;
+  if (offer) {
+    return offer.isFreeTrial ? `Start your ${offer.introLabel}` : `Get ${offer.introLabel}`;
+  }
+  if (selectedPackage) {
+    return `Subscribe ${getPackagePlanTitle(selectedPackage)}`;
+  }
+  return 'Subscribe';
+}
+
+/** Subtext under CTA with live StoreKit prices */
+function getSubscribeCtaSubtext(selectedPackage) {
+  const dp = selectedPackage ? getDisplayPrice(selectedPackage.product, selectedPackage) : null;
+  if (!dp?.displayPrice) return 'Pricing loads from the App Store';
+  const per = shortPeriodLabel(dp.periodLabel);
+  if (dp.isPromo && dp.thenPriceString) {
+    return `Then ${dp.displayPrice}/${per} · after promo ${dp.thenPriceString}/${shortPeriodLabel(dp.thenPeriodLabel)}`;
+  }
+  return `${dp.displayPrice} per ${dp.periodLabel}`;
+}
+
+/** Features blurb for new subscribers — uses selected/default package pricing */
+function getTrialFeaturesSubtitle(selectedPackage, packages) {
+  const pkg = selectedPackage || getPreferredDefaultPackage(packages);
+  const offer = pkg ? getIntroOrPromoOffer(pkg.product) : null;
+  const dp = pkg ? getDisplayPrice(pkg.product, pkg) : null;
+  if (offer?.isFreeTrial) {
+    const after = dp?.displayPrice
+      ? `then ${dp.displayPrice}/${shortPeriodLabel(dp.periodLabel)}`
+      : 'then your selected plan price';
+    return `${offer.introLabel}, ${after}. Cancel anytime.`;
+  }
+  if (dp?.displayPrice) {
+    return `Plans from ${dp.displayPrice}/${shortPeriodLabel(dp.periodLabel)}. Cancel anytime.`;
+  }
+  return PREMIUM_VALUE_ANCHOR.trialLabel;
 }
 
 /** Short billing unit for CTA subtext: wk, mo, yr */
@@ -182,9 +209,16 @@ function PurchaseSubscriptionScreen() {
         return;
       }
 
+      const packages = filterKnownSubscriptionPackages(offeringsData.current.availablePackages);
+      if (!packages.length) {
+        console.log('No known subscription packages (weekly/monthly/yearly) in offering');
+        setError('No subscription packages available');
+        return;
+      }
+
       const sortedOffering = {
         ...offeringsData.current,
-        availablePackages: sortPackagesForDisplay(offeringsData.current.availablePackages),
+        availablePackages: sortPackagesForDisplay(packages),
       };
       console.log('Setting offerings:', sortedOffering);
       setOfferings(sortedOffering);
@@ -455,82 +489,6 @@ function PurchaseSubscriptionScreen() {
     }
   };
 
-  const getMonthlyPackage = () => {
-    if (!offerings?.availablePackages) {
-      console.log('No available packages found');
-      return null;
-    }
-    const monthly = offerings.availablePackages.find(
-      pkg => pkg.product.subscriptionPeriod === 'P1M' || pkg.packageType === 'MONTHLY'
-    );
-    console.log('Getting monthly package:', monthly ? {
-      identifier: monthly.identifier,
-      price: monthly.product.priceString,
-      period: monthly.product.subscriptionPeriod,
-      type: monthly.packageType
-    } : 'No monthly package found');
-    return monthly;
-  };
-
-  const getYearlyPackage = () => {
-    if (!offerings?.availablePackages) {
-      console.log('No available packages found');
-      return null;
-    }
-    const yearly = offerings.availablePackages.find(
-      pkg => pkg.product.subscriptionPeriod === 'P1Y' || pkg.packageType === 'ANNUAL'
-    );
-    console.log('Getting yearly package:', yearly ? {
-      identifier: yearly.identifier,
-      price: yearly.product.priceString,
-      period: yearly.product.subscriptionPeriod,
-      type: yearly.packageType
-    } : 'No yearly package found');
-    return yearly;
-  };
-
-  const renderSubscriptionButton = (pkg, isSelected) => {
-    if (!pkg) {
-      console.log('No package provided for button');
-      return null;
-    }
-
-    const getPeriodText = (pkg) => getPackagePeriodLabel(pkg);
-    
-    // Show 'Monthly' instead of 'Preview Product' for preview mode
-    let displayTitle = pkg.product.title;
-    if (displayTitle === 'Preview Product' && getPeriodText(pkg) === 'month') {
-      displayTitle = 'Monthly';
-    }
-    if (displayTitle === 'Yearly Premium' && getPeriodText(pkg) === 'year') {
-      displayTitle = 'Yearly';
-    }
-
-    return (
-      <View style={isSelected ? styles.selectedOutline : null}>
-        <TouchableOpacity
-          style={[styles.subscriptionButton, isSelected && styles.selectedSubscriptionButton]}
-          onPress={() => setSelectedPackage(pkg)}
-        >
-          <LinearGradient
-            colors={isSelected ? ['#00ffff', '#0088ff'] : ['#222', '#111']}
-            style={styles.subscriptionButtonGradient}
-          >
-            <Text style={[styles.subscriptionButtonText, isSelected && styles.selectedButtonText]}>
-              {displayTitle}
-            </Text>
-            <Text style={[styles.subscriptionPrice, isSelected && styles.selectedButtonText]}>
-              {pkg.product.priceString || '$9.99'}
-            </Text>
-            <Text style={[styles.subscriptionPeriod, isSelected && styles.selectedButtonText]}>
-              per {getPeriodText(pkg)}
-            </Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-    );
-  };
-
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <TouchableOpacity
@@ -558,20 +516,16 @@ function PurchaseSubscriptionScreen() {
         <Text style={styles.featuresSubtitle}>
           {hasExistingSubscription === true
             ? PREMIUM_VALUE_ANCHOR.subline
-            : `Try it free for 7 days — then ${PREMIUM_VALUE_ANCHOR.weeklyPriceLabel}`}
+            : getTrialFeaturesSubtitle(selectedPackage, offerings?.availablePackages)}
         </Text>
         <PremiumBenefitsShowcase />
       </View>
 
       {/* Plans Header */}
           <View style={styles.plansHeader}>
-        <Text style={styles.plansTitle}>
-          {hasExistingSubscription === true ? 'Choose Your Plan' : 'Start your free trial'}
-        </Text>
+        <Text style={styles.plansTitle}>Choose your plan</Text>
         <Text style={styles.plansSubtitle}>
-          {hasExistingSubscription === true
-            ? 'Select the subscription that works best for you'
-            : 'Weekly plan — 7-day free trial, then about $5/week. Cancel anytime in Settings.'}
+          {buildSubscriptionPlansSubtitle(offerings?.availablePackages)}
         </Text>
       </View>
 
@@ -603,13 +557,13 @@ function PurchaseSubscriptionScreen() {
           <View style={styles.pricingContainer}>
             {offerings?.availablePackages?.map((pkg) => {
               const isWeekly = isWeeklyPackage(pkg);
-              const isMonthly = isMonthlyPackage(pkg);
               const isYearly = isYearlyPackage(pkg);
-              const isSelected = selectedPackage?.identifier === pkg.identifier;
-              const displayPrice = getDisplayPrice(pkg.product);
+              const productId = getPackageProductId(pkg);
+              const isSelected = getPackageProductId(selectedPackage) === productId;
+              const displayPrice = getDisplayPrice(pkg.product, pkg);
               return (
                 <TouchableOpacity 
-                  key={pkg.identifier}
+                  key={productId || pkg.identifier}
                   style={[
                     styles.pricingCard,
                     isSelected && styles.selectedCard
@@ -621,7 +575,7 @@ function PurchaseSubscriptionScreen() {
                       {getPackagePlanTitle(pkg)}
                     </Text>
                     <View style={styles.pricingPriceRow}>
-                      {displayPrice.isPromo ? (
+                      {displayPrice.isPromo && displayPrice.originalPrice ? (
                         <>
                           <Text style={[styles.pricingPrice, styles.pricingPriceStrikethrough]}>
                             {displayPrice.originalPrice}
@@ -629,7 +583,9 @@ function PurchaseSubscriptionScreen() {
                           <Text style={styles.pricingPrice}>{displayPrice.displayPrice}</Text>
                         </>
                       ) : (
-                        <Text style={styles.pricingPrice}>{displayPrice.displayPrice}</Text>
+                        <Text style={styles.pricingPrice}>
+                          {displayPrice.displayPrice ?? '—'}
+                        </Text>
                       )}
                     </View>
                     <Text style={styles.pricingPeriod}>
@@ -681,22 +637,10 @@ function PurchaseSubscriptionScreen() {
                 <>
                   <View style={styles.subscribeButtonContent}>
                     <Text style={styles.subscribeButtonText}>
-                      {loading ? 'Loading...' : (() => {
-                        const offer = selectedPackage ? getIntroOrPromoOffer(selectedPackage.product) : null;
-                        if (offer) return offer.isFreeTrial ? `Start your ${offer.introLabel}` : `Get ${offer.introLabel}`;
-                        return 'Start your 7-day free trial';
-                      })()}
+                      {loading ? 'Loading...' : getSubscribeCtaLabel(selectedPackage)}
                     </Text>
                     <Text style={styles.subscribeButtonSubtext}>
-                      {(() => {
-                        const dp = selectedPackage ? getDisplayPrice(selectedPackage.product) : null;
-                        if (!dp) return 'Then choose your plan';
-                        const per = shortPeriodLabel(dp.periodLabel);
-                        if (dp.isPromo && dp.thenPriceString) {
-                          return `Then ${dp.displayPrice}/${per} (then ${dp.thenPriceString}/${shortPeriodLabel(dp.thenPeriodLabel)})`;
-                        }
-                        return `Then ${dp.displayPrice} per ${dp.periodLabel}`;
-                      })()}
+                      {loading ? '' : getSubscribeCtaSubtext(selectedPackage)}
                     </Text>
                   </View>
                   <Ionicons name="sparkles" size={22} color="#000" style={styles.subscribeButtonIcon} />
@@ -708,9 +652,9 @@ function PurchaseSubscriptionScreen() {
           {/* Guideline 3.1.2: Clear trial, promotional offer duration, then full price after that time */}
           {hasExistingSubscription !== true && selectedPackage && (() => {
             const introOffer = getIntroOrPromoOffer(selectedPackage.product);
-            const displayPrice = getDisplayPrice(selectedPackage.product);
-            const introText = introOffer ? introOffer.introLabel : '7-day free trial';
-            const afterText = introOffer ? introOffer.introDurationLabel : 'After 7 days';
+            const displayPrice = getDisplayPrice(selectedPackage.product, selectedPackage);
+            const introText = introOffer?.introLabel ?? 'Introductory offer';
+            const afterText = introOffer?.introDurationLabel ?? 'After the introductory period';
             const perLabel = displayPrice.periodLabel;
             const thenPerLabel = displayPrice.thenPeriodLabel || displayPrice.periodLabel;
             return (
@@ -1164,18 +1108,6 @@ const styles = StyleSheet.create({
     color: '#000',
     fontWeight: 'bold',
     fontSize: 16,
-  },
-  selectedOutline: {
-    borderWidth: 3,
-    borderColor: '#00ffff',
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,255,255,0.08)',
-    shadowColor: '#00ffff',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 16,
-    elevation: 12,
-    marginBottom: 10,
   },
   subscriptionButtonsContainer: {
     display: 'none',

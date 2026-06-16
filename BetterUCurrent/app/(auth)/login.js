@@ -27,6 +27,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import TurnstileCaptcha from "../../components/TurnstileCaptcha";
 import { consumerDomainFromEmail, isPersonalConsumerEmail } from "../../lib/schoolEmailDomains";
 import { signInWithSchoolSso, schoolDomainFromEmail } from "../../lib/schoolSso";
+import {
+  formatAppleSignInError,
+  isAppleSignInCanceled,
+  persistAppleProfileFields,
+  signInWithAppleNative,
+} from "../../utils/appleAuth";
+import { normalizeSchoolProfile } from "../../lib/schoolProfileNormalize";
+import { hasCompletedAppOnboarding, resolvePostAuthRouteForProfile } from "../../lib/onboardingGate";
 import { TURNSTILE_CONFIG } from "../../config/turnstile";
 // Initialize WebBrowser for auth
 WebBrowser.maybeCompleteAuthSession();
@@ -111,6 +119,10 @@ const LoginScreen = () => {
         throw error;
       }
 
+      if (!params.id_token) {
+        throw new Error('Apple web sign-in did not return a token.');
+      }
+
       console.log('Supabase sign in successful:', data);
 
       await syncSchoolDomainOnLogin(data.user.id, data.user.email);
@@ -118,7 +130,7 @@ const LoginScreen = () => {
       // Check onboarding status - handle case where profile doesn't exist
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('onboarding_completed')
+        .select('onboarding_completed, account_type, org_id')
         .eq('id', data.user.id)
         .single();
 
@@ -137,36 +149,25 @@ const LoginScreen = () => {
       }
 
       await resetBotProtection(); // Reset bot protection after successful login
-      if (!profile?.onboarding_completed) {
+      if (!hasCompletedAppOnboarding(normalizeSchoolProfile(profile))) {
         router.replace('/(auth)/onboarding/welcome');
       } else {
-        router.replace('/');
+        router.replace(resolvePostAuthRouteForProfile(profile));
       }
     } catch (error) {
-      console.error('Apple Sign In error:', error);
-      setError('Failed to sign in with Apple');
-      Alert.alert('Error', 'Failed to sign in with Apple. Please try again.');
+      if (!isAppleSignInCanceled(error)) {
+        console.error('Apple Sign In error:', error);
+        const msg = formatAppleSignInError(error, 'sign in with Apple');
+        setError(msg);
+        Alert.alert('Apple Sign In', msg);
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
-  /**
-   * Saves name and email from Sign in with Apple to the profile when provided.
-   * Apple only sends fullName and email on the FIRST sign-in; we must persist them
-   * immediately so we never ask the user for them again (App Store Guideline 4.0).
-   */
-  const persistAppleNameEmailIfProvided = async (userId, credential) => {
-    const parts = [];
-    if (credential.fullName?.givenName) parts.push(credential.fullName.givenName);
-    if (credential.fullName?.familyName) parts.push(credential.fullName.familyName);
-    const full_name = parts.length ? parts.join(" ").trim() : null;
-    const email = credential.email || null;
-    if (!full_name && !email) return;
-    const payload = { id: userId };
-    if (full_name) payload.full_name = full_name;
-    if (email) payload.email = email;
-    await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+  const saveAppleProfileFields = async (userId, credential) => {
+    await persistAppleProfileFields(supabase, userId, credential);
   };
 
   const handleAppleSignIn = async () => {
@@ -181,31 +182,12 @@ const LoginScreen = () => {
       setIsLoading(true);
       setError("");
       console.log('Starting Apple Sign In...');
-      
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
 
-      console.log('Apple Sign In successful, processing credential...');
-      
-      // Sign in with Supabase using the identityToken
-      const { data, error } = await supabase.auth.signInWithIdToken({
-        provider: 'apple',
-        token: credential.identityToken,
-      });
-
-      if (error) {
-        console.error('Supabase sign in error:', error);
-        throw error;
-      }
+      const { data, credential } = await signInWithAppleNative(supabase);
 
       console.log('Supabase sign in successful:', data);
 
-      // App Store requirement: use name/email from Apple; never ask again.
-      await persistAppleNameEmailIfProvided(data.user.id, credential);
+      await saveAppleProfileFields(data.user.id, credential);
 
       await syncSchoolDomainOnLogin(
         data.user.id,
@@ -215,7 +197,7 @@ const LoginScreen = () => {
       // Check onboarding status - handle case where profile doesn't exist
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('onboarding_completed')
+        .select('onboarding_completed, account_type, org_id')
         .eq('id', data.user.id)
         .single();
 
@@ -234,16 +216,17 @@ const LoginScreen = () => {
       }
 
       await resetBotProtection(); // Reset bot protection after successful login
-      if (!profile?.onboarding_completed) {
+      if (!hasCompletedAppOnboarding(normalizeSchoolProfile(profile))) {
         router.replace('/(auth)/onboarding/welcome');
       } else {
-        router.replace('/');
+        router.replace(resolvePostAuthRouteForProfile(profile));
       }
     } catch (error) {
-      if (error.code !== 'ERR_CANCELED') {
+      if (!isAppleSignInCanceled(error)) {
         console.error('Apple Sign In error:', error);
-        setError('Failed to sign in with Apple');
-        Alert.alert('Error', 'Failed to sign in with Apple. Please try again.');
+        const msg = formatAppleSignInError(error, 'sign in with Apple');
+        setError(msg);
+        Alert.alert('Apple Sign In', msg);
       }
     } finally {
       setIsLoading(false);
@@ -369,7 +352,7 @@ const LoginScreen = () => {
     await syncSchoolDomainOnLogin(userId, userEmail);
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("onboarding_completed, account_type")
+      .select("onboarding_completed, account_type, org_id")
       .eq("id", userId)
       .maybeSingle();
 
@@ -379,14 +362,10 @@ const LoginScreen = () => {
     }
 
     await resetBotProtection();
-    if (profile?.account_type === "parent") {
-      router.replace("/(parent)/dashboard");
-      return;
-    }
-    if (!profile?.onboarding_completed) {
+    if (!hasCompletedAppOnboarding(normalizeSchoolProfile(profile))) {
       router.replace("/(auth)/onboarding/welcome");
     } else {
-      router.replace("/");
+      router.replace(resolvePostAuthRouteForProfile(profile));
     }
   };
 
@@ -635,10 +614,10 @@ const LoginScreen = () => {
 
         console.log('Login successful, checking onboarding status...');
         await resetBotProtection(); // Reset bot protection after successful login
-        if (!profile?.onboarding_completed) {
+        if (!hasCompletedAppOnboarding(normalizeSchoolProfile(profile))) {
           router.replace('/(auth)/onboarding/welcome');
         } else {
-          router.replace('/');
+          router.replace(resolvePostAuthRouteForProfile(profile));
         }
         return;
 
@@ -682,24 +661,13 @@ const LoginScreen = () => {
     try {
       setIsLoading(true);
       setError("");
-      const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
-      });
-      // Sign in with Supabase using the identityToken
-      const { data, error } = await supabase.auth.signInWithIdToken({
-        provider: 'apple',
-        token: credential.identityToken,
-      });
-      if (error) throw error;
-      await persistAppleNameEmailIfProvided(data.user.id, credential);
+      const { data, credential } = await signInWithAppleNative(supabase);
+      await saveAppleProfileFields(data.user.id, credential);
       await syncSchoolDomainOnLogin(data.user.id, credential.email || data.user.email);
       // Check onboarding status - handle case where profile doesn't exist
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('onboarding_completed')
+        .select('onboarding_completed, account_type, org_id')
         .eq('id', data.user.id)
         .single();
       if (profileError) {
@@ -716,15 +684,16 @@ const LoginScreen = () => {
         return;
       }
       await resetBotProtection(); // Reset bot protection after successful login
-      if (!profile?.onboarding_completed) {
+      if (!hasCompletedAppOnboarding(normalizeSchoolProfile(profile))) {
         router.replace('/(auth)/onboarding/welcome');
       } else {
-        router.replace('/');
+        router.replace(resolvePostAuthRouteForProfile(profile));
       }
     } catch (error) {
-      if (error.code !== 'ERR_CANCELED') {
-        setError('Failed to sign in with Apple');
-        Alert.alert('Error', 'Failed to sign in with Apple. Please try again.');
+      if (!isAppleSignInCanceled(error)) {
+        const msg = formatAppleSignInError(error, 'sign in with Apple');
+        setError(msg);
+        Alert.alert('Apple Sign In', msg);
       }
     } finally {
       setIsLoading(false);

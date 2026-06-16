@@ -3,17 +3,28 @@ import { View, Text, StyleSheet } from "react-native";
 import { schoolWellnessTheme as T } from "../schoolWellnessTheme";
 
 /**
- * Groups related hub content with a titled section (same pattern as Spiritual tab).
- * @param {boolean} [inCard] — wrap content in a rounded card surface
+ * Groups related hub content — cyan accent bar, sentence-case titles (mirrors SpiritualSection).
  */
-export function SchoolWellnessSection({ title, subtitle, children, last = false, inCard = false }) {
+export function SchoolWellnessSection({
+  title,
+  subtitle,
+  children,
+  last = false,
+  inCard = false,
+  accentColor,
+}) {
+  const accent = accentColor || T.accent;
+
   return (
     <View style={[styles.group, last && styles.groupLast]}>
       <View style={styles.header}>
-        <Text style={styles.title} accessibilityRole="header">
-          {title}
-        </Text>
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+        <View style={[styles.accentBar, { backgroundColor: accent }]} />
+        <View style={styles.headerText}>
+          <Text style={styles.title} accessibilityRole="header">
+            {title}
+          </Text>
+          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+        </View>
       </View>
       <View style={[styles.body, inCard && styles.bodyCard]}>{children}</View>
     </View>
@@ -27,19 +38,30 @@ const styles = StyleSheet.create({
   groupLast: {
     marginBottom: T.spacing.sm,
   },
-  header: { marginBottom: 12, paddingHorizontal: 2 },
+  header: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 12,
+    paddingHorizontal: 2,
+  },
+  accentBar: {
+    width: 3,
+    minHeight: 36,
+    borderRadius: 2,
+  },
+  headerText: { flex: 1 },
   title: {
     color: T.text,
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: "800",
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
+    letterSpacing: -0.2,
   },
   subtitle: {
     color: T.sub,
-    fontSize: 14,
-    marginTop: 5,
-    lineHeight: 20,
+    fontSize: 13,
+    marginTop: 4,
+    lineHeight: 19,
     fontWeight: "500",
   },
   body: { gap: 12 },

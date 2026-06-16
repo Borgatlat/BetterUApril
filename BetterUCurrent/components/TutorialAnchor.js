@@ -11,20 +11,29 @@ export function TutorialAnchor({ anchorKey, children, style }) {
   const viewRef = useRef(null);
   const homeScroll = useHomeScroll();
 
+  // Keep latest context callbacks in refs so measure/register effects do not
+  // re-run when anchorBounds updates change the context value identity.
+  const reportAnchorBoundsRef = useRef(homeScroll?.reportAnchorBounds);
+  const registerAnchorRef = useRef(homeScroll?.registerAnchor);
+  reportAnchorBoundsRef.current = homeScroll?.reportAnchorBounds;
+  registerAnchorRef.current = homeScroll?.registerAnchor;
+
   const measure = useCallback(() => {
     const node = viewRef.current;
-    if (!node?.measureInWindow || !homeScroll?.reportAnchorBounds) return;
+    const report = reportAnchorBoundsRef.current;
+    if (!node?.measureInWindow || !report) return;
     node.measureInWindow((x, y, width, height) => {
       if (width > 0 && height > 0) {
-        homeScroll.reportAnchorBounds(anchorKey, { x, y, width, height });
+        report(anchorKey, { x, y, width, height });
       }
     });
-  }, [anchorKey, homeScroll]);
+  }, [anchorKey]);
 
   useEffect(() => {
-    if (!homeScroll?.registerAnchor) return undefined;
-    return homeScroll.registerAnchor(anchorKey, viewRef, measure);
-  }, [anchorKey, measure, homeScroll]);
+    const register = registerAnchorRef.current;
+    if (!register) return undefined;
+    return register(anchorKey, viewRef, measure);
+  }, [anchorKey, measure]);
 
   return (
     <View ref={viewRef} style={style} onLayout={measure} collapsable={false}>

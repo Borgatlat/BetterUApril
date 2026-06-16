@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Animated } from 'react-native';
 import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAuthSession } from '../../hooks/useAuthSession';
+import { useOrgBranding } from '../../context/OrgBrandingContext';
 import {
   fetchSchoolDisplayName,
   formatOrgIdAsDisplayName,
@@ -56,6 +57,7 @@ const HomeScreen = () => {
   const params = useLocalSearchParams();
   const showEasyMode = params?.showEasyMode === '1' || params?.showEasyMode === 1;
   const { workspace, orgId } = useAuthSession();
+  const { modules } = useOrgBranding();
   const [schoolDisplayName, setSchoolDisplayName] = useState(() =>
     formatOrgIdAsDisplayName(orgId)
   );
@@ -95,20 +97,20 @@ const HomeScreen = () => {
   const { refreshKey: scheduleRefreshKey, notifyScheduleUpdated } = useScheduleRefresh();
   const { scrollPaddingBottom } = useBottomChromeInsets();
   const homeScroll = useHomeScroll();
+  const registerScrollRefRef = React.useRef(homeScroll?.registerScrollRef);
+  const registerScrollContentRefRef = React.useRef(homeScroll?.registerScrollContentRef);
+  const remeasureAllAnchorsRef = React.useRef(homeScroll?.remeasureAllAnchors);
+  registerScrollRefRef.current = homeScroll?.registerScrollRef;
+  registerScrollContentRefRef.current = homeScroll?.registerScrollContentRef;
+  remeasureAllAnchorsRef.current = homeScroll?.remeasureAllAnchors;
 
-  const attachScrollRef = React.useCallback(
-    (node) => {
-      homeScroll?.registerScrollRef?.(node);
-    },
-    [homeScroll],
-  );
+  const attachScrollRef = React.useCallback((node) => {
+    registerScrollRefRef.current?.(node);
+  }, []);
 
-  const attachScrollContentRef = React.useCallback(
-    (node) => {
-      homeScroll?.registerScrollContentRef?.(node);
-    },
-    [homeScroll],
-  );
+  const attachScrollContentRef = React.useCallback((node) => {
+    registerScrollContentRefRef.current?.(node);
+  }, []);
   const [recoveryScore, setRecoveryScore] = useState(null);
   const [recoveryHoursLabel, setRecoveryHoursLabel] = useState('Fully recovered');
   const [recoveryBreakdown, setRecoveryBreakdown] = useState({ draggingDown: [], bringingUp: [] });
@@ -171,8 +173,8 @@ const HomeScreen = () => {
     }, [userProfile?.id])
   );
 
-  /** School roster uses School / Spiritual — hide nutrition shortcuts alongside the Nutrition tab. */
-  const hideNutritionForSchoolStudent = workspace === 'student';
+  /** Hide nutrition on home only when the org has nutrition module off. */
+  const hideNutritionForSchoolStudent = workspace === 'student' && !modules.nutrition;
   const showNutritionSection =
     !hideNutritionForSchoolStudent && (homePrefs.showDailyNutrition || homePrefs.showFoodScanner);
   const showAiSection = homePrefs.showAIServices || homePrefs.showFutureU;
@@ -183,9 +185,9 @@ const HomeScreen = () => {
       style={[styles.container, { backgroundColor: homeBg }]}
       showsVerticalScrollIndicator={false}
       contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollPaddingBottom }]}
-      onContentSizeChange={() => homeScroll?.remeasureAllAnchors?.()}
-      onScrollEndDrag={() => homeScroll?.remeasureAllAnchors?.()}
-      onMomentumScrollEnd={() => homeScroll?.remeasureAllAnchors?.()}
+      onContentSizeChange={() => remeasureAllAnchorsRef.current?.()}
+      onScrollEndDrag={() => remeasureAllAnchorsRef.current?.()}
+      onMomentumScrollEnd={() => remeasureAllAnchorsRef.current?.()}
     >
       <View ref={attachScrollContentRef} collapsable={false}>
       <TutorialAnchor anchorKey={HOME_TUTORIAL_ANCHORS.HEADER} style={styles.header}>
@@ -280,17 +282,7 @@ const HomeScreen = () => {
             messageCount={sharedMessageCount}
             maxMessages={MAX_DAILY_MESSAGES}
           />
-          <PremiumDailyFocus
-            userId={userProfile.id}
-            isPremium={isPremium}
-            messageCount={sharedMessageCount}
-            maxMessages={MAX_DAILY_MESSAGES}
-            onOpenTherapist={() => setShowTherapistModal(true)}
-            onOpenTrainer={() => setShowTrainerModal(true)}
-          />
           <WeeklyWellnessReport userId={userProfile.id} isPremium={isPremium} accentColor="#FFD700" />
-          <EasyModeBanner userId={userProfile.id} accentColor={accent} forceVisible={showEasyMode} />
-          <ProgressWinsPanel userId={userProfile.id} accentColor={accent} compact />
         </View>
       )}
 
@@ -363,6 +355,21 @@ const HomeScreen = () => {
           onFutureuChecklistChanged={notifyScheduleUpdated}
           onSeeMore={() => router.push('/(modals)/plan-your-week')}
         />
+        {userProfile?.id && workspace !== 'student' && (
+          <View style={styles.postScheduleBlock}>
+            <PremiumDailyFocus
+              userId={userProfile.id}
+              isPremium={isPremium}
+              messageCount={sharedMessageCount}
+              maxMessages={MAX_DAILY_MESSAGES}
+              accentColor={accent}
+              onOpenTherapist={() => setShowTherapistModal(true)}
+              onOpenTrainer={() => setShowTrainerModal(true)}
+            />
+            <EasyModeBanner userId={userProfile.id} accentColor={accent} forceVisible={showEasyMode} />
+            <ProgressWinsPanel userId={userProfile.id} accentColor={accent} compact />
+          </View>
+        )}
       </TutorialAnchor>
 
       <View style={styles.section}>
@@ -560,6 +567,10 @@ const styles = StyleSheet.create({
   quoteText: { fontSize: 18, fontWeight: 'bold', color: '#fff', marginBottom: 10 },
   quoteAuthor: { fontSize: 14, color: '#666' },
   streakContainer: { alignItems: 'center', marginTop: 12, marginBottom: 16, paddingHorizontal: 20, width: '100%' },
+  postScheduleBlock: {
+    marginTop: 12,
+    gap: 8,
+  },
   section: { width: '100%', paddingHorizontal: 20, marginBottom: 24 },
   recoverySectionHeader: {
     flexDirection: 'row',

@@ -4,9 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { getUserWellnessFocus } from '../../lib/premiumProblemSolver';
 import { navigateToPremiumPaywall } from '../../lib/premiumConversion';
+import { hexToRgba } from '../../utils/homePageCustomization';
 
 /**
- * Home hero: one real problem → one clear action (Premium gets 3-step plan).
+ * Compact home nudge: one problem → one tap action.
  */
 export function PremiumDailyFocus({
   userId,
@@ -15,6 +16,7 @@ export function PremiumDailyFocus({
   maxMessages = 10,
   onOpenTherapist,
   onOpenTrainer,
+  accentColor = '#00ffff',
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -42,15 +44,17 @@ export function PremiumDailyFocus({
 
   if (!userId || loading) {
     return (
-      <View style={styles.card}>
-        <ActivityIndicator color="#00ffff" />
+      <View style={styles.loadingCard}>
+        <ActivityIndicator color={accentColor} size="small" />
       </View>
     );
   }
 
   if (!focus?.primaryProblem) return null;
 
-  const { primaryProblem, actionPlan } = focus;
+  const { primaryProblem } = focus;
+  const urgent = focus.state === 'atRisk';
+  const accent = urgent ? '#ff8844' : accentColor;
 
   const go = (action, route, params) => {
     if (action?.id === 'ai_support' && onOpenTherapist) {
@@ -63,116 +67,140 @@ export function PremiumDailyFocus({
   };
 
   return (
-    <View style={[styles.card, focus.state === 'atRisk' && styles.cardUrgent]}>
-      <View style={styles.header}>
-        <Ionicons name={primaryProblem.icon || 'bulb'} size={22} color={focus.state === 'atRisk' ? '#ff8844' : '#00ffff'} />
-        <Text style={styles.headerTitle}>Today&apos;s focus</Text>
-        {isPremium && (
-          <View style={styles.premiumTag}>
-            <Text style={styles.premiumTagText}>Premium plan</Text>
-          </View>
-        )}
-      </View>
-
-      <Text style={styles.problem}>{primaryProblem.problem}</Text>
-      <Text style={styles.solution}>{primaryProblem.solution}</Text>
-
+    <View style={styles.wrap}>
       <TouchableOpacity
-        style={styles.cta}
+        style={[
+          styles.card,
+          urgent && styles.cardUrgent,
+          { borderColor: hexToRgba(accent, urgent ? 0.35 : 0.14) },
+        ]}
         onPress={() => go(primaryProblem, primaryProblem.route, primaryProblem.params)}
-        activeOpacity={0.88}
+        activeOpacity={0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`Today's focus: ${primaryProblem.problem}`}
       >
-        <Text style={styles.ctaText}>{primaryProblem.cta}</Text>
-        <Ionicons name="arrow-forward" size={18} color="#000" />
+        <View style={[styles.iconWrap, { backgroundColor: hexToRgba(accent, 0.12) }]}>
+          <Ionicons name={primaryProblem.icon || 'bulb'} size={20} color={accent} />
+        </View>
+        <View style={styles.textCol}>
+          <View style={styles.titleRow}>
+            <Text style={styles.kicker}>Today&apos;s focus</Text>
+            {isPremium ? (
+              <View style={styles.premiumTag}>
+                <Text style={styles.premiumTagText}>Premium</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.problem} numberOfLines={2}>
+            {primaryProblem.problem}
+          </Text>
+          <Text style={styles.hint} numberOfLines={1}>
+            {primaryProblem.solution}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color="#666" />
       </TouchableOpacity>
 
-      {primaryProblem.premiumUnlock && !isPremium && (
+      {primaryProblem.premiumUnlock && !isPremium ? (
         <TouchableOpacity
           onPress={() => navigateToPremiumPaywall(router, 'daily_focus')}
           style={styles.premiumHint}
+          activeOpacity={0.85}
         >
-          <Ionicons name="sparkles" size={14} color="#FFD700" />
-          <Text style={styles.premiumHintText}>{primaryProblem.premiumUnlock}</Text>
+          <Ionicons name="sparkles" size={13} color="#FFD700" />
+          <Text style={styles.premiumHintText} numberOfLines={1}>
+            {primaryProblem.premiumUnlock}
+          </Text>
         </TouchableOpacity>
-      )}
-
-      {actionPlan?.length > 0 && (
-        <View style={styles.planBlock}>
-          <Text style={styles.planTitle}>{isPremium ? 'Your 3-step plan' : 'Next step'}</Text>
-          {actionPlan.map((step) => (
-            <TouchableOpacity
-              key={`${step.step}-${step.text}`}
-              style={styles.planRow}
-              onPress={() => {
-                if (step.isPremiumCta) navigateToPremiumPaywall(router, 'daily_focus');
-                else go(null, step.route, step.params);
-              }}
-              disabled={!step.route && !step.isPremiumCta}
-            >
-              <Text style={styles.planStep}>{step.step}.</Text>
-              <Text style={[styles.planText, step.isPremiumCta && styles.planPremium]}>
-                {step.text}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    marginHorizontal: 20,
-    marginBottom: 12,
-    padding: 16,
+  wrap: {
+    marginBottom: 0,
+  },
+  loadingCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 16,
-    backgroundColor: 'rgba(0, 255, 255, 0.05)',
     borderWidth: 1,
-    borderColor: 'rgba(0, 255, 255, 0.2)',
+    borderColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 14,
+    alignItems: 'center',
   },
-  cardUrgent: {
-    backgroundColor: 'rgba(255, 120, 0, 0.08)',
-    borderColor: 'rgba(255, 120, 0, 0.35)',
-  },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
-  headerTitle: { color: '#fff', fontSize: 16, fontWeight: '800', flex: 1 },
-  premiumTag: {
-    backgroundColor: 'rgba(255, 215, 0, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-  },
-  premiumTagText: { color: '#FFD700', fontSize: 10, fontWeight: '800' },
-  problem: { color: '#fff', fontSize: 15, fontWeight: '700', lineHeight: 21, marginBottom: 6 },
-  solution: { color: '#aaa', fontSize: 13, lineHeight: 18, marginBottom: 14 },
-  cta: {
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#00ffff',
+    gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    borderWidth: 1,
     paddingVertical: 12,
-    borderRadius: 12,
+    paddingHorizontal: 14,
   },
-  ctaText: { color: '#000', fontSize: 15, fontWeight: '800' },
+  cardUrgent: {
+    backgroundColor: 'rgba(255, 120, 0, 0.06)',
+  },
+  iconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  kicker: {
+    color: '#666',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  premiumTag: {
+    backgroundColor: 'rgba(255, 215, 0, 0.16)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  premiumTagText: {
+    color: '#FFD700',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  problem: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 19,
+  },
+  hint: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 2,
+    lineHeight: 16,
+  },
   premiumHint: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginTop: 12,
-    paddingVertical: 8,
+    marginTop: 6,
+    paddingHorizontal: 2,
   },
-  premiumHintText: { color: '#FFD700', fontSize: 12, fontWeight: '600', flex: 1 },
-  planBlock: {
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.08)',
+  premiumHintText: {
+    color: '#FFD700',
+    fontSize: 11,
+    fontWeight: '600',
+    flex: 1,
   },
-  planTitle: { color: '#888', fontSize: 11, fontWeight: '700', letterSpacing: 0.5, marginBottom: 8 },
-  planRow: { flexDirection: 'row', gap: 8, paddingVertical: 6 },
-  planStep: { color: '#00ffff', fontWeight: '800', width: 18 },
-  planText: { color: '#ccc', fontSize: 13, flex: 1, lineHeight: 18 },
-  planPremium: { color: '#FFD700' },
 });

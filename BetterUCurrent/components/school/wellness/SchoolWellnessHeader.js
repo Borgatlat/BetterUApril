@@ -1,7 +1,6 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useUser } from "../../../context/UserContext";
 import { PremiumAvatar } from "../../../app/components/PremiumAvatar";
@@ -9,14 +8,13 @@ import NotificationBadge from "../../NotificationBadge";
 import NotificationModal from "../../NotificationModal";
 import { schoolWellnessTheme as T } from "../schoolWellnessTheme";
 import { hexToRgba } from "../../../utils/homePageCustomization";
+import { WellnessIntro } from "./WellnessIntro";
 
-/**
- * Top bar: greeting + your school's name (not generic “whole you” marketing copy).
- */
+/** Top bar + wellness intro with school name. */
 export function SchoolWellnessHeader({
   schoolName = "Your school",
+  onBack,
   onBackHome,
-  logoUrl = null,
   accentColor,
 }) {
   const router = useRouter();
@@ -24,104 +22,74 @@ export function SchoolWellnessHeader({
   const [showNotifications, setShowNotifications] = useState(false);
   const accent = accentColor || T.accent;
   const displaySchool = schoolName?.trim() || "Your school";
-  const firstName =
-    userProfile?.full_name?.split(" ")[0] || userProfile?.username || "there";
+  const handleBack = onBack ?? onBackHome;
 
   return (
     <>
-      <LinearGradient colors={T.heroGradient} style={styles.gradient}>
-        <View style={styles.topBar}>
-          {typeof onBackHome === "function" ? (
-            <TouchableOpacity
-              style={styles.backBtn}
-              onPress={onBackHome}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Back to fitness home"
-            >
-              <Ionicons name="chevron-back" size={20} color={T.accent} />
-              <Text style={styles.backTxt}>Fitness home</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.backSpacer} />
-          )}
-          <View style={styles.institutionalBadge}>
-            <Ionicons name="school" size={11} color={T.goldMuted} style={styles.badgeIcon} />
-            <Text style={styles.badgeTxt}>CAMPUS WELLNESS</Text>
-          </View>
-        </View>
-        <View style={styles.row}>
-          <View style={styles.textCol}>
-            {logoUrl ? (
-              <Image source={{ uri: logoUrl }} style={styles.logo} resizeMode="contain" accessibilityLabel="School logo" />
-            ) : null}
-            <Text style={styles.greeting}>Hello, {firstName}</Text>
-            <Text style={styles.h1} accessibilityRole="header" numberOfLines={2}>
-              {displaySchool}
-            </Text>
-            <Text style={styles.tagline}>Daily check-ins · formation · campus support</Text>
-          </View>
-          <View style={styles.actions}>
-            <NotificationBadge
-              onPress={() => setShowNotifications(true)}
-              size="medium"
-              showCount
-              iconColor={accent}
-              style={[
-                styles.iconBtn,
-                {
-                  backgroundColor: hexToRgba(accent, 0.06),
-                  borderColor: hexToRgba(accent, 0.12),
-                },
-              ]}
+      <View style={styles.topBar}>
+        {typeof handleBack === "function" ? (
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={handleBack}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={20} color={accent} />
+            <Text style={[styles.backTxt, { color: accent }]}>Back</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.backSpacer} />
+        )}
+
+        <View style={styles.actions}>
+          <NotificationBadge
+            onPress={() => setShowNotifications(true)}
+            size="medium"
+            showCount
+            iconColor={accent}
+            style={[
+              styles.iconBtn,
+              {
+                backgroundColor: hexToRgba(accent, 0.06),
+                borderColor: hexToRgba(accent, 0.12),
+              },
+            ]}
+          />
+          <TouchableOpacity
+            style={[
+              styles.iconBtn,
+              {
+                backgroundColor: hexToRgba(accent, 0.06),
+                borderColor: hexToRgba(accent, 0.12),
+              },
+            ]}
+            onPress={() => router.push("/(tabs)/profile")}
+            activeOpacity={0.7}
+            accessibilityLabel="Open profile"
+          >
+            <PremiumAvatar
+              userId={userProfile?.id}
+              source={userProfile?.avatar_url ? { uri: userProfile.avatar_url } : null}
+              size={40}
             />
-            <TouchableOpacity
-              style={[
-                styles.iconBtn,
-                {
-                  backgroundColor: hexToRgba(accent, 0.06),
-                  borderColor: hexToRgba(accent, 0.12),
-                },
-              ]}
-              onPress={() => router.push("/(tabs)/profile")}
-              activeOpacity={0.7}
-              accessibilityLabel="Open profile"
-            >
-              <PremiumAvatar
-                userId={userProfile?.id}
-                source={userProfile?.avatar_url ? { uri: userProfile.avatar_url } : null}
-                size={40}
-              />
-            </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         </View>
-      </LinearGradient>
-      <NotificationModal
-        visible={showNotifications}
-        onClose={() => setShowNotifications(false)}
-      />
+      </View>
+
+      <WellnessIntro schoolName={displaySchool} accentColor={accent} />
+
+      <NotificationModal visible={showNotifications} onClose={() => setShowNotifications(false)} />
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: {
-    marginHorizontal: -20,
-    marginBottom: 8,
-    paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 18,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-    borderWidth: 1,
-    borderTopWidth: 0,
-    borderColor: T.border,
-  },
   topBar: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: 12,
     gap: 8,
   },
   backBtn: {
@@ -131,64 +99,8 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingRight: 8,
   },
-  backTxt: {
-    color: T.accent,
-    fontSize: 13,
-    fontWeight: "700",
-  },
+  backTxt: { fontSize: 13, fontWeight: "700" },
   backSpacer: { width: 1 },
-  institutionalBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: T.goldDim,
-    borderWidth: 1,
-    borderColor: "rgba(212,175,55,0.35)",
-  },
-  badgeIcon: { marginRight: 5 },
-  badgeTxt: {
-    color: T.goldMuted,
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  textCol: { flex: 1 },
-  logo: { width: 120, height: 36, marginBottom: 8 },
-  greeting: {
-    color: T.sub,
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  h1: {
-    color: T.text,
-    fontSize: 22,
-    fontWeight: "800",
-    letterSpacing: -0.4,
-  },
-  tagline: {
-    color: T.subMuted,
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: 4,
-  },
-  actions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingTop: 4,
-  },
-  iconBtn: {
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 4,
-  },
+  actions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  iconBtn: { borderRadius: 12, borderWidth: 1, padding: 4 },
 });
