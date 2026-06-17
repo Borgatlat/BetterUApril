@@ -35,7 +35,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>13</string>
+	<string>14</string>
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-9221552597487164~4144394214</string>
 	<key>GMSApiKey</key>
@@ -66,7 +66,9 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app uses your location to track your runs and show your position on the map.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Allow $(PRODUCT_NAME) to access your microphone</string>
+	<string>BetterU uses the microphone so you can speak your Future U questions.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>BetterU converts your speech to text in Future U.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app uses the photo library to save workout progress images.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

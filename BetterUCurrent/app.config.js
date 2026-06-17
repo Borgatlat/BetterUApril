@@ -161,7 +161,7 @@ export default {
       bundleIdentifier: "com.enriqueortiz.betteru",
       // Bump buildNumber so iOS/TestFlight treats the next build as a new binary
       // (otherwise you can keep seeing the old app icon due to caching / same build).
-      buildNumber: "13",
+      buildNumber: "14",
       infoPlist: {
         NSCameraUsageDescription: "This app uses the camera to let you take profile pictures.",
         NSPhotoLibraryUsageDescription: "This app uses the photo library to let you select profile pictures.",
@@ -169,6 +169,10 @@ export default {
         NSLocationWhenInUseUsageDescription: "This app uses your location to track your runs and show your position on the map.",
         NSLocationAlwaysAndWhenInUseUsageDescription: "This app uses your location to track your runs in the background.",
         NSLocationAlwaysUsageDescription: "This app uses your location to track your runs in the background.",
+        NSMicrophoneUsageDescription:
+          "BetterU uses the microphone so you can speak your Future U questions.",
+        NSSpeechRecognitionUsageDescription:
+          "BetterU converts your speech to text in Future U.",
         ITSAppUsesNonExemptEncryption: false,
         UIBackgroundModes: isPersonalIosDev ? ['location'] : ['remote-notification', 'location'],
         // NSSupportsLiveActivities: true,  // Temporarily disabled for TestFlight

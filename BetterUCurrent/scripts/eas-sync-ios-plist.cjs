@@ -17,7 +17,16 @@ function readAppConfigFields() {
   const text = fs.readFileSync(path.join(root, "app.config.js"), "utf8");
   const version = text.match(/^\s*version:\s*"([^"]+)"/m)?.[1];
   const buildNumber = text.match(/buildNumber:\s*"(\d+)"/)?.[1];
-  return { version, buildNumber };
+  const readInfoPlistString = (key) => {
+    const re = new RegExp(`${key}:\\s*\\n?\\s*"([^"]+)"`);
+    return text.match(re)?.[1];
+  };
+  return {
+    version,
+    buildNumber,
+    microphoneUsage: readInfoPlistString("NSMicrophoneUsageDescription"),
+    speechRecognitionUsage: readInfoPlistString("NSSpeechRecognitionUsageDescription"),
+  };
 }
 
 function setPlistString(plist, key, value) {
@@ -40,8 +49,15 @@ function main() {
     return;
   }
 
-  const { version, buildNumber } = readAppConfigFields();
+  const { version, buildNumber, microphoneUsage, speechRecognitionUsage } = readAppConfigFields();
   let plist = fs.readFileSync(plistPath, "utf8");
+
+  if (microphoneUsage) {
+    plist = setPlistString(plist, "NSMicrophoneUsageDescription", microphoneUsage);
+  }
+  if (speechRecognitionUsage) {
+    plist = setPlistString(plist, "NSSpeechRecognitionUsageDescription", speechRecognitionUsage);
+  }
 
   const mapsKey =
     process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY?.trim() ||

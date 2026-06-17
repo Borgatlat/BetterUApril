@@ -108,6 +108,11 @@ if (fs.existsSync(plistPath) && buildMatch) {
   } else if (plistBuild) {
     ok(`Info.plist CFBundleVersion matches app.config (${buildMatch[1]})`);
   }
+  if (!plist.includes('<key>NSSpeechRecognitionUsageDescription</key>')) {
+    fail('ios/BetterU/Info.plist missing NSSpeechRecognitionUsageDescription (required for Future U voice / App Store Connect)');
+  } else {
+    ok('Info.plist has NSSpeechRecognitionUsageDescription');
+  }
 }
 
 const migrationDir = path.join(root, 'supabase', 'migrations');
